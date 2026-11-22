@@ -25,6 +25,28 @@ if (-not (Test-Path -LiteralPath $gh)) {
     throw "No existe gh en $gh."
 }
 
+# Comprueba que la version del codigo coincide con la que se publica.
+$initPath = Join-Path $root "umbral\__init__.py"
+$initText = Get-Content -LiteralPath $initPath -Raw -Encoding UTF8
+$declared = [regex]::Match($initText, '__version__\s*=\s*"([^"]+)"').Groups[1].Value
+if ($declared -ne $tag.TrimStart("v")) {
+    throw "La version del codigo ($declared) no coincide con la del release ($($tag.TrimStart('v'))). Actualiza umbral\__init__.py antes de publicar."
+}
+
+# Sube el codigo fuente de esta version a GitHub.
+$env:GIT_TERMINAL_PROMPT = "0"
+git -C $root add -A
+git -C $root diff --cached --quiet
+if ($LASTEXITCODE -ne 0) {
+    git -C $root commit -m "Umbral $tag"
+}
+$remoteTag = git -C $root rev-parse "refs/tags/$tag" 2>$null
+if (-not $remoteTag) {
+    git -C $root tag $tag
+}
+git -C $root push origin main
+git -C $root push origin $tag
+
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLower()
 "$hash *Umbral.exe" | Set-Content -LiteralPath $shaFile -Encoding ASCII
 
@@ -50,12 +72,13 @@ if ($existing) {
     & $gh release upload $tag $exe $shaFile --repo $repo --clobber
     & $gh release edit $tag --repo $repo --notes-file $notesFile
 } else {
-    $cmdArgs = @(
-        "release", "create", $tag, $exe, $shaFile,
-        "--repo", $repo,
-        "--title", "Umbral $($tag.TrimStart('v'))",
-        "--notes-file", $notesFile
-    )
+$cmdArgs = @(
+    "release", "create", $tag, $exe, $shaFile,
+    "--repo", $repo,
+    "--target", "main",
+    "--title", "Umbral $($tag.TrimStart('v'))",
+    "--notes-file", $notesFile
+)
     if ($Latest) { $cmdArgs += "--latest" }
     & $gh @cmdArgs
 }
