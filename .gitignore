@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+build/
+dist/
+.venv/
+Umbral.spec
+tools/patch_*.py
