@@ -72,13 +72,13 @@ if ($existing) {
     & $gh release upload $tag $exe $shaFile --repo $repo --clobber
     & $gh release edit $tag --repo $repo --notes-file $notesFile
 } else {
-$cmdArgs = @(
-    "release", "create", $tag, $exe, $shaFile,
-    "--repo", $repo,
-    "--target", "main",
-    "--title", "Umbral $($tag.TrimStart('v'))",
-    "--notes-file", $notesFile
-)
+    $cmdArgs = @(
+        "release", "create", $tag, $exe, $shaFile,
+        "--repo", $repo,
+        "--target", "main",
+        "--title", "Umbral $($tag.TrimStart('v'))",
+        "--notes-file", $notesFile
+    )
     if ($Latest) { $cmdArgs += "--latest" }
     & $gh @cmdArgs
 }
