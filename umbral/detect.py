@@ -8,10 +8,10 @@ from pathlib import Path
 from .index import FileIndex, composite
 from .models import Emulator, Game, slugify
 from .profiles import PROFILE_BY_KEY, PROFILES, EmulatorProfile
-from .rom_rules import AMBIGUOUS_EXTENSIONS, path_hint, plausible
+from .rom_rules import AMBIGUOUS_EXTENSIONS, rom_system, validate_rom
 from .stores import store_games
 
-DETECTION_VERSION = 5
+DETECTION_VERSION = 6
 
 
 @dataclass
@@ -547,27 +547,6 @@ def _dusklight_game(emulator: Emulator) -> Game:
     )
 
 
-def _iso_system(path: Path) -> str | None:
-    try:
-        with path.open("rb") as handle:
-            head = handle.read(4 * 1024 * 1024)
-    except OSError:
-        return None
-    if b"PS3_DISC.SFB" in head or b"PS3_GAME" in head:
-        return "ps3"
-    if b"PSP_GAME" in head:
-        return "psp"
-    if b"SYSTEM.CNF" in head and b"BOOT2" in head and b"cdrom0" in head:
-        return "ps2"
-    if b"PLAYSTATION" in head or b"BOOT = cdrom0" in head or b"BOOT=cdrom0" in head:
-        return "ps1"
-    if len(head) >= 0x1C:
-        magic = head[0x18:0x1C]
-        if magic in (b"\x5d\x1c\x9e\xa3", b"\xc2\x33\x9f\x3d"):
-            return "wii"
-    return None
-
-
 def profile_for_rom(path: Path, profiles: list[EmulatorProfile]) -> EmulatorProfile | None:
     return _profile_for_rom(path, profiles)
 
@@ -582,8 +561,8 @@ def _profile_for_rom(path: Path, profiles: list[EmulatorProfile]) -> EmulatorPro
     if not candidates:
         return None
     if suffix in AMBIGUOUS_EXTENSIONS:
-        system_key = (_iso_system(path) if suffix == ".iso" else None) or path_hint(path)
-        if not system_key:
+        system_key = rom_system(path)
+        if system_key is None or not validate_rom(path, system_key):
             return None
         exact = [
             profile

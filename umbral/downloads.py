@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .detect import _default_roots, _iso_system, _unique_roots
-from .rom_rules import path_hint
+from .detect import _default_roots, _unique_roots
+from .rom_rules import AMBIGUOUS_EXTENSIONS, validate_rom
 from .index import composite
 from .models import Game
 from .paths import data_dir
@@ -81,8 +81,8 @@ def looks_like_rom(path: Path) -> bool:
     extension = _final_extension(path)
     if extension not in ROM_EXTENSIONS:
         return False
-    if extension == ".iso":
-        return bool(_iso_system(path) or path_hint(path))
+    if extension in AMBIGUOUS_EXTENSIONS:
+        return validate_rom(path)
     return True
 
 

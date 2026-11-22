@@ -87,6 +87,7 @@ class Store:
             if (
                 game.source == "auto"
                 and game.rom_path
+                and Path(game.rom_path).is_file()
                 and is_ambiguous(game.rom_path)
                 and not plausible(game.rom_path, game.system_key)
             ):
@@ -184,6 +185,12 @@ class Store:
             if os.path.normcase(fresh.executable) in hidden_paths:
                 continue
             if fresh.rom_path and os.path.normcase(fresh.rom_path) in hidden_paths:
+                continue
+            if (
+                fresh.source == "auto"
+                and fresh.rom_path
+                and not plausible(fresh.rom_path, fresh.system_key)
+            ):
                 continue
             existing = by_id.get(fresh.id)
             if existing is None:

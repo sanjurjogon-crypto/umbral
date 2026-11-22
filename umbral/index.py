@@ -54,6 +54,15 @@ SKIP_DIRS = {
     "support",
     "directx",
     "dotnet",
+    "prompts",
+    "pipelines",
+    "licenses",
+    "license",
+    "docs",
+    "documentation",
+    "readme",
+    "saves",
+    "save",
 }
 
 CACHE_TTL = 60.0

@@ -101,12 +101,26 @@ def _bucket_key(title: str) -> str:
 
 def _candidate_titles(game: Game) -> list[str]:
     names: list[str] = []
-    values = [game.title]
-    if game.source not in {"steam", "epic"}:
+    values: list[str] = []
+    if game.source in {"steam", "epic"}:
+        values.append(game.title)
+    else:
+        emulated = game.system_key not in {"pc", "ports", "steam", "epic"}
         if game.rom_path:
-            values.append(Path(game.rom_path).stem)
-        if game.system_key != "ports" and game.executable:
-            values.append(Path(game.executable).stem)
+            rom = Path(game.rom_path)
+            rom_name = rom.stem if rom.is_file() else rom.name
+            if emulated:
+                values.append(rom_name)
+                values.append(game.title)
+            else:
+                values.append(game.title)
+                values.append(rom_name)
+                if game.executable:
+                    values.append(Path(game.executable).stem)
+        else:
+            values.append(game.title)
+            if game.system_key not in {"ports", "steam", "epic"} and game.executable:
+                values.append(Path(game.executable).stem)
     for value in values:
         if not value:
             continue

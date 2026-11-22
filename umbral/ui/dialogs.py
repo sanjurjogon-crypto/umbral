@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from ..detect import clean_title, profile_for_rom
 from ..downloads import Download, describe as describe_download, emulator_for
 from ..models import Emulator, Game, slugify
+from ..rom_rules import is_ambiguous, validate_rom
 from ..consoles import CONSOLE_EXTENSIONS, CONSOLES
 from ..profiles import EmulatorProfile, all_profiles, profile_from_dict
 from ..standalone import StandaloneCandidate, open_url
@@ -299,7 +300,7 @@ class AddGameDialog(QDialog):
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("Se rellena con el nombre del archivo")
         self.rom_edit = QLineEdit()
-        self.rom_edit.setPlaceholderText("Archivo .rvz, .3ds, .iso… o el .exe de un port")
+        self.rom_edit.setPlaceholderText("Archivo de ROM (.rvz, .3ds, .iso, .bin…) o el .exe de un port")
         self.rom_edit.editingFinished.connect(self._auto_fill)
         self.system_combo = QComboBox()
         for label, key in SYSTEMS:
@@ -416,9 +417,16 @@ class AddGameDialog(QDialog):
         row.addWidget(folder_button)
         return container
 
+    def _game_file_filter(self) -> str:
+        extensions = sorted(
+            {extension.lstrip(".") for profile in self._profiles() for extension in profile.rom_extensions}
+        )
+        patterns = " ".join(f"*.{extension}" for extension in extensions)
+        return f"Juegos y ejecutables ({patterns} *.exe);;Todos los archivos (*)"
+
     def _browse_game_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Selecciona el juego", "", "Juegos y ejecutables (*.rvz *.iso *.3ds *.cia *.nsp *.xci *.wbfs *.cue *.chd *.zip *.exe);;Todos los archivos (*)"
+            self, "Selecciona el juego", "", self._game_file_filter()
         )
         if path:
             self.rom_edit.setText(path)
@@ -590,6 +598,40 @@ class AddGameDialog(QDialog):
 
         system_label = self.system_combo.currentText().strip() or "Otro"
         system_key = str(self.system_combo.currentData() or "otros")
+        if rom:
+            rom_path = Path(rom)
+            if rom_path.is_file():
+                suffix = rom_path.suffix.lower()
+                known = {
+                    extension
+                    for profile in self._profiles()
+                    for extension in profile.rom_extensions
+                }
+                invalid_rom = (
+                    suffix not in {".iso", ".chd"}
+                    and is_ambiguous(rom_path)
+                    and not validate_rom(
+                        rom_path, "" if system_key == "otros" else system_key
+                    )
+                )
+                unknown = suffix != ".exe" and suffix not in known
+                if invalid_rom or unknown:
+                    reason = (
+                        "no parece una ROM válida para el sistema elegido"
+                        if invalid_rom
+                        else "no tiene una extensión de ROM conocida"
+                    )
+                    answer = QMessageBox.question(
+                        self,
+                        "Archivo poco habitual",
+                        f"{rom_path.name} {reason}.\n\n"
+                        "Puede ser un archivo de datos, un documento o una ROM dañada. "
+                        "¿Añadirlo igualmente?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No,
+                    )
+                    if answer != QMessageBox.Yes:
+                        return
         arguments = [
             line.strip()
             for line in self.arguments_edit.toPlainText().splitlines()
