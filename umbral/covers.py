@@ -108,7 +108,7 @@ def _candidate_titles(game: Game) -> list[str]:
         emulated = game.system_key not in {"pc", "ports", "steam", "epic"}
         if game.rom_path:
             rom = Path(game.rom_path)
-            rom_name = rom.stem if rom.is_file() else rom.name
+            rom_name = rom.name if rom.is_dir() else rom.stem
             if emulated:
                 values.append(rom_name)
                 values.append(game.title)

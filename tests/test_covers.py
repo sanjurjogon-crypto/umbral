@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from umbral.covers import _candidate_titles
+from umbral.models import Game
+
+
+def _game(**overrides) -> Game:
+    data = {
+        "id": "test",
+        "title": "PONFERRADA IA",
+        "system": "Mega Drive / Genesis",
+        "system_key": "genesis",
+        "rom_path": "",
+        "executable": "",
+    }
+    data.update(overrides)
+    return Game(**data)
+
+
+def test_emulated_game_prefers_rom_over_emulator() -> None:
+    game = _game(
+        rom_path=r"C:\Roms\Street Voter II Turbo.bin",
+        executable=r"C:\Emuladores\azahar.exe",
+    )
+    titles = _candidate_titles(game)
+    assert titles[0] == "Street Voter II Turbo"
+    assert "azahar" not in " ".join(titles).lower()
+
+
+def test_pc_game_can_use_executable() -> None:
+    game = _game(
+        title="Hades",
+        system="PC",
+        system_key="pc",
+        executable=r"C:\Games\Hades\Hades.exe",
+    )
+    titles = _candidate_titles(game)
+    assert titles[0] == "Hades"
+
+
+def test_emulated_game_without_rom_still_returns_title() -> None:
+    game = _game(title="Sonic", executable=r"C:\Emuladores\fusion.exe")
+    assert _candidate_titles(game)[0] == "Sonic"

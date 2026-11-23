@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Notes = "",
-    [switch]$Latest
+    [switch]$Latest,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,18 @@ if ($Version -notmatch '^v?\d+(\.\d+){1,3}$') {
 }
 $tag = $Version.TrimStart("v")
 $tag = "v$tag"
+
+if (-not $SkipBuild) {
+    Push-Location $root
+    try {
+        python -m PyInstaller --noconfirm Umbral.spec
+        if ($LASTEXITCODE -ne 0) {
+            throw "PyInstaller fallo con codigo $LASTEXITCODE."
+        }
+    } finally {
+        Pop-Location
+    }
+}
 
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "No existe $exe. Compila antes con PyInstaller."
@@ -35,13 +48,30 @@ if ($declared -ne $tag.TrimStart("v")) {
 
 # Sube el codigo fuente de esta version a GitHub.
 $env:GIT_TERMINAL_PROMPT = "0"
-git -C $root add -A
+git -C $root add -u
+$sourceItems = @(
+    "main.py",
+    "umbral",
+    "tools",
+    "tests",
+    ".github",
+    "pytest.ini",
+    "requirements-dev.txt",
+    "README.md",
+    ".gitignore"
+)
+foreach ($item in $sourceItems) {
+    $target = Join-Path $root $item
+    if (Test-Path -LiteralPath $target) {
+        git -C $root add -- $item
+    }
+}
 git -C $root diff --cached --quiet
 if ($LASTEXITCODE -ne 0) {
     git -C $root commit -m "Umbral $tag"
 }
-$remoteTag = git -C $root rev-parse "refs/tags/$tag" 2>$null
-if (-not $remoteTag) {
+$existingTag = git -C $root tag --list $tag
+if (-not $existingTag) {
     git -C $root tag $tag
 }
 git -C $root push origin main

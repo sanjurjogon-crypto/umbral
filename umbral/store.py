@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 from .models import Game
 from .paths import library_file, settings_file
 from .rom_rules import is_ambiguous, plausible
+
+BACKUP_COUNT = 3
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "version": 1,
@@ -24,16 +27,53 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
-def _read_json(path: Path, default: Any) -> Any:
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return default
+def _backup_paths(path: Path) -> list[Path]:
+    return [
+        path.with_name(f"{path.name}.bak{index}")
+        for index in range(1, BACKUP_COUNT + 1)
+    ]
+
+
+def _read_json(path: Path, default: Any) -> tuple[Any, Path | None]:
+    if path.is_file():
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                return json.load(handle), None
+        except (OSError, ValueError):
+            try:
+                shutil.copy2(path, path.with_name(f"{path.name}.corrupt"))
+            except OSError:
+                pass
+    for backup in _backup_paths(path):
+        try:
+            with backup.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        try:
+            shutil.copy2(backup, path)
+        except OSError:
+            pass
+        return data, backup
+    return default, None
 
 
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    backups = _backup_paths(path)
+    if path.is_file():
+        for index in range(len(backups) - 1, 0, -1):
+            source = backups[index - 1]
+            target = backups[index]
+            if source.is_file():
+                try:
+                    os.replace(source, target)
+                except OSError:
+                    pass
+        try:
+            shutil.copy2(path, backups[0])
+        except OSError:
+            pass
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
@@ -42,8 +82,15 @@ def _write_json(path: Path, data: Any) -> None:
 
 class Store:
     def __init__(self) -> None:
-        loaded = _read_json(settings_file(), {})
+        loaded, settings_backup = _read_json(settings_file(), {})
+        if not isinstance(loaded, dict):
+            loaded = {}
         self.settings: dict[str, Any] = {**DEFAULT_SETTINGS, **loaded}
+        self.recovery_notice = ""
+        if settings_backup is not None:
+            self.recovery_notice = (
+                f"settings.json restaurado desde {settings_backup.name}."
+            )
         if str(self.settings.get("accent", "")).upper() == "#E9B949":
             self.settings["accent"] = "#C9A45F"
         self.settings.setdefault("emulator_paths", {})
@@ -55,7 +102,10 @@ class Store:
         self._load_library()
 
     def _load_library(self) -> None:
-        raw = _read_json(library_file(), {"games": []})
+        raw, library_backup = _read_json(library_file(), {"games": []})
+        if library_backup is not None:
+            note = f"library.json restaurado desde {library_backup.name}."
+            self.recovery_notice = f"{self.recovery_notice} {note}".strip()
         games = raw.get("games", []) if isinstance(raw, dict) else []
         self.games = [Game.from_dict(item) for item in games if isinstance(item, dict)]
         for game in self.games:

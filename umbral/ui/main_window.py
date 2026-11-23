@@ -322,6 +322,9 @@ class MainWindow(QMainWindow):
             self.toast.show_message(f"Biblioteca lista: {len(self.store.games)} juegos.")
         else:
             self.toast.show_message("No hay juegos todavía. Usa Añadir juego o revisa Ajustes.")
+        notice = getattr(self.store, "recovery_notice", "")
+        if notice:
+            QTimer.singleShot(1200, lambda text=notice: self.toast.show_message(text, 7000))
         self._detect_and_merge()
         self.store.settings["first_run"] = False
         self.store.save_settings()
