@@ -24,16 +24,40 @@ def _is_steam_tool(name: str) -> bool:
     return any(part in lowered for part in STEAM_TOOL_NAMES)
 
 
+def _vdf_library_paths(text: str) -> list[Path]:
+    raw_paths = [match.group(1) for match in re.finditer(r'"path"\s*"([^"]+)"', text)]
+    raw_paths += [
+        match.group(1)
+        for match in re.finditer(r'"\d+"\s*"([^"]+)"', text)
+        if ":" in match.group(1) or match.group(1).startswith("\\\\")
+    ]
+    paths: list[Path] = []
+    for raw in raw_paths:
+        extra = Path(raw.replace("\\\\", "\\"))
+        if extra.is_dir() and extra not in paths:
+            paths.append(extra)
+    return paths
+
+
 def steam_roots() -> list[Path]:
     candidates: list[Path] = []
     try:
         import winreg
 
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as handle:
-            value, _ = winreg.QueryValueEx(handle, "SteamPath")
-            if value:
-                candidates.append(Path(str(value)))
-    except (ImportError, OSError, FileNotFoundError):
+        registry_keys = (
+            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+        )
+        for root, subkey, value_name in registry_keys:
+            try:
+                with winreg.OpenKey(root, subkey) as handle:
+                    value, _ = winreg.QueryValueEx(handle, value_name)
+                    if value and Path(str(value)) not in candidates:
+                        candidates.append(Path(str(value)))
+            except (OSError, FileNotFoundError):
+                continue
+    except ImportError:
         pass
 
     for base in (
@@ -60,9 +84,8 @@ def steam_roots() -> list[Path]:
             text = vdf.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        for match in re.finditer(r'"path"\s*"([^"]+)"', text):
-            extra = Path(match.group(1).replace("\\\\", "\\"))
-            if extra.is_dir() and extra not in libraries:
+        for extra in _vdf_library_paths(text):
+            if extra not in libraries:
                 libraries.append(extra)
     return libraries
 
@@ -74,11 +97,17 @@ def _acf_value(text: str, key: str) -> str:
 
 def steam_games() -> list[Game]:
     games: dict[str, Game] = {}
-    for library in steam_roots():
+    roots = steam_roots()
+    steam_exe = next(
+        (root / "steam.exe" for root in roots if (root / "steam.exe").is_file()),
+        None,
+    )
+    if steam_exe is None:
+        return []
+    for library in roots:
         steamapps = library / "steamapps"
         common = steamapps / "common"
-        steam_exe = library / "steam.exe"
-        if not steam_exe.is_file():
+        if not steamapps.is_dir():
             continue
         for manifest in steamapps.glob("appmanifest_*.acf"):
             try:
@@ -106,7 +135,7 @@ def steam_games() -> list[Game]:
                 description=f"Juego de Steam instalado en {folder}.",
                 executable=str(steam_exe),
                 arguments=["-applaunch", app_id],
-                working_dir=str(library),
+                working_dir=str(steam_exe.parent),
                 rom_path="",
                 emulator="Steam",
                 accent=STEAM_ACCENT,
