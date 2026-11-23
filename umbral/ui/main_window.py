@@ -678,6 +678,8 @@ class MainWindow(QMainWindow):
         try:
             info = UpdateInfo(**stored)
         except TypeError:
+            self.store.settings.pop("update_known", None)
+            self.store.save_settings()
             return
         if not is_newer(info.version, __version__):
             self.store.settings.pop("update_known", None)
@@ -988,19 +990,30 @@ class MainWindow(QMainWindow):
 
     def _install_update(self) -> None:
         if self._updating:
+            self.toast.show_message("La actualización ya se está aplicando.")
             return
         info = self.update_info
         if info is None:
-            self.toast.show_message("Comprueba primero si hay una versión nueva.")
+            self.update_banner.hide()
+            self.toast.show_message("No hay una actualización lista. Compruebo de nuevo…", 5000)
+            self._check_updates(manual=True)
             return
-        self._download_update_inline(info)
+        try:
+            self._download_update_inline(info)
+        except Exception as exc:  # noqa: BLE001 - un fallo aquí no debe dejar el botón muerto
+            self.update_banner.show_error(f"No se pudo iniciar la descarga: {exc}")
 
     def _download_update_inline(self, info) -> None:
         if self.download_worker is not None and self.download_worker.isRunning():
+            if not self.update_banner.isVisible():
+                self.update_banner.show_update(info.version)
+            self.update_banner.show_progress(0, 0)
+            self.toast.show_message("La descarga ya está en marcha.")
             return
         if not self.update_banner.isVisible():
             self.update_banner.show_update(info.version)
         self.update_banner.show_progress(0, 0)
+        self.toast.show_message(f"Descargando Umbral {info.version}…", 4000)
         download = DownloadWorker(info, self)
         download.progress.connect(self.update_banner.show_progress)
         download.done.connect(self._on_update_downloaded)
@@ -1015,6 +1028,11 @@ class MainWindow(QMainWindow):
             self.download_worker = None
 
     def _on_update_download_failed(self, message: str) -> None:
+        if not self.update_banner.isVisible():
+            if self.update_info is not None:
+                self.update_banner.show_update(self.update_info.version)
+            else:
+                self.update_banner.show_update("")
         self.update_banner.show_error(message)
 
     def _on_update_downloaded(self, path: str) -> None:
@@ -1030,6 +1048,7 @@ class MainWindow(QMainWindow):
         self._updating = True
         self.store.save_library()
         self.store.save_settings()
+        self.close()
         app = QApplication.instance()
         if app is not None:
             app.quit()

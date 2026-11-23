@@ -931,7 +931,10 @@ class UpdateBanner(QFrame):
         self.line2.setText("- Hay una nueva actualización de Umbral disponible")
         self.line1.show()
         self.line2.show()
-        self.detail.setText(f"Versión {version} · se reinicia sola al terminar")
+        if version:
+            self.detail.setText(f"Versión {version} · se reinicia sola al terminar")
+        else:
+            self.detail.setText("Preparando la actualización")
         self.detail.show()
         self.action.setText("Actualizar ahora")
         self.action.setEnabled(True)

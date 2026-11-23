@@ -273,12 +273,20 @@ def _ps_quote(value: str) -> str:
 
 def _replacement_script(target: Path, new_exe: Path, pid: int) -> str:
     backup = target.with_name(target.stem + ".old.exe")
+    log = target.with_name("umbral-update.log")
     return f"""$ErrorActionPreference = 'Stop'
 $target = {_ps_quote(str(target))}
 $new = {_ps_quote(str(new_exe))}
 $backup = {_ps_quote(str(backup))}
+$log = {_ps_quote(str(log))}
 $pidToWait = {int(pid)}
+function Write-Log($message) {{
+    try {{
+        "$(Get-Date -Format o) $message" | Add-Content -LiteralPath $log -Encoding UTF8
+    }} catch {{}}
+}}
 try {{
+    Write-Log "Esperando al proceso $pidToWait"
     $waited = 0
     while ($waited -lt 240) {{
         $proc = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue
@@ -286,16 +294,24 @@ try {{
         Start-Sleep -Milliseconds 500
         $waited++
     }}
+    if ($null -ne (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {{
+        throw "Umbral sigue abierto; no se reemplaza el ejecutable."
+    }}
     Start-Sleep -Milliseconds 700
     if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }}
     Move-Item -LiteralPath $target -Destination $backup -Force
+    Write-Log "Ejecutable anterior movido a $backup"
     Move-Item -LiteralPath $new -Destination $target -Force
+    Write-Log "Nuevo ejecutable instalado"
     Start-Process -FilePath $target
     Start-Sleep -Seconds 4
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    Write-Log "Actualización completada"
 }} catch {{
+    Write-Log "ERROR: $($_.Exception.Message)"
     if ((Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $target)) {{
         Move-Item -LiteralPath $backup -Destination $target -Force -ErrorAction SilentlyContinue
+        Write-Log "Restaurado el ejecutable anterior"
     }}
     Start-Process -FilePath $target -ErrorAction SilentlyContinue
 }}
