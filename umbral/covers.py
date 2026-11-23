@@ -224,6 +224,18 @@ def is_landscape(path: Path) -> bool:
     return width > 0 and height > 0 and width / height >= 1.05
 
 
+def is_image_bytes(payload: bytes) -> bool:
+    if payload[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if payload[:2] == b"\xff\xd8":
+        return True
+    if payload[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return True
+    return False
+
+
 def _steam_local_portrait(app_id: str) -> Path | None:
     if not app_id:
         return None
@@ -475,6 +487,16 @@ def _resolve_online(game: Game) -> dict | None:
         found = _gamedb_search([title, *titles[:index], *titles[index + 1 :]], game.system_key)
         if found:
             return found
+    if game.source == "steam":
+        for title in titles:
+            found = _steam_search_cover(title)
+            if found:
+                return found
+    if game.system_key not in {"pc", "steam"}:
+        for title in titles:
+            found = _itch_cover(title)
+            if found:
+                return found
     return None
 
 
@@ -484,6 +506,8 @@ def _download(url: str, target: Path) -> bool:
     except (URLError, TimeoutError, OSError, ValueError):
         return False
     if len(payload) < 1024:
+        return False
+    if not is_image_bytes(payload):
         return False
     try:
         target.parent.mkdir(parents=True, exist_ok=True)

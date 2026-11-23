@@ -135,7 +135,7 @@ def steam_games() -> list[Game]:
                 description=f"Juego de Steam instalado en {folder}.",
                 executable=str(steam_exe),
                 arguments=["-applaunch", app_id],
-                working_dir=str(steam_exe.parent),
+                working_dir=str(folder),
                 rom_path="",
                 emulator="Steam",
                 accent=STEAM_ACCENT,

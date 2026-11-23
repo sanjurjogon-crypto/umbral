@@ -31,6 +31,7 @@ def test_secondary_library_without_steam_exe_is_scanned(monkeypatch, tmp_path: P
     assert set(games) == {"Game A", "Game B"}
     assert games["Game B"].executable == str(main / "steam.exe")
     assert games["Game B"].arguments == ["-applaunch", "200"]
+    assert games["Game B"].working_dir == str(secondary / "steamapps" / "common" / "GameB")
 
 
 def test_vdf_new_format_paths(monkeypatch, tmp_path: Path) -> None:

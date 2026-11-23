@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from umbral.covers import _candidate_titles
+from umbral.covers import _candidate_titles, is_image_bytes
 from umbral.models import Game
 
 
@@ -43,3 +43,12 @@ def test_pc_game_can_use_executable() -> None:
 def test_emulated_game_without_rom_still_returns_title() -> None:
     game = _game(title="Sonic", executable=r"C:\Emuladores\fusion.exe")
     assert _candidate_titles(game)[0] == "Sonic"
+
+
+def test_html_response_is_not_a_cover() -> None:
+    assert is_image_bytes(b"<!DOCTYPE html><html><body>404</body></html>") is False
+
+
+def test_png_and_jpeg_are_covers() -> None:
+    assert is_image_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32) is True
+    assert is_image_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32) is True

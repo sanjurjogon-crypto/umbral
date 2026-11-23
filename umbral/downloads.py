@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .detect import _default_roots, _unique_roots
-from .rom_rules import AMBIGUOUS_EXTENSIONS, validate_rom
+from .rom_rules import AMBIGUOUS_EXTENSIONS, rom_system, validate_rom
 from .index import composite
 from .models import Game
 from .paths import data_dir
@@ -201,7 +201,21 @@ def mark_seen(downloads: Iterable[Download], state: dict[str, float] | None = No
 
 
 def emulator_for(path: Path) -> EmulatorProfile | None:
-    return _profile_for_extension(_final_extension(path))
+    extension = _final_extension(path)
+    if extension not in AMBIGUOUS_EXTENSIONS:
+        return _profile_for_extension(extension)
+    system = rom_system(path)
+    if system is None:
+        return None
+    matches = [
+        profile
+        for profile in PROFILES
+        if extension in profile.rom_extensions
+        and (profile.system_key == system or system in profile.systems)
+    ]
+    if not matches:
+        return None
+    return min(matches, key=lambda profile: (profile.priority, profile.name))
 
 
 def describe(download: Download) -> str:

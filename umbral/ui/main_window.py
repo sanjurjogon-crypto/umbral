@@ -378,6 +378,10 @@ class MainWindow(QMainWindow):
         from ..downloads import pending_downloads
 
         mykey = getattr(self, "_notice_key", "")
+        hidden_paths = {
+            _path_key(str(item))
+            for item in self.store.settings.get("hidden_paths", [])
+        }
         try:
             pending = pending_downloads(
                 self.store.settings.get("scan_folders", []), games=self.store.games
@@ -388,6 +392,7 @@ class MainWindow(QMainWindow):
             item
             for item in pending
             if not item.partial
+            and _path_key(str(item.path)) not in hidden_paths
             and not any(
                 _path_key(game.rom_path) == _path_key(str(item.path))
                 for game in self.store.games
@@ -438,6 +443,7 @@ class MainWindow(QMainWindow):
             )
             self._detect_announce = False
         self._notice_downloads()
+        QTimer.singleShot(800, self._fetch_missing_covers)
 
     def _on_detect_failed(self, message: str) -> None:
         self._detect_announce = False
@@ -690,13 +696,24 @@ class MainWindow(QMainWindow):
         self._announce_update(info)
 
     def _on_process_finished(self, game: Game, code: int, seconds: int, log_path: Path) -> None:
-        if code == 0 and seconds >= 5:
+        if seconds >= 5:
             game.touch_play(seconds)
             self.store.save_library()
             self._refresh_all()
-            self.toast.show_message(f"Sesión guardada: {game.title} · {game.playtime_text}")
+            if code != 0 and seconds < 30:
+                self._show_error(
+                    "El juego se cerró con un error",
+                    f"Código de salida: {code}\nRegistro: {log_path}\n"
+                    "La sesión se ha guardado igualmente.",
+                    game,
+                )
+            else:
+                suffix = "" if code == 0 else f" (código {code})"
+                self.toast.show_message(
+                    f"Sesión guardada: {game.title} · {game.playtime_text}{suffix}"
+                )
             return
-        if code != 0 and seconds < 30:
+        if code != 0:
             self._show_error(
                 "El juego se cerró con un error",
                 f"Código de salida: {code}\nRegistro: {log_path}",
@@ -793,25 +810,42 @@ class MainWindow(QMainWindow):
             self._refresh_all()
 
         known = {_path_key(game.executable) for game in self.store.games if game.executable}
+        hidden = {str(item) for item in self.store.settings.get("hidden_games", [])}
+        hidden_paths = {
+            _path_key(str(item))
+            for item in self.store.settings.get("hidden_paths", [])
+        }
         fresh = [
-            candidate for candidate in candidates
+            candidate
+            for candidate in candidates
             if _path_key(str(candidate.executable)) not in known
+            and _path_key(str(candidate.executable)) not in hidden_paths
         ]
         existing_ids = {game.id for game in self.store.games}
         emulated_known = {
             _path_key(game.rom_path) for game in self.store.games if game.rom_path
         }
         new_games = [
-            game for game in emulated
+            game
+            for game in emulated
             if game.id not in existing_ids
+            and game.id not in hidden
             and (not game.rom_path or _path_key(game.rom_path) not in emulated_known)
+            and (not game.rom_path or _path_key(game.rom_path) not in hidden_paths)
+            and (
+                game.rom_path
+                or game.system_key not in {"pc", "ports"}
+                or _path_key(game.executable) not in hidden_paths
+            )
         ]
         store_fresh = [game for game in new_games if game.source in {"steam", "epic"}]
         emulated_fresh = [game for game in new_games if game.source not in {"steam", "epic"}]
         downloaded_known = {_path_key(game.rom_path) for game in self.store.games if game.rom_path}
         pending = [
-            download for download in pending
+            download
+            for download in pending
             if _path_key(str(download.path)) not in downloaded_known
+            and _path_key(str(download.path)) not in hidden_paths
         ]
         if not fresh and not pending and not emulated_fresh and not store_fresh:
             self.toast.show_message("No hay juegos nuevos que añadir.")
@@ -831,22 +865,45 @@ class MainWindow(QMainWindow):
     def _add_scan_selection(self, selection: list[object]) -> None:
         added = 0
         downloads: list[Download] = []
+        existing_ids = {game.id for game in self.store.games}
+        existing_roms = {
+            _path_key(game.rom_path) for game in self.store.games if game.rom_path
+        }
+        existing_executables = {
+            _path_key(game.executable)
+            for game in self.store.games
+            if game.executable
+            and game.system_key in {"pc", "ports", "steam", "epic"}
+        }
         for item in selection:
+            game: Optional[Game] = None
             if isinstance(item, StandaloneCandidate):
                 game = item.to_game()
-                if self.store.get(game.id) is None:
-                    self.store.upsert(game)
-                    added += 1
             elif isinstance(item, Game):
-                if self.store.get(item.id) is None:
-                    self.store.upsert(item)
-                    added += 1
+                game = item
             elif isinstance(item, Download):
                 game = self._game_from_download(item)
-                if game is not None and self.store.get(game.id) is None:
-                    self.store.upsert(game)
+                if game is not None:
                     downloads.append(item)
-                    added += 1
+            if game is None:
+                continue
+            if game.id in existing_ids:
+                continue
+            if game.rom_path and _path_key(game.rom_path) in existing_roms:
+                continue
+            if (
+                not game.rom_path
+                and game.executable
+                and _path_key(game.executable) in existing_executables
+            ):
+                continue
+            self.store.upsert(game)
+            existing_ids.add(game.id)
+            if game.rom_path:
+                existing_roms.add(_path_key(game.rom_path))
+            elif game.executable:
+                existing_executables.add(_path_key(game.executable))
+            added += 1
         mark_seen(downloads)
         self.store.save_library()
         self._refresh_all()
@@ -987,6 +1044,7 @@ class MainWindow(QMainWindow):
 
     def _postpone_update(self) -> None:
         self.update_banner.hide()
+        self.settings_page.dismiss_update()
 
     def _install_update(self) -> None:
         if self._updating:
@@ -1085,4 +1143,6 @@ class MainWindow(QMainWindow):
         if self.download_worker is not None and self.download_worker.isRunning():
             self.download_worker.cancel()
             self.download_worker.wait(4000)
+        if self.cover_worker is not None and self.cover_worker.isRunning():
+            self.cover_worker.wait(3000)
         super().closeEvent(event)

@@ -56,6 +56,7 @@ $sourceItems = @(
     "tests",
     ".github",
     "pytest.ini",
+    "requirements.txt",
     "requirements-dev.txt",
     "README.md",
     ".gitignore"
@@ -70,12 +71,24 @@ git -C $root diff --cached --quiet
 if ($LASTEXITCODE -ne 0) {
     git -C $root commit -m "Umbral $tag"
 }
+$headCommit = (git -C $root rev-parse HEAD).Trim()
 $existingTag = git -C $root tag --list $tag
+$forceTag = $false
 if (-not $existingTag) {
     git -C $root tag $tag
+} else {
+    $tagCommit = (git -C $root rev-list -n 1 $tag).Trim()
+    if ($tagCommit -ne $headCommit) {
+        git -C $root tag -f $tag
+        $forceTag = $true
+    }
 }
 git -C $root push origin main
-git -C $root push origin $tag
+if ($forceTag) {
+    git -C $root push --force origin $tag
+} else {
+    git -C $root push origin $tag
+}
 
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLower()
 "$hash *Umbral.exe" | Set-Content -LiteralPath $shaFile -Encoding ASCII

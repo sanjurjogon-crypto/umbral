@@ -96,11 +96,25 @@ class Game:
             return f"Hace {days} días"
         return moment.strftime("%d/%m/%Y")
 
+    def resolved_arguments(self) -> list[str]:
+        arguments = [arg.replace("{rom}", self.rom_path or "") for arg in self.arguments]
+        already_included = any(
+            "{rom}" in arg or (self.rom_path and self.rom_path in arg)
+            for arg in self.arguments
+        )
+        if (
+            self.rom_path
+            and self.system_key not in {"pc", "ports", "steam", "epic"}
+            and not already_included
+        ):
+            arguments.append(self.rom_path)
+        return arguments
+
     @property
     def command_preview(self) -> str:
         parts: list[str] = []
-        for arg in self.arguments:
-            value = arg.replace("{rom}", self.rom_path or "")
+        for arg in self.resolved_arguments():
+            value = arg
             if " " in value and not (value.startswith('"') and value.endswith('"')):
                 value = f'"{value}"'
             parts.append(value)

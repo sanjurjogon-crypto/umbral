@@ -247,7 +247,10 @@ class GameDetailDialog(QDialog):
         if self.game.rom_path:
             rom = Path(self.game.rom_path)
             candidates.append(str(rom if rom.is_dir() else rom.parent))
-        candidates.append(self.game.working_dir or str(Path(self.game.executable).parent))
+        if self.game.working_dir:
+            candidates.append(self.game.working_dir)
+        if self.game.executable:
+            candidates.append(str(Path(self.game.executable).parent))
         for folder in candidates:
             try:
                 if folder and Path(folder).is_dir():
@@ -1211,7 +1214,7 @@ class GameScanDialog(QDialog):
         recheck = QPushButton("Volver a comprobar")
         recheck.setObjectName("ghost")
         recheck.setCursor(Qt.PointingHandCursor)
-        recheck.clicked.connect(self.recheck_requested)
+        recheck.clicked.connect(self._recheck)
         cancel = QPushButton("Cancelar")
         cancel.setObjectName("ghost")
         cancel.setCursor(Qt.PointingHandCursor)
@@ -1230,6 +1233,10 @@ class GameScanDialog(QDialog):
         from .widgets import SectionHeader
 
         return SectionHeader(text)
+
+    def _recheck(self) -> None:
+        self.recheck_requested.emit()
+        self.accept()
 
     def _candidate_row(self, candidate: StandaloneCandidate) -> QWidget:
         frame = QFrame()
@@ -1342,8 +1349,11 @@ class GameScanDialog(QDialog):
         row.setContentsMargins(14, 11, 14, 11)
         row.setSpacing(12)
 
+        profile = emulator_for(download.path)
+        usable = not download.partial and profile is not None
         box = QCheckBox()
-        box.setChecked(not download.partial and emulator_for(download.path) is not None)
+        box.setChecked(usable)
+        box.setEnabled(usable)
         key = f"download::{str(download.path).lower()}"
         self._boxes[key] = (box, download)
         row.addWidget(box, 0, Qt.AlignTop)
@@ -1354,7 +1364,11 @@ class GameScanDialog(QDialog):
         heading.setStyleSheet("font-weight: 700;")
         heading.setWordWrap(True)
         text.addWidget(heading)
-        detail = QLabel(describe_download(download))
+        if profile is None and not download.partial:
+            detail_text = "Sistema no identificado. Añádelo a mano desde «Añadir juego»."
+        else:
+            detail_text = describe_download(download)
+        detail = QLabel(detail_text)
         detail.setObjectName("muted")
         detail.setWordWrap(True)
         text.addWidget(detail)

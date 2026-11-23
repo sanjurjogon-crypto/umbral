@@ -324,7 +324,7 @@ def _hookshot_version(folder: Path) -> str:
         return ""
 
 
-def find_roms(index: FileIndex, extensions: tuple[str, ...], max_depth: int = 6, limit: int = 200) -> list[Path]:
+def find_roms(index: FileIndex, extensions: tuple[str, ...], max_depth: int = 6, limit: int = 2000) -> list[Path]:
     wanted = {extension.lower() for extension in extensions}
     results: list[Path] = []
     seen: set[str] = set()

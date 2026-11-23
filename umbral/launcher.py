@@ -33,8 +33,7 @@ def validate(game: Game) -> list[str]:
 
 
 def build_command(game: Game) -> list[str]:
-    arguments = [argument.replace("{rom}", game.rom_path or "") for argument in game.arguments]
-    return [game.executable, *arguments]
+    return [game.executable, *game.resolved_arguments()]
 
 
 def diagnostic_text(game: Game, log_path: Path | None = None) -> str:

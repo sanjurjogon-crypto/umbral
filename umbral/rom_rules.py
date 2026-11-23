@@ -182,6 +182,7 @@ ZIP_EXTENSION_SYSTEMS = {
     ".wux": "wii",
     ".cso": "psp",
     ".pbp": "psp",
+    ".cue": "ps1",
     ".gdi": "dreamcast",
     ".cdi": "dreamcast",
     ".chd": "ps1",
@@ -330,9 +331,13 @@ def rom_system(path: str | Path) -> str | None:
     if suffix == ".chd":
         return path_hint(candidate) if chd_header(candidate) else None
     if suffix == ".zip":
-        if not zip_has_rom(candidate):
+        content = zip_rom_system(candidate)
+        if content is None:
             return None
-        return path_hint(candidate) or zip_rom_system(candidate)
+        hint = path_hint(candidate)
+        if content in {"ps2", "ps1"}:
+            return hint
+        return content
     if suffix == ".crt":
         return "c64" if crt_header(candidate) else None
     return path_hint(candidate)
@@ -349,6 +354,11 @@ def validate_rom(path: str | Path, system_key: str = "") -> bool:
         return True
     detected = rom_system(candidate)
     if detected is None:
+        if system_key == "atari2600" and candidate.suffix.lower() == ".bin":
+            try:
+                return candidate.stat().st_size in ATARI_SIZES
+            except OSError:
+                return False
         return False
     if not system_key or system_key == "multi" or system_key == detected:
         return True
