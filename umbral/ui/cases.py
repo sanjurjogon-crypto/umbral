@@ -34,6 +34,9 @@ EMULATOR_BY_NAME: dict[str, str] = {
 PC_BAND = "#17130d"
 PC_BAND_LIGHT = "#2a2317"
 SANS_FONT = "Segoe UI"
+NINTENDO_FONT = "Bahnschrift"
+PS_FONT = "Trebuchet MS"
+XBOX_FONT = "Segoe UI"
 HEADLINE_FONT = "Arial Black"
 
 
@@ -61,16 +64,16 @@ CASE_PROFILES: dict[str, CaseProfile] = {
         w_scale=0.88,
         h_scale=1.00,
         radius=5.5,
-        spine_color="#d91e26",
+        spine_color="#e60012",
         header_bg="#e60012",
         header_accent="#ff5a5f",
         header_text="#ffffff",
         band_label="SWITCH 2",
         depth_scale=0.76,
         shell_kind="translucent_tint",
-        shell_color="#d91e26",
-        shell_alpha=215,
-        bezel=(0.025, 0.022, 0.025, 0.022),
+        shell_color="#e60012",
+        shell_alpha=230,
+        bezel=(0.032, 0.026, 0.032, 0.026),
     ),
     "switch": CaseProfile(
         key="switch",
@@ -689,7 +692,7 @@ def console_art_rect(frame: QRectF, profile: CaseProfile) -> QRectF:
     )
     key = profile.key
     if key == "switch2":
-        top_cut = inner.height() * 0.115
+        top_cut = inner.height() * 0.145
         return inner.adjusted(0.0, top_cut, 0.0, 0.0)
     if key == "switch":
         return inner
@@ -1050,47 +1053,84 @@ def _draw_gamecube_cube(painter: QPainter, center: QPointF, r: float) -> None:
 
 
 def _paint_switch2(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseProfile) -> None:
-    bar = QRectF(inner.left(), inner.top(), inner.width(), inner.height() * 0.115)
-    grad = QLinearGradient(bar.topLeft(), bar.bottomLeft())
-    grad.setColorAt(0.0, QColor("#ef0818"))
-    grad.setColorAt(1.0, QColor("#bf000d"))
-    painter.fillRect(bar, grad)
-    painter.fillRect(QRectF(bar.left(), bar.bottom() - 1.0, bar.width(), 1.2), QColor(255, 255, 255, 65))
+    bar = QRectF(inner.left(), inner.top(), inner.width(), inner.height() * 0.145)
+    painter.fillRect(bar, QColor("#e60012"))
 
-    pad = bar.height() * 0.18
-    icon = QRectF(bar.left() + pad * 1.4, bar.top() + pad, bar.height() - pad * 2, bar.height() - pad * 2)
-    _draw_joycon_emblem(painter, icon, QColor("#ffffff"))
+    # Centered [Joy-Con emblem] + "2" on top, "NINTENDO SWITCH" stacked underneath
+    top_h = bar.height() * 0.50
+    icon_s = top_h * 0.82
+    font_two = QFont(NINTENDO_FONT)
+    font_two.setPixelSize(max(10, int(top_h * 0.92)))
+    font_two.setBold(True)
+    fm_two = QFontMetrics(font_two)
+    two_w = fm_two.horizontalAdvance("2")
+    gap = icon_s * 0.22
+    group_w = icon_s + gap + two_w
+    gx = bar.center().x() - group_w / 2.0
+    gy = bar.top() + bar.height() * 0.12
 
-    font = QFont(SANS_FONT)
-    font.setPixelSize(max(7, int(bar.height() * 0.42)))
-    font.setBold(True)
-    font.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
-    painter.setFont(font)
+    _draw_joycon_emblem(painter, QRectF(gx, gy, icon_s, icon_s), QColor("#ffffff"))
+    painter.setFont(font_two)
     painter.setPen(QColor("#ffffff"))
-    text_rect = QRectF(icon.right() + pad * 0.9, bar.top(), bar.right() - icon.right() - pad * 1.6, bar.height())
-    shown = QFontMetrics(font).elidedText("SWITCH 2", Qt.ElideRight, int(text_rect.width()))
-    painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, shown)
+    painter.drawText(
+        QRectF(gx + icon_s + gap, gy - top_h * 0.08, two_w + 4.0, top_h * 1.05),
+        Qt.AlignLeft | Qt.AlignVCenter,
+        "2",
+    )
+
+    sub_font = QFont(NINTENDO_FONT)
+    sub_font.setPixelSize(max(6, int(bar.height() * 0.15)))
+    sub_font.setBold(True)
+    sub_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
+    painter.setFont(sub_font)
+    painter.drawText(
+        QRectF(bar.left(), bar.top() + bar.height() * 0.59, bar.width(), bar.height() * 0.17),
+        Qt.AlignCenter,
+        "NINTENDO",
+    )
+
+    sw_font = QFont(NINTENDO_FONT)
+    sw_font.setPixelSize(max(7, int(bar.height() * 0.21)))
+    sw_font.setBold(True)
+    sw_font.setLetterSpacing(QFont.AbsoluteSpacing, 1.1)
+    painter.setFont(sw_font)
+    painter.drawText(
+        QRectF(bar.left(), bar.top() + bar.height() * 0.74, bar.width(), bar.height() * 0.23),
+        Qt.AlignCenter,
+        "SWITCH",
+    )
 
 
 def _paint_switch(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseProfile) -> None:
-    size = min(inner.width() * 0.22, inner.height() * 0.155)
-    margin = inner.width() * 0.045
-    badge = QRectF(inner.left() + margin, inner.top() + margin * 0.9, size, size)
-    # Red Nintendo Switch corner tile
+    size = min(inner.width() * 0.23, inner.height() * 0.165)
+    margin = inner.width() * 0.032
+    badge = QRectF(inner.left() + margin, inner.top() + margin * 0.85, size, size)
     painter.save()
-    painter.setPen(QPen(QColor(255, 255, 255, 110), 1.0))
+    painter.setPen(Qt.NoPen)
     painter.setBrush(QColor("#e60012"))
-    painter.drawRoundedRect(badge, size * 0.12, size * 0.12)
-    icon_box = badge.adjusted(size * 0.18, size * 0.12, -size * 0.18, -size * 0.34)
+    painter.drawRoundedRect(badge, size * 0.06, size * 0.06)
+    icon_box = badge.adjusted(size * 0.22, size * 0.12, -size * 0.22, -size * 0.42)
     _draw_joycon_emblem(painter, icon_box, QColor("#ffffff"))
 
-    font = QFont(SANS_FONT)
-    font.setPixelSize(max(5, int(size * 0.18)))
-    font.setBold(True)
-    painter.setFont(font)
+    nin_font = QFont(NINTENDO_FONT)
+    nin_font.setPixelSize(max(4, int(size * 0.12)))
+    nin_font.setBold(True)
+    nin_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.5)
+    painter.setFont(nin_font)
     painter.setPen(QColor("#ffffff"))
     painter.drawText(
-        QRectF(badge.left(), badge.bottom() - size * 0.32, badge.width(), size * 0.28),
+        QRectF(badge.left(), badge.bottom() - size * 0.37, badge.width(), size * 0.14),
+        Qt.AlignCenter,
+        "NINTENDO",
+    )
+
+    sw_font = QFont(NINTENDO_FONT)
+    sw_font.setPixelSize(max(5, int(size * 0.17)))
+    sw_font.setBold(True)
+    sw_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.7)
+    painter.setFont(sw_font)
+    painter.drawText(
+        QRectF(badge.left(), badge.bottom() - size * 0.24, badge.width(), size * 0.20),
         Qt.AlignCenter,
         "SWITCH",
     )
@@ -1101,43 +1141,39 @@ def _paint_3ds(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CasePr
     strip_w = inner.width() * 0.145
     strip = QRectF(inner.right() - strip_w, inner.top(), strip_w, inner.height())
     grad = QLinearGradient(strip.topLeft(), strip.topRight())
-    grad.setColorAt(0.0, QColor("#e3e7ed"))
-    grad.setColorAt(0.18, QColor("#ffffff"))
-    grad.setColorAt(1.0, QColor("#f2f4f7"))
+    grad.setColorAt(0.0, QColor("#e8ecf2"))
+    grad.setColorAt(0.16, QColor("#ffffff"))
+    grad.setColorAt(1.0, QColor("#f4f6f9"))
     painter.fillRect(strip, grad)
 
-    # Divider rule and red top-right corner accent (classic PAL 3DS spine-front flap)
-    painter.fillRect(QRectF(strip.left(), strip.top(), 1.2, strip.height()), QColor("#c5cbd4"))
-    red_tab = QRectF(strip.left() + 1.2, strip.top(), strip.width() - 1.2, strip.height() * 0.12)
-    painter.fillRect(red_tab, QColor("#d32f2f"))
-
-    # Tiny Nintendo seal dot inside red tab (avoids cramped horizontal text in narrow vertical strip)
-    dot_r = min(red_tab.width(), red_tab.height()) * 0.24
-    painter.setPen(QPen(QColor("#ffffff"), max(1.0, dot_r * 0.25)))
-    painter.setBrush(Qt.NoBrush)
-    painter.drawEllipse(red_tab.center(), dot_r, dot_r)
+    # Clean vertical divider rule (authentic white PAL 3DS side bar, no invented red circle)
+    painter.fillRect(QRectF(strip.left(), strip.top(), 1.1, strip.height()), QColor("#d1d5db"))
 
     # Vertical rotated "NINTENDO 3DS" text along the white right strip
     painter.save()
     cx = strip.center().x()
-    cy = strip.center().y() + strip.height() * 0.06
+    cy = strip.center().y()
     painter.translate(cx, cy)
     painter.rotate(-90)
-    font = QFont(SANS_FONT)
-    font.setPixelSize(max(7, int(strip_w * 0.42)))
+    font = QFont(NINTENDO_FONT)
+    font.setPixelSize(max(7, int(strip_w * 0.44)))
     font.setBold(True)
-    font.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
+    font.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
     painter.setFont(font)
     fm = QFontMetrics(font)
     nint = "NINTENDO "
-    tail = "3DS"
-    total_w = fm.horizontalAdvance(nint) + fm.horizontalAdvance(tail)
+    mid = "3D"
+    tail = "S"
+    w_nint = fm.horizontalAdvance(nint)
+    w_mid = fm.horizontalAdvance(mid)
+    w_tail = fm.horizontalAdvance(tail)
+    total_w = w_nint + w_mid + w_tail
     start_x = -total_w / 2.0
     h_box = strip_w * 0.9
-    painter.setPen(QColor("#1e2229"))
-    painter.drawText(QRectF(start_x, -h_box / 2.0, fm.horizontalAdvance(nint) + 2.0, h_box), Qt.AlignVCenter | Qt.AlignLeft, nint)
+    painter.setPen(QColor("#17191c"))
+    painter.drawText(QRectF(start_x, -h_box / 2.0, w_nint + w_mid + 2.0, h_box), Qt.AlignVCenter | Qt.AlignLeft, nint + mid)
     painter.setPen(QColor("#d32f2f"))
-    painter.drawText(QRectF(start_x + fm.horizontalAdvance(nint), -h_box / 2.0, fm.horizontalAdvance(tail) + 2.0, h_box), Qt.AlignVCenter | Qt.AlignLeft, tail)
+    painter.drawText(QRectF(start_x + w_nint + w_mid, -h_box / 2.0, w_tail + 2.0, h_box), Qt.AlignVCenter | Qt.AlignLeft, tail)
     painter.restore()
 
 
@@ -1163,7 +1199,7 @@ def _paint_nds(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CasePr
     painter.save()
     painter.translate(strip.center().x(), strip.center().y() + strip.height() * 0.06)
     painter.rotate(-90)
-    font = QFont(SANS_FONT)
+    font = QFont(NINTENDO_FONT)
     font.setPixelSize(max(7, int(strip_w * 0.42)))
     font.setBold(True)
     font.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
@@ -1190,19 +1226,12 @@ def _paint_wii(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CasePr
     painter.setBrush(Qt.NoBrush)
     painter.drawPath(curve)
 
-    font = QFont(SANS_FONT)
+    font = QFont(NINTENDO_FONT)
     font.setPixelSize(max(9, int(bar_h * 0.56)))
     font.setBold(True)
     painter.setFont(font)
     painter.setPen(QColor("#7b8594"))
     painter.drawText(QRectF(bar.left() + bar_h * 0.45, bar.top(), bar.width() * 0.5, bar_h * 0.9), Qt.AlignLeft | Qt.AlignVCenter, "Wii")
-
-    # Blue 'ii' dots glow accent
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor("#00a8e8"))
-    dot_r = max(1.4, bar_h * 0.06)
-    painter.drawEllipse(QPointF(bar.left() + bar_h * 1.18, bar.top() + bar_h * 0.23), dot_r, dot_r)
-    painter.drawEllipse(QPointF(bar.left() + bar_h * 1.38, bar.top() + bar_h * 0.23), dot_r, dot_r)
 
     _draw_pal_badge(
         painter,
@@ -1227,7 +1256,7 @@ def _paint_wiiu(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseP
     painter.setBrush(Qt.NoBrush)
     painter.drawPath(curve)
 
-    font = QFont(SANS_FONT)
+    font = QFont(NINTENDO_FONT)
     font.setPixelSize(max(9, int(bar_h * 0.54)))
     font.setBold(True)
     painter.setFont(font)
