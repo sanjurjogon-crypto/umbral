@@ -154,7 +154,7 @@ def extra_qss(style: GameStyle) -> str:
         letter-spacing: 1px;
     }}
     QFrame#updateBanner {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(20, 18, 14, 0.86), stop:0.55 rgba(12, 11, 9, 0.82), stop:1 rgba(8, 8, 7, 0.85));
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(22, 19, 14, 0.90), stop:0.45 rgba(14, 12, 10, 0.86), stop:1 rgba(8, 8, 7, 0.90));
         border: {thin}px solid rgba(255, 255, 255, 0.14);
         border-top: 2px solid {accent};
         border-bottom: 1px solid {hair};
@@ -163,51 +163,51 @@ def extra_qss(style: GameStyle) -> str:
     QLabel#bannerEyebrow {{
         color: {accent};
         font-family: "{heading}";
-        font-size: 10px;
+        font-size: 11px;
         font-weight: {weight};
-        letter-spacing: 2px;
+        letter-spacing: 2.5px;
     }}
     QLabel#bannerTitle {{
         color: {accent_2};
         font-family: "{heading}";
-        font-size: 19px;
+        font-size: 21px;
         font-weight: {weight};
-        letter-spacing: 0.5px;
+        letter-spacing: 0.4px;
     }}
     QLabel#bannerText {{
         color: {style.text};
-        font-size: 13px;
+        font-size: 16px;
     }}
     QLabel#bannerDetail {{
         color: {accent};
-        font-size: 11px;
-        letter-spacing: 0.5px;
+        font-size: 13px;
+        letter-spacing: 0.6px;
     }}
     QPushButton#bannerPrimary {{
-        background: rgba(212, 175, 55, 0.18);
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(212, 175, 55, 0.28), stop:1 rgba(212, 175, 55, 0.14));
         border: {thin}px solid {accent};
         border-bottom: 2px solid {hair};
         color: {accent_2};
         font-family: "{heading}";
-        font-size: 11px;
+        font-size: 12px;
         font-weight: {weight};
-        letter-spacing: 1.5px;
-        padding: 7px 16px;
+        letter-spacing: 1.8px;
+        padding: 10px 24px;
         border-radius: {radius}px;
     }}
     QPushButton#bannerPrimary:hover {{
-        background: rgba(212, 175, 55, 0.28);
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(212, 175, 55, 0.40), stop:1 rgba(212, 175, 55, 0.22));
         border-color: {accent_2};
     }}
     QPushButton#bannerGhost {{
-        background: rgba(14, 12, 10, 0.44);
+        background: rgba(14, 12, 10, 0.52);
         border: {thin}px solid rgba(255, 255, 255, 0.14);
         border-bottom: 2px solid {style.border_soft};
         color: {style.muted};
         font-family: "{heading}";
-        font-size: 11px;
-        letter-spacing: 1px;
-        padding: 7px 14px;
+        font-size: 12px;
+        letter-spacing: 1.4px;
+        padding: 10px 20px;
         border-radius: {radius}px;
     }}
     QPushButton#bannerGhost:hover {{
