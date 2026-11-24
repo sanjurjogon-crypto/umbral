@@ -187,3 +187,94 @@ def test_game_detail_dialog_buttons_do_not_overlap() -> None:
 
     dialog.close()
     app.processEvents()
+
+
+def test_library_grid_view_and_hide_demos(monkeypatch, tmp_path: Path) -> None:
+    _app()
+    games = [
+        Game(id="g1", title="Hades", system="Steam", system_key="steam", source="steam"),
+        Game(id="g2", title="Cardsharp Demo", system="Steam", system_key="steam", source="steam"),
+        Game(id="g3", title="Dumbfire Playtest", system="Steam", system_key="steam", source="steam"),
+    ]
+    store = _store(monkeypatch, tmp_path, games)
+    page = LibraryPage(store)
+    page.resize(1100, 720)
+
+    page.hide_demos_check.setChecked(True)
+    assert [g.id for g in page._visible_games()] == ["g1"]
+    assert store.settings["hide_demos"] is True
+
+    page._set_view_mode("grid")
+    page.show()
+    _app().processEvents()
+    assert store.settings["library_view"] == "grid"
+    assert page.grid_scroll.isVisibleTo(page)
+    assert not page.canvas.isVisibleTo(page)
+    assert page.grid_layout.count() == 1
+    assert page.grid_layout.itemAt(0).widget().isVisibleTo(page)
+
+    page._set_view_mode("shelf")
+    assert store.settings["library_view"] == "shelf"
+    assert page.canvas.isVisibleTo(page)
+    assert not page.grid_scroll.isVisibleTo(page)
+
+
+def test_health_page_shows_stores_duplicates_and_add_folder(monkeypatch, tmp_path: Path) -> None:
+    import umbral.ui.pages as pages_mod
+
+    _app()
+    monkeypatch.setattr(
+        pages_mod,
+        "store_statuses",
+        lambda: [("steam", "Steam", True), ("epic", "Epic Games", False), ("gog", "GOG", False)],
+    )
+    exe = tmp_path / "rpcs3.exe"
+    exe.write_bytes(b"MZ")
+    rom1 = tmp_path / "a" / "oot.nup"
+    rom2 = tmp_path / "b" / "oot.nup"
+    rom1.parent.mkdir()
+    rom2.parent.mkdir()
+    rom1.write_bytes(b"ROM")
+    rom2.write_bytes(b"ROM")
+
+    games = [
+        Game(id="steam-1", title="Dark Souls", system="Steam", system_key="steam", source="steam", executable=str(exe)),
+        Game(id="dup-1", title="Ocarina of Time", system="Switch 2", system_key="switch2", emulator="Fritchii", executable=str(exe), rom_path=str(rom1)),
+        Game(id="dup-2", title="Ocarina of Time", system="Switch 2", system_key="switch2", emulator="Fritchii", executable=str(exe), rom_path=str(rom2)),
+    ]
+    store = _store(monkeypatch, tmp_path, games)
+    page = HealthPage(store)
+    page.set_emulators(
+        [Emulator(key="rpcs3", name="RPCS3", executable=str(exe), system="PS3", system_key="ps3", found=True)]
+    )
+    page.refresh()
+
+    texts = [lbl.text() for lbl in page.findChildren(QLabel)]
+    assert any("Copias duplicadas: Ocarina of Time" in text for text in texts)
+    assert any("Steam" == text for text in texts)
+    assert any("Detectada · 1 juego" in text for text in texts)
+
+
+def test_settings_page_lists_hidden_games_and_emits_restore(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from umbral.ui.pages import SettingsPage
+
+    _app()
+    store = _store(monkeypatch, tmp_path, [])
+    store.settings["hidden_games"] = ["pc-boxshelf-1"]
+    store.settings["hidden_paths"] = ["c:/games/boxshelf.exe"]
+    page = SettingsPage(store)
+    page.refresh()
+
+    restored_games: list[str] = []
+    restored_paths: list[str] = []
+    page.unhide_game_requested.connect(restored_games.append)
+    page.unhide_path_requested.connect(restored_paths.append)
+
+    restore_buttons = [btn for btn in page.findChildren(QPushButton) if btn.text() == "Restaurar"]
+    assert len(restore_buttons) == 2
+    restore_buttons[0].click()
+    restore_buttons[1].click()
+    assert restored_games == ["pc-boxshelf-1"]
+    assert restored_paths == ["c:/games/boxshelf.exe"]

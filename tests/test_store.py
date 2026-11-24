@@ -151,3 +151,21 @@ def test_export_and_import_library_merges_playtime_and_settings(monkeypatch, tmp
     store.export_library(exported)
     parsed = json.loads(exported.read_text(encoding="utf-8"))
     assert len(parsed["games"]) == 2
+
+
+def test_unhide_game_and_unhide_path_restore_visibility(monkeypatch, tmp_path: Path) -> None:
+    _point_store(monkeypatch, tmp_path)
+    store = store_module.Store()
+    rom = _sega_rom(tmp_path / "game.bin")
+    game = store_module.Game.from_dict(_game(rom))
+    store.games = [game]
+    store.hide(game.id)
+
+    assert game.id in store.settings["hidden_games"]
+    assert store.unhide_game(game.id) is True
+    assert game.id not in store.settings["hidden_games"]
+    assert store.unhide_game(game.id) is False
+
+    assert len(store.settings["hidden_paths"]) == 1
+    assert store.unhide_path(str(rom)) is True
+    assert store.settings["hidden_paths"] == []

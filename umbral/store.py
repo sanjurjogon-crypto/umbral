@@ -25,6 +25,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "detection_version": 0,
     "sound": False,
     "update_dismissed_version": "",
+    "library_view": "shelf",
+    "hide_demos": False,
 }
 
 
@@ -323,6 +325,26 @@ class Store:
                 if key not in {_path_key(str(item)) for item in paths}:
                     paths.append(key)
         self.save_settings()
+
+    def unhide_game(self, game_id: str) -> bool:
+        hidden = self.settings.get("hidden_games", [])
+        if not isinstance(hidden, list) or game_id not in hidden:
+            return False
+        self.settings["hidden_games"] = [item for item in hidden if item != game_id]
+        self.save_settings()
+        return True
+
+    def unhide_path(self, path: str) -> bool:
+        paths = self.settings.get("hidden_paths", [])
+        if not isinstance(paths, list):
+            return False
+        target = _path_key(str(path))
+        filtered = [item for item in paths if _path_key(str(item)) != target]
+        if len(filtered) == len(paths):
+            return False
+        self.settings["hidden_paths"] = filtered
+        self.save_settings()
+        return True
 
     @staticmethod
     def _hidden_values(game: Game) -> list[str]:

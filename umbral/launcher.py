@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -147,3 +150,92 @@ class ProcessWatcher(QThread):
         code = self._process.wait()
         wait_for_job(self._job)
         self.finished_ok.emit(int(code), self.elapsed_seconds(), self._log_path)
+
+
+def steam_app_id(game: Game) -> str:
+    args = list(game.arguments or [])
+    for index, arg in enumerate(args):
+        if arg == "-applaunch" and index + 1 < len(args):
+            candidate = str(args[index + 1]).strip()
+            if candidate.isdigit():
+                return candidate
+    match = re.search(r"AppID de Steam:\s*(\d+)", game.notes or "")
+    return match.group(1) if match else ""
+
+
+def _steam_app_state(app_id: str) -> tuple[bool, bool]:
+    if os.name != "nt" or not app_id:
+        return False, False
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, rf"Software\Valve\Steam\Apps\{app_id}"
+        ) as handle:
+            running = False
+            updating = False
+            try:
+                value, _ = winreg.QueryValueEx(handle, "Running")
+                running = bool(int(value))
+            except (OSError, ValueError, TypeError):
+                pass
+            try:
+                value, _ = winreg.QueryValueEx(handle, "Updating")
+                updating = bool(int(value))
+            except (OSError, ValueError, TypeError):
+                pass
+            return running, updating
+    except OSError:
+        return False, False
+
+
+class SteamWatcher(QThread):
+    finished_ok = Signal(int, int, str)
+
+    def __init__(
+        self,
+        app_id: str,
+        log_path: Path,
+        game_id: str = "",
+        launch_timeout: float = 120.0,
+        poll_interval: float = 1.0,
+    ) -> None:
+        super().__init__()
+        self.app_id = str(app_id)
+        self._log_path = str(log_path)
+        self.game_id = game_id
+        self._launch_timeout = launch_timeout
+        self._poll_interval = poll_interval
+        self._started_at: Optional[float] = None
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def elapsed_seconds(self) -> int:
+        if self._started_at is None:
+            return 0
+        return max(1, int(time.monotonic() - self._started_at))
+
+    def run(self) -> None:
+        deadline = time.monotonic() + self._launch_timeout
+        while not self._stop_event.is_set():
+            running, updating = _steam_app_state(self.app_id)
+            if running:
+                self._started_at = time.monotonic()
+                break
+            if updating:
+                deadline = max(deadline, time.monotonic() + 30.0)
+            if time.monotonic() >= deadline:
+                return
+            self._stop_event.wait(min(0.5, self._poll_interval))
+
+        if self._stop_event.is_set() or self._started_at is None:
+            return
+
+        while not self._stop_event.is_set():
+            running, _updating = _steam_app_state(self.app_id)
+            if not running:
+                self.finished_ok.emit(0, self.elapsed_seconds(), self._log_path)
+                return
+            self._stop_event.wait(self._poll_interval)

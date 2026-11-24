@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -28,6 +30,7 @@ from ..launcher import validate
 from ..models import Emulator, Game
 from ..profiles import EmulatorProfile, PROFILE_BY_KEY, all_profiles
 from ..store import Store, format_seconds
+from ..stores import store_statuses
 from ..updater import UpdateInfo, relative_time
 from .shelf import ShelfCanvas
 from .style import active as active_style
@@ -213,6 +216,10 @@ class HomePage(QWidget):
         self.rows.addWidget(row)
 
 
+def _is_demo_game(game: Game) -> bool:
+    return bool(re.search(r"\b(demo|playtest|play\s+test)\b", game.title or "", re.I))
+
+
 class LibraryPage(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
@@ -227,6 +234,10 @@ class LibraryPage(QWidget):
         self._favorites_only = False
         self._favorites_filter = ""
         self._state_filter = ""
+        self._hide_demos = bool(store.settings.get("hide_demos", False))
+        self._view_mode = str(store.settings.get("library_view", "shelf"))
+        if self._view_mode not in {"shelf", "grid"}:
+            self._view_mode = "shelf"
         self._sort_key = str(store.settings.get("sort_key", "title"))
         self._sort_asc = bool(store.settings.get("sort_asc", True))
         if self._sort_key not in SORT_DEFAULT_ASC:
@@ -240,7 +251,7 @@ class LibraryPage(QWidget):
         header_body.setSpacing(10)
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(18)
+        top_row.setSpacing(14)
 
         title_box = QVBoxLayout()
         title_box.setSpacing(6)
@@ -252,6 +263,33 @@ class LibraryPage(QWidget):
         title_box.addWidget(self.count_label)
         top_row.addLayout(title_box)
         top_row.addStretch(1)
+
+        self.hide_demos_check = QCheckBox("Ocultar demos")
+        self.hide_demos_check.setChecked(self._hide_demos)
+        self.hide_demos_check.setCursor(Qt.PointingHandCursor)
+        self.hide_demos_check.toggled.connect(self._demos_toggled)
+        top_row.addWidget(self.hide_demos_check, 0, Qt.AlignVCenter)
+
+        self.shelf_view_btn = QPushButton("Estantería")
+        self.shelf_view_btn.setObjectName("chip")
+        self.shelf_view_btn.setCheckable(True)
+        self.shelf_view_btn.setChecked(self._view_mode == "shelf")
+        self.shelf_view_btn.setCursor(Qt.PointingHandCursor)
+        self.shelf_view_btn.clicked.connect(lambda: self._set_view_mode("shelf"))
+
+        self.grid_view_btn = QPushButton("Cuadrícula")
+        self.grid_view_btn.setObjectName("chip")
+        self.grid_view_btn.setCheckable(True)
+        self.grid_view_btn.setChecked(self._view_mode == "grid")
+        self.grid_view_btn.setCursor(Qt.PointingHandCursor)
+        self.grid_view_btn.clicked.connect(lambda: self._set_view_mode("grid"))
+
+        view_group = QButtonGroup(self)
+        view_group.setExclusive(True)
+        view_group.addButton(self.shelf_view_btn)
+        view_group.addButton(self.grid_view_btn)
+        top_row.addWidget(self.shelf_view_btn, 0, Qt.AlignVCenter)
+        top_row.addWidget(self.grid_view_btn, 0, Qt.AlignVCenter)
         header_body.addLayout(top_row)
 
         sort_row = QHBoxLayout()
@@ -289,6 +327,21 @@ class LibraryPage(QWidget):
         self.canvas.details_requested.connect(self.details_requested)
         self.canvas.context_requested.connect(self.context_requested)
         self.canvas.selection_changed.connect(self._on_selection)
+
+        self.grid_scroll = QScrollArea(self)
+        self.grid_scroll.setWidgetResizable(True)
+        self.grid_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.grid_scroll.setFrameShape(QFrame.NoFrame)
+        grid_content = QWidget()
+        grid_outer = QVBoxLayout(grid_content)
+        grid_outer.setContentsMargins(38, 12, 38, 32)
+        grid_outer.setSpacing(0)
+        grid_wrap = QWidget()
+        self.grid_layout = FlowLayout(grid_wrap, margin=0, h_spacing=18, v_spacing=22)
+        grid_outer.addWidget(grid_wrap)
+        grid_outer.addStretch(1)
+        self.grid_scroll.setWidget(grid_content)
+        self.grid_scroll.hide()
 
         self.info = QWidget(self)
         self.info.setObjectName("shelfInfo")
@@ -360,9 +413,14 @@ class LibraryPage(QWidget):
         self.canvas.setGeometry(0, 0, width, height)
         header_h = self.header.sizeHint().height()
         self.header.setGeometry(0, 0, width, header_h)
+        if hasattr(self, "grid_scroll"):
+            self.grid_scroll.setGeometry(0, header_h, width, max(0, height - header_h))
         bottom_h = self._bottom_height(width)
         self.bottom.setGeometry(0, height - bottom_h, width, bottom_h)
-        self.canvas.lower()
+        if self._view_mode == "grid" and hasattr(self, "grid_scroll"):
+            self.grid_scroll.lower()
+        else:
+            self.canvas.lower()
         self.header.raise_()
         self.bottom.raise_()
         if hasattr(self, "_empty"):
@@ -412,6 +470,23 @@ class LibraryPage(QWidget):
         self._state_filter = str(self.state_combo.currentData() or "")
         self.refresh(reset=True)
 
+    def _demos_toggled(self, checked: bool) -> None:
+        self._hide_demos = bool(checked)
+        self.store.settings["hide_demos"] = self._hide_demos
+        self.store.save_settings()
+        self.refresh(reset=True)
+
+    def _set_view_mode(self, mode: str) -> None:
+        if mode not in {"shelf", "grid"}:
+            return
+        self._view_mode = mode
+        self.shelf_view_btn.setChecked(mode == "shelf")
+        self.grid_view_btn.setChecked(mode == "grid")
+        self.store.settings["library_view"] = mode
+        self.store.save_settings()
+        self.refresh()
+        self.focus_canvas()
+
     def _save_sort(self) -> None:
         self.store.settings["sort_key"] = self._sort_key
         self.store.settings["sort_asc"] = self._sort_asc
@@ -429,6 +504,8 @@ class LibraryPage(QWidget):
             games = [game for game in games if game.system_key == active_filter]
         if self._state_filter:
             games = [game for game in games if game.state == self._state_filter]
+        if self._hide_demos:
+            games = [game for game in games if not _is_demo_game(game)]
         query = self._query.strip().lower()
         if query:
             games = [
@@ -515,23 +592,47 @@ class LibraryPage(QWidget):
                     "Añadir juego",
                 )
             self.canvas.hide()
+            self.grid_scroll.hide()
             self.info.hide()
+            self.bottom.hide()
+            clear_layout(self.grid_layout)
             self._empty.show()
             self._layout_overlays()
             return
         self._empty.hide()
-        self.canvas.show()
-        self.info.show()
-        self.canvas.set_games(games)
-        if reset:
-            self.canvas.reset_position()
-        game = self.canvas.current_game()
-        if game is not None:
-            self._on_selection(game)
+        if self._view_mode == "grid":
+            self.canvas.hide()
+            self.info.hide()
+            self.bottom.hide()
+            self.grid_scroll.show()
+            clear_layout(self.grid_layout)
+            for game in games:
+                card = GameCard(game)
+                card.play_requested.connect(self.play_requested)
+                card.details_requested.connect(self.details_requested)
+                card.context_requested.connect(self.context_requested)
+                self.grid_layout.addWidget(card)
+                card.show()
+            self.grid_layout.parentWidget().updateGeometry()
+            if reset:
+                self.grid_scroll.verticalScrollBar().setValue(0)
+        else:
+            clear_layout(self.grid_layout)
+            self.grid_scroll.hide()
+            self.canvas.show()
+            self.info.show()
+            self.bottom.show()
+            self.canvas.set_games(games)
+            if reset:
+                self.canvas.reset_position()
+            game = self.canvas.current_game()
+            if game is not None:
+                self._on_selection(game)
         self._layout_overlays()
 
     def focus_canvas(self) -> None:
-        self.canvas.setFocus(Qt.OtherFocusReason)
+        target = self.grid_scroll if self._view_mode == "grid" else self.canvas
+        target.setFocus(Qt.OtherFocusReason)
 
 
 class StatsPage(QWidget):
@@ -628,6 +729,7 @@ class StatsPage(QWidget):
 class HealthPage(QWidget):
     rescan_requested = Signal()
     relink_requested = Signal(object)
+    add_folder_requested = Signal()
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -680,7 +782,7 @@ class HealthPage(QWidget):
                         "info",
                         emulator.name,
                         f"Emulador detectado, pero no hay juegos de {emulator.system} en las carpetas escaneadas.",
-                        None,
+                        "__add_folder__",
                     )
                 )
 
@@ -698,17 +800,42 @@ class HealthPage(QWidget):
                     )
                 )
 
+        dup_groups: dict[tuple[str, str, str], list[Game]] = {}
+        for game in self.store.games:
+            norm_title = re.sub(r"[^a-z0-9]+", " ", (game.title or "").lower()).strip()
+            if not norm_title:
+                continue
+            key = (game.system_key, (game.emulator or "").strip().lower(), norm_title)
+            dup_groups.setdefault(key, []).append(game)
+        for group in dup_groups.values():
+            if len(group) > 1:
+                sample = group[0]
+                issues.append(
+                    (
+                        "info",
+                        f"Copias duplicadas: {sample.title}",
+                        f"Hay {len(group)} entradas en {sample.system}"
+                        + (f" ({sample.emulator})" if sample.emulator else "")
+                        + ". Puedes ocultar la que sobre desde su ficha.",
+                        None,
+                    )
+                )
+
         if not issues:
             self.body.addWidget(
                 HealthRow("ok", "Todo en orden", "Los ejecutables y los archivos de tus juegos están en su sitio.")
             )
         else:
-            for level, title_text, detail, game in issues:
-                if game is not None:
+            for level, title_text, detail, action_target in issues:
+                if isinstance(action_target, Game):
                     row = HealthRow(level, title_text, detail, "Reasignar")
                     row.action_clicked.connect(
-                        lambda _checked=False, target=game: self.relink_requested.emit(target)
+                        lambda _checked=False, target=action_target: self.relink_requested.emit(target)
                     )
+                    self.body.addWidget(row)
+                elif action_target == "__add_folder__":
+                    row = HealthRow(level, title_text, detail, "Añadir carpeta")
+                    row.action_clicked.connect(self.add_folder_requested)
                     self.body.addWidget(row)
                 else:
                     self.body.addWidget(HealthRow(level, title_text, detail))
@@ -718,6 +845,23 @@ class HealthPage(QWidget):
             level = "ok" if emulator.found else "warn"
             detail = emulator.executable if emulator.found else (emulator.note or "Sin ruta configurada.")
             self.body.addWidget(HealthRow(level, emulator.name, detail))
+
+        self.body.addWidget(SectionHeader("Tiendas"))
+        store_counts: dict[str, int] = {}
+        for game in self.store.games:
+            if game.source in {"steam", "epic", "gog"}:
+                store_counts[game.source] = store_counts.get(game.source, 0) + 1
+        for source_key, label, installed in store_statuses():
+            count = store_counts.get(source_key, 0)
+            active_store = installed or count > 0
+            level = "ok" if active_store else "info"
+            if count > 0:
+                detail = f"Detectada · {count} juego" if count == 1 else f"Detectada · {count} juegos"
+            elif installed:
+                detail = "Detectada · sin juegos añadidos en la biblioteca"
+            else:
+                detail = "No detectada en este equipo"
+            self.body.addWidget(HealthRow(level, label, detail))
 
         self.body.addStretch(1)
 
@@ -733,6 +877,8 @@ class SettingsPage(QWidget):
     export_diagnostics = Signal()
     export_library = Signal()
     import_library = Signal()
+    unhide_game_requested = Signal(str)
+    unhide_path_requested = Signal(str)
     check_updates = Signal()
     install_update = Signal()
     later_update = Signal()
@@ -976,6 +1122,51 @@ class SettingsPage(QWidget):
         covers_button.setCursor(Qt.PointingHandCursor)
         covers_button.clicked.connect(self.covers_requested)
         self.body.addWidget(covers_button, 0, Qt.AlignLeft)
+
+        self.body.addWidget(SectionHeader("Juegos ocultos"))
+        hidden_ids = [str(item) for item in self.store.settings.get("hidden_games", []) if str(item)]
+        hidden_paths = [str(item) for item in self.store.settings.get("hidden_paths", []) if str(item)]
+        if not hidden_ids and not hidden_paths:
+            empty_hidden = QLabel("No hay juegos ocultos.")
+            empty_hidden.setObjectName("tiny")
+            self.body.addWidget(empty_hidden)
+        else:
+            for game_id in hidden_ids:
+                frame = QFrame()
+                frame.setObjectName("tile")
+                row = QHBoxLayout(frame)
+                row.setContentsMargins(16, 10, 16, 10)
+                row.setSpacing(12)
+                label = QLabel(game_id)
+                label.setObjectName("muted")
+                label.setWordWrap(True)
+                row.addWidget(label, 1)
+                restore = QPushButton("Restaurar")
+                restore.setObjectName("icon")
+                restore.setCursor(Qt.PointingHandCursor)
+                restore.clicked.connect(
+                    lambda _checked=False, value=game_id: self.unhide_game_requested.emit(value)
+                )
+                row.addWidget(restore)
+                self.body.addWidget(frame)
+            for path_value in hidden_paths:
+                frame = QFrame()
+                frame.setObjectName("tile")
+                row = QHBoxLayout(frame)
+                row.setContentsMargins(16, 10, 16, 10)
+                row.setSpacing(12)
+                label = QLabel(f"{Path(path_value).name}  ·  {path_value}")
+                label.setObjectName("muted")
+                label.setWordWrap(True)
+                row.addWidget(label, 1)
+                restore = QPushButton("Restaurar")
+                restore.setObjectName("icon")
+                restore.setCursor(Qt.PointingHandCursor)
+                restore.clicked.connect(
+                    lambda _checked=False, value=path_value: self.unhide_path_requested.emit(value)
+                )
+                row.addWidget(restore)
+                self.body.addWidget(frame)
 
         self.body.addWidget(SectionHeader("Datos y mantenimiento"))
         data_row = QHBoxLayout()

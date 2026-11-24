@@ -35,7 +35,7 @@ from .. import __version__
 from ..consoles import CONSOLE_EXTENSIONS
 from ..detect import DETECTION_VERSION, working_dir_for
 from ..downloads import Download, emulator_for, mark_seen
-from ..launcher import LaunchError, ProcessWatcher, diagnostic_text, launch_game, validate
+from ..launcher import LaunchError, ProcessWatcher, SteamWatcher, diagnostic_text, launch_game, steam_app_id, validate
 from ..models import Emulator, Game, now_iso, slugify
 from ..paths import assets_dir, data_dir, path_key as _path_key
 from ..relink import missing_parts, relink
@@ -248,6 +248,7 @@ class MainWindow(QMainWindow):
             page.add_requested.connect(self._add_game)
         self.health.rescan_requested.connect(self._rescan)
         self.health.relink_requested.connect(self._relink_game)
+        self.health.add_folder_requested.connect(self._add_scan_folder)
         self.settings_page.rescan_requested.connect(self._rescan)
         self.settings_page.scan_pc_requested.connect(self._scan_pc_games)
         self.settings_page.covers_requested.connect(self._refresh_covers)
@@ -258,6 +259,8 @@ class MainWindow(QMainWindow):
         self.settings_page.export_diagnostics.connect(self._export_diagnostics)
         self.settings_page.export_library.connect(self._export_library)
         self.settings_page.import_library.connect(self._import_library)
+        self.settings_page.unhide_game_requested.connect(self._unhide_game)
+        self.settings_page.unhide_path_requested.connect(self._unhide_path)
         self.settings_page.check_updates.connect(lambda: self._check_updates(manual=True))
         self.settings_page.install_update.connect(self._install_update)
         self.settings_page.later_update.connect(self._postpone_update)
@@ -710,10 +713,13 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self.toast.show_message(f"Lanzando {game.title}…")
 
-        if game.source in {"steam", "epic"}:
-            return
-
-        watcher = ProcessWatcher(process, log_path, game_id=game.id)
+        if game.source == "steam":
+            app_id = steam_app_id(game)
+            if not app_id:
+                return
+            watcher = SteamWatcher(app_id, log_path, game_id=game.id)
+        else:
+            watcher = ProcessWatcher(process, log_path, game_id=game.id)
         watcher.finished_ok.connect(
             lambda code, seconds, path, game_id=game.id: self._on_process_finished(
                 game_id, int(code), int(seconds), Path(path)
@@ -1162,6 +1168,19 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self.toast.show_message(f"Estilo {active().name} aplicado.")
 
+    def _add_scan_folder(self) -> None:
+        self.settings_page._add_folder()
+
+    def _unhide_game(self, game_id: str) -> None:
+        if self.store.unhide_game(game_id):
+            self._refresh_all()
+            self._detect_and_merge(announce=True)
+
+    def _unhide_path(self, path_value: str) -> None:
+        if self.store.unhide_path(path_value):
+            self._refresh_all()
+            self._detect_and_merge(announce=True)
+
     def _open_data(self) -> None:
         self._open_path(data_dir())
 
@@ -1399,6 +1418,9 @@ class MainWindow(QMainWindow):
                     watcher.finished.disconnect()
                 except (RuntimeError, TypeError):
                     pass
+                if hasattr(watcher, "stop"):
+                    watcher.stop()
+                    watcher.wait(1500)
                 watcher.setParent(None)
         self.store.save_library()
         self.store.save_settings()

@@ -119,3 +119,18 @@ def test_epic_folder_fallback_skips_services_and_detects_games(
     games = stores.epic_games(roots=[tmp_path])
     assert [game.title for game in games] == ["Rocket League"]
     assert games[0].executable == str(exe)
+
+
+def test_store_statuses_reports_all_stores(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(stores, "steam_roots", lambda: [tmp_path])
+    monkeypatch.setattr(stores, "epic_manifests_dir", lambda: tmp_path / "missing")
+    monkeypatch.setattr(stores, "epic_install_roots", lambda: [])
+    monkeypatch.setattr(stores, "gog_roots", lambda: [])
+    monkeypatch.setattr(stores, "_gog_registry_games", lambda: [])
+
+    statuses = stores.store_statuses()
+    assert statuses == [
+        ("steam", "Steam", True),
+        ("epic", "Epic Games", False),
+        ("gog", "GOG", False),
+    ]

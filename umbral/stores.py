@@ -569,3 +569,14 @@ def gog_games(scan_folders: Iterable[str] | None = None) -> list[Game]:
 
 def store_games(scan_folders: Iterable[str] | None = None) -> list[Game]:
     return [*steam_games(), *epic_games(), *gog_games(scan_folders)]
+
+
+def store_statuses() -> list[tuple[str, str, bool]]:
+    steam_found = bool(steam_roots())
+    epic_found = epic_manifests_dir().is_dir() or bool(epic_install_roots())
+    gog_found = bool(gog_roots()) or bool(_gog_registry_games())
+    return [
+        ("steam", "Steam", steam_found),
+        ("epic", "Epic Games", epic_found),
+        ("gog", "GOG", gog_found),
+    ]
