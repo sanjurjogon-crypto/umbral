@@ -19,6 +19,7 @@ class Detection:
     games: list[Game] = field(default_factory=list)
     emulators: list[Emulator] = field(default_factory=list)
     roms: list[str] = field(default_factory=list)
+    diagnostics: list[str] = field(default_factory=list)
 
 
 def _default_roots() -> list[Path]:
@@ -601,6 +602,7 @@ def detect(
     candidates = _find_named(exe_index, all_names, max_depth=6, limit=300)
 
     found_emulators: list[Emulator] = []
+    diagnostics: list[str] = []
     for profile in sorted(profiles, key=lambda item: (item.priority, item.name)):
         if profile.key == "hookshot":
             emulator = detect_hookshot(overrides, exe_index, candidates)
@@ -610,6 +612,10 @@ def detect(
             emulator = _detect_profile(profile, overrides, candidates)
         if emulator.found:
             found_emulators.append(emulator)
+            diagnostics.append(f"Emulador {emulator.name}: {emulator.executable}")
+        else:
+            detail = f" ({emulator.note})" if emulator.note else ""
+            diagnostics.append(f"Emulador no encontrado: {emulator.name}{detail}")
 
     found_keys = {emulator.key for emulator in found_emulators}
     auto_profiles = [profile for profile in profiles if profile.auto_scan and profile.key in found_keys]
@@ -623,6 +629,7 @@ def detect(
     for rom in roms:
         profile = _profile_for_rom(rom, auto_profiles)
         if profile is None:
+            diagnostics.append(f"Descartado: {rom} (no parece una ROM válida)")
             continue
         key = str(rom).lower()
         if key in seen_roms:
@@ -631,6 +638,7 @@ def detect(
         emulator = next(item for item in found_emulators if item.key == profile.key)
         games.append(_game_from_rom(rom, emulator, profile))
         rom_paths.add(str(rom))
+        diagnostics.append(f"Juego {profile.name}: {rom}")
 
     all_markers = tuple(
         sorted({marker for profile in auto_profiles for marker in profile.folder_markers})
@@ -664,6 +672,7 @@ def detect(
         games.append(_dusklight_game(dusklight))
 
     games.extend(store_games())
+    diagnostics.append(f"Tiendas: {sum(1 for game in games if game.source in {'steam', 'epic'})} juegos de Steam y Epic.")
 
     deduplicated: dict[str, Game] = {}
     for game in games:
@@ -673,4 +682,5 @@ def detect(
         games=sorted(deduplicated.values(), key=lambda item: item.title.lower()),
         emulators=found_emulators,
         roms=sorted(rom_paths),
+        diagnostics=diagnostics,
     )

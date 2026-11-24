@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from .job import create_job_for_process, wait_for_job
 from .models import Game, slugify
 from .paths import logs_dir
 
@@ -115,6 +116,8 @@ class ProcessWatcher(QThread):
 
     def run(self) -> None:
         started = time.monotonic()
+        job = create_job_for_process(self._process)
         code = self._process.wait()
+        wait_for_job(job)
         seconds = max(1, int(time.monotonic() - started))
         self.finished_ok.emit(int(code), seconds, self._log_path)

@@ -35,6 +35,7 @@ class Game:
     accent: str = "#E9B949"
     cover: str = ""
     favorite: bool = False
+    progress: str = ""
     playtime_seconds: int = 0
     sessions: int = 0
     last_played: str = ""
@@ -123,10 +124,22 @@ class Game:
             executable = f'"{executable}"'
         return " ".join([executable, *parts]).strip()
 
+    @property
+    def state(self) -> str:
+        if self.progress == "finished":
+            return "finished"
+        if self.progress == "playing":
+            return "playing"
+        if self.playtime_seconds > 0 or self.sessions > 0:
+            return "playing"
+        return "unplayed"
+
     def touch_play(self, seconds: int) -> None:
         self.playtime_seconds += max(1, int(seconds))
         self.sessions += 1
         self.last_played = now_iso()
+        if self.progress == "finished":
+            self.progress = "playing"
 
 
 @dataclass

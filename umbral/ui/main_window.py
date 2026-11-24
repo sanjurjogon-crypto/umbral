@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -28,11 +29,13 @@ from PySide6.QtWidgets import (
 from ..cover_worker import CoverWorker
 from ..covers import cover_needs_refresh, game_cover
 from .. import __version__
+from ..consoles import CONSOLE_EXTENSIONS
 from ..detect import DETECTION_VERSION
 from ..downloads import Download, emulator_for, mark_seen
 from ..launcher import LaunchError, ProcessWatcher, diagnostic_text, launch_game, validate
 from ..models import Emulator, Game, now_iso, slugify
 from ..paths import assets_dir, data_dir
+from ..relink import missing_parts, relink
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
 from ..store import Store
@@ -246,6 +249,7 @@ class MainWindow(QMainWindow):
             page.details_requested.connect(self._details)
             page.add_requested.connect(self._add_game)
         self.health.rescan_requested.connect(self._rescan)
+        self.health.relink_requested.connect(self._relink_game)
         self.settings_page.rescan_requested.connect(self._rescan)
         self.settings_page.scan_pc_requested.connect(self._scan_pc_games)
         self.settings_page.covers_requested.connect(self._refresh_covers)
@@ -253,6 +257,7 @@ class MainWindow(QMainWindow):
         self.settings_page.accent_changed.connect(self._set_accent)
         self.settings_page.style_changed.connect(self._set_style)
         self.settings_page.open_data.connect(self._open_data)
+        self.settings_page.export_diagnostics.connect(self._export_diagnostics)
         self.settings_page.check_updates.connect(lambda: self._check_updates(manual=True))
         self.settings_page.install_update.connect(self._install_update)
         self.settings_page.later_update.connect(self._postpone_update)
@@ -436,6 +441,8 @@ class MainWindow(QMainWindow):
         self.store.merge_detected(result.games)
         self.store.save_library()
         self.store.save_settings()
+        self._last_detection_log = list(getattr(result, "diagnostics", []))
+        self._write_detection_log(self._last_detection_log)
         self._refresh_all()
         if self._detect_announce:
             self.toast.show_message(
@@ -453,6 +460,53 @@ class MainWindow(QMainWindow):
         if self.detect_worker is not None:
             self.detect_worker.deleteLater()
             self.detect_worker = None
+
+    def _write_detection_log(self, lines: list[str]) -> None:
+        try:
+            path = data_dir() / "detection.log"
+            stamp = datetime.now().isoformat(timespec="seconds")
+            with path.open("w", encoding="utf-8") as handle:
+                handle.write(f"Umbral {__version__} · detección {stamp}\n")
+                for line in lines:
+                    handle.write(f"{line}\n")
+        except OSError:
+            pass
+
+    def _export_diagnostics(self) -> None:
+        from PySide6.QtCore import QStandardPaths
+
+        folder = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or str(data_dir())
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar diagnóstico",
+            str(Path(folder) / "umbral-diagnostico.txt"),
+            "Texto (*.txt)",
+        )
+        if not target:
+            return
+        lines = [
+            f"Umbral {__version__}",
+            f"Fecha: {datetime.now().isoformat(timespec='seconds')}",
+            f"Datos: {data_dir()}",
+            "",
+            "Biblioteca:",
+            f"  Juegos: {len(self.store.games)}",
+            "",
+            "Emuladores:",
+        ]
+        for emulator in self.emulators:
+            state = "OK" if emulator.found else "NO"
+            lines.append(f"  [{state}] {emulator.name}: {emulator.executable or emulator.note}")
+        lines.append("")
+        lines.append("Última detección:")
+        for line in getattr(self, "_last_detection_log", []):
+            lines.append(f"  {line}")
+        try:
+            Path(target).write_text("\n".join(lines), encoding="utf-8")
+        except OSError as exc:
+            self.toast.show_message(f"No se pudo guardar el diagnóstico: {exc}")
+            return
+        self.toast.show_message("Diagnóstico exportado.")
 
     def _refresh_all(self) -> None:
         self.home.refresh()
@@ -764,6 +818,50 @@ class MainWindow(QMainWindow):
 
     def _rescan(self) -> None:
         self._detect_and_merge(announce=True)
+
+    def _relink_game(self, game: Game) -> None:
+        parts = missing_parts(game)
+        if not parts:
+            self.toast.show_message("Ese juego ya tiene todas sus rutas en su sitio.")
+            return
+        part = parts[0]
+        label = "la ROM o carpeta del juego" if part == "rom" else "el ejecutable del emulador o del port"
+        if part == "rom":
+            allowed = CONSOLE_EXTENSIONS.get(game.system_key, ())
+            if game.system_key in {"pc", "ports"}:
+                path = QFileDialog.getExistingDirectory(
+                    self, f"Selecciona la carpeta para {game.title}"
+                )
+            elif allowed:
+                patterns = " ".join(f"*{extension}" for extension in allowed)
+                path, _ = QFileDialog.getOpenFileName(
+                    self,
+                    f"Selecciona {label} de {game.title}",
+                    "",
+                    f"Archivos compatibles ({patterns});;Todos los archivos (*)",
+                )
+            else:
+                path, _ = QFileDialog.getOpenFileName(
+                    self, f"Selecciona {label} de {game.title}", "", "Todos los archivos (*)"
+                )
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self, f"Selecciona {label} de {game.title}", "", "Ejecutables (*.exe);;Todos los archivos (*)"
+            )
+        if not path:
+            return
+        if not relink(game, part, path):
+            self.toast.show_message("Esa ruta no es válida para reasignar el juego.")
+            return
+        self.store.save_library()
+        self._refresh_all()
+        self.toast.show_message(f"Ruta actualizada para {game.title}.")
+        remaining = missing_parts(game)
+        if remaining:
+            self.toast.show_message(
+                f"Queda otra ruta por asignar en {game.title}. Pulsa Reasignar de nuevo.",
+                6000,
+            )
 
     def _scan_pc_games(self) -> None:
         if self.scan_worker is not None and self.scan_worker.isRunning():

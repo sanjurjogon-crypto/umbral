@@ -781,7 +781,16 @@ class StatTile(QFrame):
 
 
 class HealthRow(QFrame):
-    def __init__(self, level: str, title: str, detail: str, parent: Optional[QWidget] = None) -> None:
+    action_clicked = Signal()
+
+    def __init__(
+        self,
+        level: str,
+        title: str,
+        detail: str,
+        action_text: str = "",
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("health")
         style = active_style()
@@ -795,7 +804,7 @@ class HealthRow(QFrame):
         body = QHBoxLayout(self)
         body.setContentsMargins(16, 13, 16, 13)
         body.setSpacing(12)
-        dot = QLabel("●")
+        dot = QLabel("?")
         dot.setStyleSheet(f"color: {color}; font-size: 12px;")
         body.addWidget(dot)
         text = QVBoxLayout()
@@ -808,6 +817,12 @@ class HealthRow(QFrame):
         text.addWidget(title_label)
         text.addWidget(detail_label)
         body.addLayout(text, 1)
+        if action_text:
+            button = QPushButton(action_text)
+            button.setObjectName("ghost")
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(self.action_clicked)
+            body.addWidget(button)
 
 
 class EmptyState(QWidget):

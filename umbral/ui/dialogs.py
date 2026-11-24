@@ -154,6 +154,11 @@ class GameDetailDialog(QDialog):
         self.favorite_button.setCursor(Qt.PointingHandCursor)
         self.favorite_button.clicked.connect(self._toggle_favorite)
         self._update_favorite_button()
+        self.progress_button = QPushButton()
+        self.progress_button.setObjectName("ghost")
+        self.progress_button.setCursor(Qt.PointingHandCursor)
+        self.progress_button.clicked.connect(self._toggle_progress)
+        self._update_progress_button()
         folder = QPushButton("Abrir carpeta")
         folder.setObjectName("ghost")
         folder.setCursor(Qt.PointingHandCursor)
@@ -173,6 +178,7 @@ class GameDetailDialog(QDialog):
         buttons.addWidget(play)
         buttons.addWidget(edit)
         buttons.addWidget(self.favorite_button)
+        buttons.addWidget(self.progress_button)
         buttons.addStretch(1)
         buttons.addWidget(folder)
         buttons.addWidget(remove)
@@ -218,6 +224,16 @@ class GameDetailDialog(QDialog):
     def _toggle_favorite(self) -> None:
         self.game.favorite = not self.game.favorite
         self._update_favorite_button()
+        self.changed.emit()
+
+    def _update_progress_button(self) -> None:
+        text = "✓  Terminado" if self.game.progress == "finished" else "Marcar terminado"
+        self.progress_button.setText(text)
+        self.progress_button.setMinimumWidth(self.progress_button.sizeHint().width() + 10)
+
+    def _toggle_progress(self) -> None:
+        self.game.progress = "" if self.game.progress == "finished" else "finished"
+        self._update_progress_button()
         self.changed.emit()
 
     def _play(self) -> None:

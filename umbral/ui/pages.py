@@ -52,6 +52,13 @@ SORT_OPTIONS = [
     ("year", "Año"),
 ]
 
+STATE_OPTIONS = [
+    ("", "Todos"),
+    ("unplayed", "Sin jugar"),
+    ("playing", "En curso"),
+    ("finished", "Terminados"),
+]
+
 SORT_DEFAULT_ASC = {
     "title": True,
     "played": False,
@@ -188,6 +195,7 @@ class LibraryPage(QWidget):
         self._query = ""
         self._favorites_only = False
         self._favorites_filter = ""
+        self._state_filter = ""
         self._sort_key = str(store.settings.get("sort_key", "title"))
         self._sort_asc = bool(store.settings.get("sort_asc", True))
         if self._sort_key not in SORT_DEFAULT_ASC:
@@ -232,9 +240,16 @@ class LibraryPage(QWidget):
         self.order_button.setObjectName("ghost")
         self.order_button.setCursor(Qt.PointingHandCursor)
         self.order_button.clicked.connect(self._toggle_order)
+        self.state_combo = QComboBox()
+        self.state_combo.setCursor(Qt.PointingHandCursor)
+        for key, label in STATE_OPTIONS:
+            self.state_combo.addItem(label, key)
+        self.state_combo.currentIndexChanged.connect(self._state_changed)
         sort_row.addWidget(sort_label)
         sort_row.addWidget(self.sort_combo)
         sort_row.addWidget(self.order_button)
+        sort_row.addSpacing(10)
+        sort_row.addWidget(self.state_combo)
         header_body.addLayout(sort_row)
         self._sync_order_button()
 
@@ -361,6 +376,10 @@ class LibraryPage(QWidget):
         self._sync_order_button()
         self.refresh(reset=True)
 
+    def _state_changed(self, _index: int) -> None:
+        self._state_filter = str(self.state_combo.currentData() or "")
+        self.refresh(reset=True)
+
     def _save_sort(self) -> None:
         self.store.settings["sort_key"] = self._sort_key
         self.store.settings["sort_asc"] = self._sort_asc
@@ -376,6 +395,8 @@ class LibraryPage(QWidget):
         active_filter = self.current_filter()
         if active_filter:
             games = [game for game in games if game.system_key == active_filter]
+        if self._state_filter:
+            games = [game for game in games if game.state == self._state_filter]
         query = self._query.strip().lower()
         if query:
             games = [
@@ -552,6 +573,7 @@ class StatsPage(QWidget):
 
 class HealthPage(QWidget):
     rescan_requested = Signal()
+    relink_requested = Signal(object)
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -580,13 +602,14 @@ class HealthPage(QWidget):
         header.addWidget(rescan)
         self.body.addLayout(header)
 
-        issues: list[tuple[str, str, str]] = []
+        issues: list[tuple[str, str, str, Optional[Game]]] = []
         for game in self.store.games:
-            for message in validate(game):
-                issues.append(("error", game.title, message))
+            messages = validate(game)
+            if messages:
+                issues.append(("error", game.title, " ".join(messages), game))
         for emulator in self.emulators:
             if not emulator.found:
-                issues.append(("warn", emulator.name, emulator.note or "No se encontró el ejecutable."))
+                issues.append(("warn", emulator.name, emulator.note or "No se encontró el ejecutable.", None))
 
         for emulator in self.emulators:
             if emulator.key in ("hookshot", "retroarch"):
@@ -597,6 +620,7 @@ class HealthPage(QWidget):
                         "info",
                         emulator.name,
                         f"Emulador detectado, pero no hay juegos de {emulator.system} en las carpetas escaneadas.",
+                        None,
                     )
                 )
 
@@ -610,6 +634,7 @@ class HealthPage(QWidget):
                         "warn",
                         emulator.name,
                         "Detectado, pero falta el firmware. Instálalo desde el propio emulador.",
+                        None,
                     )
                 )
 
@@ -618,8 +643,15 @@ class HealthPage(QWidget):
                 HealthRow("ok", "Todo en orden", "Los ejecutables y los archivos de tus juegos están en su sitio.")
             )
         else:
-            for level, title_text, detail in issues:
-                self.body.addWidget(HealthRow(level, title_text, detail))
+            for level, title_text, detail, game in issues:
+                if game is not None:
+                    row = HealthRow(level, title_text, detail, "Reasignar")
+                    row.action_clicked.connect(
+                        lambda _checked=False, target=game: self.relink_requested.emit(target)
+                    )
+                    self.body.addWidget(row)
+                else:
+                    self.body.addWidget(HealthRow(level, title_text, detail))
 
         self.body.addWidget(SectionHeader("Emuladores y ports"))
         for emulator in self.emulators:
@@ -638,6 +670,7 @@ class SettingsPage(QWidget):
     covers_requested = Signal()
     manage_emulators = Signal()
     open_data = Signal()
+    export_diagnostics = Signal()
     check_updates = Signal()
     install_update = Signal()
     later_update = Signal()
@@ -893,8 +926,13 @@ class SettingsPage(QWidget):
         rescan.setObjectName("ghost")
         rescan.setCursor(Qt.PointingHandCursor)
         rescan.clicked.connect(self.rescan_requested)
+        export = QPushButton("Exportar diagnóstico")
+        export.setObjectName("ghost")
+        export.setCursor(Qt.PointingHandCursor)
+        export.clicked.connect(self.export_diagnostics)
         data_row.addWidget(open_data)
         data_row.addWidget(rescan)
+        data_row.addWidget(export)
         data_row.addStretch(1)
         self.body.addLayout(data_row)
         note = QLabel(
