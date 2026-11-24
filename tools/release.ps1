@@ -2,15 +2,20 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Notes = "",
     [switch]$Latest,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Yes
 )
 
 $ErrorActionPreference = "Stop"
-$root = "C:\Users\sanju\Desktop\umbral"
+$root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root "dist"
 $exe = Join-Path $dist "Umbral.exe"
 $shaFile = Join-Path $dist "Umbral.exe.sha256"
 $gh = Join-Path $env:LOCALAPPDATA "Programs\gh\bin\gh.exe"
+if (-not (Test-Path -LiteralPath $gh)) {
+    $command = Get-Command gh -ErrorAction SilentlyContinue
+    if ($null -ne $command) { $gh = $command.Source }
+}
 $repo = "sanjurjogon-crypto/umbral"
 
 if ($Version -notmatch '^v?\d+(\.\d+){1,3}$') {
@@ -59,6 +64,7 @@ $sourceItems = @(
     "requirements.txt",
     "requirements-dev.txt",
     "README.md",
+    "Umbral.spec",
     ".gitignore"
 )
 foreach ($item in $sourceItems) {
@@ -69,6 +75,15 @@ foreach ($item in $sourceItems) {
 }
 git -C $root diff --cached --quiet
 if ($LASTEXITCODE -ne 0) {
+    $staged = @(git -C $root diff --cached --name-only)
+    Write-Host "Cambios que entraran en el commit de $tag :"
+    $staged | ForEach-Object { Write-Host "  $_" }
+    if (-not $Yes) {
+        $answer = Read-Host "Continuar con la publicacion? (s/N)"
+        if ($answer -notmatch '^[sSyY]') {
+            throw "Publicacion cancelada. Revisa el arbol o vuelve a lanzar con -Yes."
+        }
+    }
     git -C $root commit -m "Umbral $tag"
 }
 $headCommit = (git -C $root rev-parse HEAD).Trim()

@@ -59,6 +59,29 @@ STATE_OPTIONS = [
     ("finished", "Terminados"),
 ]
 
+HOME_SHELVES = [
+    ("En curso", "playing"),
+    ("Sin jugar", "unplayed"),
+    ("Terminados", "finished"),
+]
+
+
+def shelf_games(games: list[Game], state_key: str, limit: int = 8) -> list[Game]:
+    selected = [game for game in games if game.state == state_key]
+    if state_key == "unplayed":
+        selected.sort(key=lambda game: game.added_at, reverse=True)
+    elif state_key == "finished":
+        selected.sort(
+            key=lambda game: (game.last_played, game.playtime_seconds),
+            reverse=True,
+        )
+    else:
+        selected.sort(
+            key=lambda game: (game.playtime_seconds, game.last_played),
+            reverse=True,
+        )
+    return selected[:limit]
+
 SORT_DEFAULT_ASC = {
     "title": True,
     "played": False,
@@ -127,17 +150,23 @@ class HomePage(QWidget):
         featured = self._featured(games)
         self.hero.set_game(featured)
 
-        recent = sorted((game for game in games if game.last_played), key=lambda game: game.last_played, reverse=True)
-        if featured is not None:
-            recent = [game for game in recent if game.id != featured.id]
-        recent = recent[:8]
-        favorites = [game for game in games if game.favorite][:8]
-        added = sorted(games, key=lambda game: game.added_at, reverse=True)[:8]
+        pool = [game for game in games if featured is None or game.id != featured.id]
 
+        recent = sorted(
+            (game for game in pool if game.last_played),
+            key=lambda game: game.last_played,
+            reverse=True,
+        )[:8]
         if recent:
             self._add_row("Recientes", recent)
+        for label, state_key in HOME_SHELVES:
+            shelf = shelf_games(pool, state_key)
+            if shelf:
+                self._add_row(label, shelf)
+        favorites = [game for game in pool if game.favorite][:8]
         if favorites:
             self._add_row("Favoritos", favorites)
+        added = sorted(pool, key=lambda game: game.added_at, reverse=True)[:8]
         if added:
             self._add_row("Añadidos recientes", added)
 
