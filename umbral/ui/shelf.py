@@ -1521,7 +1521,10 @@ class ShelfCanvas(QWidget):
         available = band.width() - badge_size - margin * 3.4
 
         source = (item.game.source or "").lower()
-        if source == "steam":
+        sys_key = (item.game.system_key or "").lower()
+        if sys_key == "ports":
+            name = (item.game.emulator or "PORT").upper()
+        elif source == "steam":
             name = "STEAM"
         elif source == "epic":
             name = "EPIC GAMES"
