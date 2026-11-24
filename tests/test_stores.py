@@ -134,3 +134,11 @@ def test_store_statuses_reports_all_stores(monkeypatch, tmp_path: Path) -> None:
         ("epic", "Epic Games", False),
         ("gog", "GOG", False),
     ]
+
+
+def test_steam_launcher_falls_back_to_steam_sh_on_posix(tmp_path: Path) -> None:
+    root = tmp_path / "steam"
+    root.mkdir()
+    launcher = root / "steam.sh"
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert stores._steam_launcher([root], is_windows=False) == launcher

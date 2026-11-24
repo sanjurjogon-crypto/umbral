@@ -37,7 +37,7 @@ from ..detect import DETECTION_VERSION, working_dir_for
 from ..downloads import Download, emulator_for, mark_seen
 from ..launcher import LaunchError, ProcessWatcher, SteamWatcher, diagnostic_text, launch_game, steam_app_id, validate
 from ..models import Emulator, Game, now_iso, slugify
-from ..paths import assets_dir, data_dir, path_key as _path_key
+from ..paths import assets_dir, data_dir, executable_file_filter, path_key as _path_key
 from ..relink import missing_parts, relink
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
@@ -1026,7 +1026,7 @@ class MainWindow(QMainWindow):
                 )
         else:
             path, _ = QFileDialog.getOpenFileName(
-                self, f"Selecciona {label} de {game.title}", "", "Ejecutables (*.exe);;Todos los archivos (*)"
+                self, f"Selecciona {label} de {game.title}", "", executable_file_filter()
             )
         if not path:
             return
@@ -1398,8 +1398,9 @@ class MainWindow(QMainWindow):
             self._check_updates(manual=True)
             return
         if not getattr(sys, "frozen", False):
+            binary_label = "Umbral.exe" if os.name == "nt" else "el ejecutable compilado de Umbral"
             message = (
-                "La actualización automática solo funciona desde Umbral.exe "
+                f"La actualización automática solo funciona desde {binary_label} "
                 "(ahora mismo estás ejecutando main.py con Python)."
             )
             if self.update_banner.isVisible():

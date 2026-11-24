@@ -43,13 +43,34 @@ def test_info_from_payload_extracts_exe_and_sha() -> None:
                 "name": "Umbral.exe.sha256",
                 "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral.exe.sha256",
             },
+            {
+                "name": "Umbral-linux-x86_64",
+                "size": 4096,
+                "digest": "sha256:" + "b" * 64,
+                "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral-linux-x86_64",
+            },
+            {
+                "name": "Umbral-linux-x86_64.sha256",
+                "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral-linux-x86_64.sha256",
+            },
         ],
     }
-    info = _info_from_payload(payload)
-    assert info is not None
-    assert info.version == "8.22.0"
-    assert info.digest == "sha256:" + "a" * 64
-    assert info.sha_url.endswith("Umbral.exe.sha256")
+    win_info = _info_from_payload(payload, asset_name="Umbral.exe")
+    assert win_info is not None
+    assert win_info.version == "8.22.0"
+    assert win_info.asset_name == "Umbral.exe"
+    assert win_info.digest == "sha256:" + "a" * 64
+    assert win_info.sha_url.endswith("Umbral.exe.sha256")
+
+    linux_info = _info_from_payload(payload, asset_name="Umbral-linux-x86_64")
+    assert linux_info is not None
+    assert linux_info.asset_name == "Umbral-linux-x86_64"
+    assert linux_info.digest == "sha256:" + "b" * 64
+    assert linux_info.sha_url.endswith("Umbral-linux-x86_64.sha256")
+
+    default_info = _info_from_payload(payload)
+    assert default_info is not None
+    assert default_info.asset_name == updater.expected_asset_name()
 
 
 def test_download_update_verifies_sha_and_rejects_missing_remote_sha(
@@ -59,7 +80,7 @@ def test_download_update_verifies_sha_and_rejects_missing_remote_sha(
     expected_sha = hashlib.sha256(payload).hexdigest()
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
-    def fake_download(url, target: Path, expected_size, progress, cancel_event) -> str:
+    def fake_download(url, target: Path, expected_size, progress, cancel_event, is_pe: bool = True) -> str:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
         return expected_sha
@@ -152,6 +173,44 @@ def test_fetch_covers_respects_stop_event(monkeypatch, tmp_path: Path) -> None:
     assert results == {}
     assert errors == {}
     assert called == 0
+
+
+def test_posix_replacement_script_and_elf_download(monkeypatch, tmp_path: Path) -> None:
+    target = tmp_path / "Umbral-linux-x86_64"
+    new_bin = tmp_path / "Umbral-8.27.0-linux"
+    script = updater._posix_replacement_script(target, new_bin, 9876)
+    assert "PID=9876" in script
+    assert "--relaunch" in script
+    assert "chmod 755" in script
+    assert "umbral-update.log" in script
+
+    elf_payload = b"\x7fELF" + b"\x00" * 2048
+    expected_sha = hashlib.sha256(elf_payload).hexdigest()
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
+
+    def fake_download(url, target_path: Path, expected_size, progress, cancel_event, is_pe=True) -> str:
+        assert is_pe is False
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(elf_payload)
+        return expected_sha
+
+    monkeypatch.setattr(updater, "_download_bytes", fake_download)
+    monkeypatch.setattr(updater, "_read_sha_file", lambda _url: expected_sha)
+    info = UpdateInfo(
+        version="8.27.0",
+        tag="v8.27.0",
+        notes="",
+        asset_url="https://github.com/example/Umbral-linux-x86_64",
+        asset_name="Umbral-linux-x86_64",
+        size=len(elf_payload),
+        digest="",
+        sha_url="https://github.com/example/Umbral-linux-x86_64.sha256",
+        page_url="https://github.com/example/releases/tag/v8.27.0",
+        published_at="",
+    )
+    out = download_update(info)
+    assert out.name == "Umbral-8.27.0-linux"
+    assert out.read_bytes() == elf_payload
 
 
 def test_clean_subprocess_env_strips_pyinstaller_vars() -> None:

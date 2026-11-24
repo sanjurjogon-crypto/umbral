@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 from pathlib import Path
 from typing import Iterable
 
@@ -65,22 +66,40 @@ def steam_roots() -> list[Path]:
     except ImportError:
         pass
 
-    for base in (
-        Path(r"C:\Program Files (x86)\Steam"),
-        Path(r"C:\Program Files\Steam"),
-        Path(r"C:\Steam"),
-    ):
-        if base not in candidates:
-            candidates.append(base)
+    if os.name == "nt":
+        for base in (
+            Path(r"C:\Program Files (x86)\Steam"),
+            Path(r"C:\Program Files\Steam"),
+            Path(r"C:\Steam"),
+        ):
+            if base not in candidates:
+                candidates.append(base)
+    else:
+        home = Path.home()
+        for base in (
+            home / ".local" / "share" / "Steam",
+            home / ".steam" / "steam",
+            home / ".steam" / "debian-installation",
+            home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+            home / "snap" / "steam" / "common" / ".local" / "share" / "Steam",
+        ):
+            if base not in candidates:
+                candidates.append(base)
 
     libraries: list[Path] = []
+    seen_real: set[str] = set()
     for candidate in candidates:
         if not candidate.is_dir():
             continue
         steamapps = candidate / "steamapps"
         if not steamapps.is_dir():
             continue
-        if candidate not in libraries:
+        try:
+            real_key = os.path.normcase(os.path.realpath(candidate))
+        except OSError:
+            real_key = os.path.normcase(str(candidate))
+        if real_key not in seen_real:
+            seen_real.add(real_key)
             libraries.append(candidate)
         vdf = steamapps / "libraryfolders.vdf"
         if not vdf.is_file():
@@ -90,7 +109,12 @@ def steam_roots() -> list[Path]:
         except OSError:
             continue
         for extra in _vdf_library_paths(text):
-            if extra not in libraries:
+            try:
+                extra_key = os.path.normcase(os.path.realpath(extra))
+            except OSError:
+                extra_key = os.path.normcase(str(extra))
+            if extra_key not in seen_real:
+                seen_real.add(extra_key)
                 libraries.append(extra)
     return libraries
 
@@ -100,13 +124,28 @@ def _acf_value(text: str, key: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _steam_launcher(roots: list[Path], is_windows: bool | None = None) -> Path | None:
+    win = (os.name == "nt") if is_windows is None else is_windows
+    exe = next((root / "steam.exe" for root in roots if (root / "steam.exe").is_file()), None)
+    if exe is not None or win:
+        return exe
+    for candidate in (
+        *(root / "steam.sh" for root in roots),
+        Path("/usr/bin/steam"),
+        Path("/usr/games/steam"),
+        Path("/var/lib/flatpak/exports/bin/com.valvesoftware.Steam"),
+        Path.home() / ".local" / "share" / "flatpak" / "exports" / "bin" / "com.valvesoftware.Steam",
+    ):
+        if candidate.is_file():
+            return candidate
+    which = shutil.which("steam")
+    return Path(which) if which else None
+
+
 def steam_games() -> list[Game]:
     games: dict[str, Game] = {}
     roots = steam_roots()
-    steam_exe = next(
-        (root / "steam.exe" for root in roots if (root / "steam.exe").is_file()),
-        None,
-    )
+    steam_exe = _steam_launcher(roots)
     if steam_exe is None:
         return []
     for library in roots:
@@ -201,8 +240,20 @@ EPIC_SKIP_FOLDERS = {
 
 
 def epic_manifests_dir() -> Path:
-    base = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
-    return base / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    program_data = os.environ.get("PROGRAMDATA", "").strip()
+    if program_data:
+        return Path(program_data) / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    if os.name == "nt":
+        return Path(r"C:\ProgramData") / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    return (
+        Path.home()
+        / ".local"
+        / "share"
+        / "Epic"
+        / "EpicGamesLauncher"
+        / "Data"
+        / "Manifests"
+    )
 
 
 def _epic_compact(value: str) -> str:
@@ -444,7 +495,7 @@ def _gog_info_game(info_file: Path) -> Game | None:
     if not exe_path.is_file():
         return None
     raw_args = str(chosen.get("arguments") or "").strip()
-    arguments = shlex.split(raw_args, posix=False) if raw_args else []
+    arguments = shlex.split(raw_args, posix=(os.name != "nt")) if raw_args else []
     rel_wd = str(chosen.get("workingDir") or "").strip()
     working_dir = (folder / rel_wd) if rel_wd and not Path(rel_wd).is_absolute() else (Path(rel_wd) if rel_wd else exe_path.parent)
     if not working_dir.is_dir():
@@ -530,11 +581,19 @@ def _gog_registry_games() -> list[Game]:
 
 
 def gog_roots(scan_folders: Iterable[str] | None = None) -> list[Path]:
-    candidates = [
-        Path(r"C:\GOG Games"),
-        Path(r"C:\Program Files (x86)\GOG Galaxy\Games"),
-        Path(r"C:\Program Files\GOG Galaxy\Games"),
-    ]
+    if os.name == "nt":
+        candidates = [
+            Path(r"C:\GOG Games"),
+            Path(r"C:\Program Files (x86)\GOG Galaxy\Games"),
+            Path(r"C:\Program Files\GOG Galaxy\Games"),
+        ]
+    else:
+        home = Path.home()
+        candidates = [
+            home / "GOG Games",
+            home / "Games" / "GOG",
+            home / "Games" / "Heroic",
+        ]
     for folder in scan_folders or []:
         if folder:
             candidates.append(Path(folder))
