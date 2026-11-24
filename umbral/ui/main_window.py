@@ -1322,12 +1322,16 @@ class MainWindow(QMainWindow):
             )
             if self.update_banner.isVisible():
                 self.update_banner.show_error(message)
+            self.settings_page.set_update_error(message)
             self.toast.show_message(message, 6000)
             return
         try:
             self._download_update_inline(info)
         except Exception as exc:  # noqa: BLE001 - un fallo aquí no debe dejar el botón muerto
-            self.update_banner.show_error(f"No se pudo iniciar la descarga: {exc}")
+            message = f"No se pudo iniciar la descarga: {exc}"
+            self.update_banner.show_error(message)
+            self.settings_page.set_update_error(message)
+            self.toast.show_message(message, 6000)
 
     def _download_update_inline(self, info) -> None:
         if self.download_worker is not None and self.download_worker.isRunning():
@@ -1339,9 +1343,11 @@ class MainWindow(QMainWindow):
         if not self.update_banner.isVisible():
             self.update_banner.show_update(info.version, getattr(info, "notes", ""))
         self.update_banner.show_progress(0, 0)
+        self.settings_page.set_update_downloading(0, 0)
         self.toast.show_message(f"Descargando Umbral {info.version}…", 4000)
         download = DownloadWorker(info, self)
         download.progress.connect(self.update_banner.show_progress)
+        download.progress.connect(self.settings_page.set_update_downloading)
         download.done.connect(self._on_update_downloaded)
         download.failed.connect(self._on_update_download_failed)
         download.finished.connect(self._clear_download_worker)
@@ -1362,6 +1368,8 @@ class MainWindow(QMainWindow):
             else:
                 self.update_banner.show_update("")
         self.update_banner.show_error(message)
+        self.settings_page.set_update_error(message)
+        self.toast.show_message(message, 6000)
 
     def _on_update_downloaded(self, path: str) -> None:
         try:
@@ -1371,7 +1379,10 @@ class MainWindow(QMainWindow):
         try:
             apply_update(Path(path))
         except UpdateError as exc:
-            self.update_banner.show_error(str(exc))
+            message = str(exc)
+            self.update_banner.show_error(message)
+            self.settings_page.set_update_error(message)
+            self.toast.show_message(message, 6000)
             return
         self._updating = True
         self.store.save_library()

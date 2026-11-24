@@ -74,3 +74,49 @@ def test_postpone_persists_dismissed_version_across_restore(monkeypatch, tmp_pat
     window.close()
     window.deleteLater()
     app.processEvents()
+
+
+def test_settings_page_shows_download_progress_and_error(monkeypatch, tmp_path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    import umbral.store as store_mod
+    from umbral.ui.pages import SettingsPage
+
+    monkeypatch.setattr(store_mod, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_mod, "settings_file", lambda: tmp_path / "settings.json")
+    app = QApplication.instance() or QApplication([])
+    store = store_mod.Store()
+    page = SettingsPage(store)
+    info = UpdateInfo(
+        version="8.23.1",
+        tag="v8.23.1",
+        notes="Corrección de actualización",
+        asset_url="https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.23.1/Umbral.exe",
+        asset_name="Umbral.exe",
+        size=1024,
+        digest="",
+        sha_url="",
+        page_url="https://github.com/sanjurjogon-crypto/umbral/releases/tag/v8.23.1",
+        published_at="",
+    )
+    page.set_update_available(info)
+    assert page._update_install_btn is not None
+    assert page._update_install_btn.text() == "Actualizar ahora"
+
+    page.set_update_downloading(5 * 1024 * 1024, 10 * 1024 * 1024)
+    assert page._update_install_btn.text() == "Descargando…"
+    assert not page._update_install_btn.isEnabled()
+    assert "50 %" in page._update_status_note.text()
+
+    page.refresh()
+    assert page._update_install_btn is not None
+    assert not page._update_install_btn.isEnabled()
+    assert "50 %" in page._update_status_note.text()
+
+    page.set_update_error("Fallo de red")
+    assert page._update_install_btn.text() == "Reintentar"
+    assert page._update_install_btn.isEnabled()
+    assert page._update_status_note.text() == "Fallo de red"
+
+    page.deleteLater()
+    app.processEvents()

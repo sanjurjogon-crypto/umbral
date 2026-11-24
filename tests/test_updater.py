@@ -115,10 +115,81 @@ def test_replacement_script_waits_stages_verifies_and_logs(tmp_path: Path) -> No
     script = _replacement_script(target, new, 4321)
     assert "$pidToWait = 4321" in script
     assert "$staged =" in script
+    assert "Target-Processes-Running" in script
+    assert "Move-WithRetry" in script
     assert "umbral-update.log" in script
     assert "sigue abierto" in script
     assert "HasExited" in script
     assert "Restaurado el ejecutable anterior" in script
+
+
+def test_clean_subprocess_env_strips_pyinstaller_vars() -> None:
+    cleaned = updater._clean_subprocess_env(
+        {
+            "PATH": "C:\\Windows",
+            "_MEIPASS": "C:\\temp\\_MEI1",
+            "_MEIPASS2": "C:\\temp\\_MEI2",
+            "_PYI_ARCHIVE_FILE": "C:\\app\\Umbral.exe",
+            "_PYI_PARENT_PROCESS_LEVEL": "1",
+            "TCL_LIBRARY": "C:\\temp\\_MEI1\\tcl",
+            "TK_LIBRARY": "C:\\temp\\_MEI1\\tk",
+            "LOCALAPPDATA": "C:\\Users\\x\\AppData\\Local",
+        }
+    )
+    assert cleaned["PATH"] == "C:\\Windows"
+    assert cleaned["LOCALAPPDATA"] == "C:\\Users\\x\\AppData\\Local"
+    for key in ("_MEIPASS", "_MEIPASS2", "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL", "TCL_LIBRARY", "TK_LIBRARY"):
+        assert key not in cleaned
+
+
+def test_download_bytes_retries_transient_error_and_reports_progress(monkeypatch, tmp_path: Path) -> None:
+    from urllib.error import URLError
+
+    payload = b"MZ" + b"x" * 2048
+    calls = 0
+
+    class FakeResponse:
+        headers = {"Content-Length": str(len(payload))}
+
+        def __init__(self) -> None:
+            self._offset = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def read(self, size: int) -> bytes:
+            if self._offset >= len(payload):
+                return b""
+            chunk = payload[self._offset : self._offset + size]
+            self._offset += len(chunk)
+            return chunk
+
+    def fake_urlopen(request, timeout=18.0):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise URLError("temporary glitch")
+        return FakeResponse()
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    events: list[tuple[int, int]] = []
+    target = tmp_path / "Umbral-8.23.1.exe"
+    sha = updater._download_bytes(
+        "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.23.1/Umbral.exe",
+        target,
+        len(payload),
+        lambda done, total: events.append((done, total)),
+        None,
+    )
+    assert calls == 2
+    assert target.read_bytes() == payload
+    assert sha == hashlib.sha256(payload).hexdigest()
+    assert events[0] == (0, len(payload))
+    assert events[-1] == (len(payload), len(payload))
+    assert updater.format_download_progress(5 * 1024 * 1024, 10 * 1024 * 1024) == "50 % · 5,0 de 10,0 MB"
 
 
 def test_untrusted_asset_url_is_rejected(tmp_path: Path) -> None:

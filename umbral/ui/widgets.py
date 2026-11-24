@@ -975,20 +975,20 @@ class UpdateBanner(QFrame):
         self._animate_in()
 
     def show_progress(self, done: int, total: int) -> None:
+        from ..updater import format_download_progress
+
         self.title.setText(f"Descargando Umbral {self._version}…")
         self.line1.hide()
         self.line2.hide()
-        if total > 0:
-            percent = min(100, int(done * 100 / total))
-            done_mb = f"{done / (1024 * 1024):.1f}".replace(".", ",")
-            total_mb = f"{total / (1024 * 1024):.1f}".replace(".", ",")
-            self.detail.setText(f"{percent} % · {done_mb} de {total_mb} MB")
-        else:
-            done_mb = f"{done / (1024 * 1024):.1f}".replace(".", ",")
-            self.detail.setText(f"{done_mb} MB")
+        self.detail.setText(format_download_progress(done, total))
+        self.detail.show()
         self.action.setText("Descargando…")
         self.action.setEnabled(False)
         self.later.setEnabled(False)
+        if not self.isVisible():
+            self.show()
+            self._effect.setOpacity(1.0)
+        self.raise_()
         self._refit()
 
     def show_error(self, message: str) -> None:
@@ -996,15 +996,25 @@ class UpdateBanner(QFrame):
         self.line1.hide()
         self.line2.hide()
         self.detail.setText(message)
+        self.detail.show()
         self.action.setText("Reintentar")
         self.action.setEnabled(True)
         self.later.setEnabled(True)
+        if not self.isVisible():
+            self.show()
+            self._effect.setOpacity(1.0)
+        self.raise_()
         self._refit()
 
     def _refit(self) -> None:
         self.adjustSize()
-        if self.isVisible():
-            self.reposition()
+        if not self.isVisible():
+            return
+        self._target = self._target_position()
+        if self._slide is not None and self._slide.state() == QPropertyAnimation.Running:
+            self._slide.setEndValue(self._target)
+            return
+        self.move(self._target)
 
     def hideEvent(self, event) -> None:  # noqa: N802 - API de Qt
         if self._fade is not None:

@@ -187,6 +187,55 @@ def _read_sha_file(url: str) -> str:
     return match.group(1).lower() if match else ""
 
 
+def format_download_progress(done: int, total: int) -> str:
+    done_mb = f"{done / (1024 * 1024):.1f}".replace(".", ",")
+    if total > 0:
+        percent = min(100, int(done * 100 / total))
+        total_mb = f"{total / (1024 * 1024):.1f}".replace(".", ",")
+        return f"{percent} % · {done_mb} de {total_mb} MB"
+    return f"{done_mb} MB"
+
+
+def _download_once(
+    url: str,
+    temporary: Path,
+    target: Path,
+    expected_size: int,
+    progress: Optional[Callable[[int, int], None]],
+    cancel_event: Optional[threading.Event],
+) -> str:
+    request = Request(url, headers={"User-Agent": USER_AGENT})
+    digest = hashlib.sha256()
+    done = 0
+    with urlopen(request, timeout=18.0) as response:
+        total = int(response.headers.get("Content-Length") or expected_size or 0)
+        if progress is not None:
+            progress(0, total)
+        with temporary.open("wb") as handle:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise UpdateCancelled()
+                chunk = response.read(65_536)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                digest.update(chunk)
+                done += len(chunk)
+                if progress is not None:
+                    progress(done, total)
+    if done < 1024:
+        raise UpdateError("La descarga quedó vacía.")
+    if expected_size and done != expected_size:
+        raise UpdateError("La descarga no coincide con el tamaño esperado.")
+    if total and done != total:
+        raise UpdateError("La descarga quedó incompleta.")
+    with temporary.open("rb") as handle:
+        if handle.read(2) != b"MZ":
+            raise UpdateError("El archivo descargado no es un ejecutable válido.")
+    os.replace(temporary, target)
+    return digest.hexdigest()
+
+
 def _download_bytes(
     url: str,
     target: Path,
@@ -194,48 +243,28 @@ def _download_bytes(
     progress: Optional[Callable[[int, int], None]],
     cancel_event: Optional[threading.Event],
 ) -> str:
-    request = Request(url, headers={"User-Agent": USER_AGENT})
     temporary = target.with_name(target.name + ".part")
-    digest = hashlib.sha256()
-    done = 0
-    try:
-        with urlopen(request, timeout=30.0) as response:
-            total = int(response.headers.get("Content-Length") or expected_size or 0)
-            with temporary.open("wb") as handle:
-                while True:
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise UpdateCancelled()
-                    chunk = response.read(262_144)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    digest.update(chunk)
-                    done += len(chunk)
-                    if progress is not None:
-                        progress(done, total)
-        if done < 1024:
-            raise UpdateError("La descarga quedó vacía.")
-        if expected_size and done != expected_size:
-            raise UpdateError("La descarga no coincide con el tamaño esperado.")
-        if total and done != total:
-            raise UpdateError("La descarga quedó incompleta.")
-        with temporary.open("rb") as handle:
-            if handle.read(2) != b"MZ":
-                raise UpdateError("El archivo descargado no es un ejecutable válido.")
-        os.replace(temporary, target)
-    except UpdateCancelled:
-        temporary.unlink(missing_ok=True)
-        raise
-    except HTTPError as exc:
-        temporary.unlink(missing_ok=True)
-        raise UpdateError(f"No se pudo descargar la actualización (error {exc.code}).") from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        temporary.unlink(missing_ok=True)
-        raise UpdateError("No se pudo descargar la actualización. Revisa tu conexión.") from exc
-    finally:
-        if temporary.exists():
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return _download_once(url, temporary, target, expected_size, progress, cancel_event)
+        except UpdateCancelled:
             temporary.unlink(missing_ok=True)
-    return digest.hexdigest()
+            raise
+        except HTTPError as exc:
+            temporary.unlink(missing_ok=True)
+            raise UpdateError(f"No se pudo descargar la actualización (error {exc.code}).") from exc
+        except UpdateError:
+            temporary.unlink(missing_ok=True)
+            raise
+        except (URLError, TimeoutError, OSError) as exc:
+            temporary.unlink(missing_ok=True)
+            if attempt >= max_attempts or (cancel_event is not None and cancel_event.is_set()):
+                raise UpdateError("No se pudo descargar la actualización. Revisa tu conexión.") from exc
+        finally:
+            if temporary.exists():
+                temporary.unlink(missing_ok=True)
+    raise UpdateError("No se pudo descargar la actualización. Revisa tu conexión.")
 
 
 def download_update(
@@ -320,25 +349,50 @@ function Write-Log($message) {{
         }}
     }} catch {{}}
 }}
+function Target-Processes-Running {{
+    if ($null -ne (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {{
+        return $true
+    }}
+    try {{
+        $normTarget = [System.IO.Path]::GetFullPath($target)
+        $matches = Get-Process -ErrorAction SilentlyContinue | Where-Object {{
+            try {{ $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq $normTarget) }} catch {{ $false }}
+        }}
+        if ($null -ne $matches) {{ return $true }}
+    }} catch {{}}
+    return $false
+}}
+function Move-WithRetry($src, $dst) {{
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 15; $attempt++) {{
+        try {{
+            Move-Item -LiteralPath $src -Destination $dst -Force
+            return
+        }} catch {{
+            $lastError = $_
+            Start-Sleep -Milliseconds 300
+        }}
+    }}
+    throw $lastError
+}}
 try {{
     Write-Log "Esperando al proceso $pidToWait"
     $waited = 0
     while ($waited -lt 240) {{
-        $proc = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue
-        if ($null -eq $proc) {{ break }}
+        if (-not (Target-Processes-Running)) {{ break }}
         Start-Sleep -Milliseconds 500
         $waited++
     }}
-    if ($null -ne (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {{
+    if (Target-Processes-Running) {{
         throw "Umbral sigue abierto; no se reemplaza el ejecutable."
     }}
     Start-Sleep -Milliseconds 700
     if (Test-Path -LiteralPath $staged) {{ Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }}
-    Move-Item -LiteralPath $new -Destination $staged -Force
+    Move-WithRetry $new $staged
     if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }}
-    Move-Item -LiteralPath $target -Destination $backup -Force
+    Move-WithRetry $target $backup
     Write-Log "Ejecutable anterior movido a $backup"
-    Move-Item -LiteralPath $staged -Destination $target -Force
+    Move-WithRetry $staged $target
     Write-Log "Nuevo ejecutable instalado"
     $started = Start-Process -FilePath $target -PassThru
     Start-Sleep -Seconds 4
@@ -361,6 +415,20 @@ try {{
 
 def _encoded_command(script: str) -> str:
     return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+
+
+def _clean_subprocess_env(base: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """Strip PyInstaller bootloader env vars so the relaunched executable starts cleanly."""
+    source = os.environ if base is None else base
+    cleaned: dict[str, str] = {}
+    for key, value in source.items():
+        upper = key.upper()
+        if upper in {"_MEIPASS", "_MEIPASS2", "TCL_LIBRARY", "TK_LIBRARY"}:
+            continue
+        if upper.startswith("_PYI_"):
+            continue
+        cleaned[key] = value
+    return cleaned
 
 
 def apply_update(new_exe: Path) -> None:
@@ -404,6 +472,7 @@ def apply_update(new_exe: Path) -> None:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=_clean_subprocess_env(),
             creationflags=flags,
             close_fds=True,
         )

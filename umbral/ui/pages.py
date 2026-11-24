@@ -890,7 +890,13 @@ class SettingsPage(QWidget):
         self.profiles: list[EmulatorProfile] = []
         self.available_update: Optional[UpdateInfo] = None
         self.update_checking = False
+        self.update_downloading = False
+        self.update_download_text = ""
+        self.update_error = ""
         self.update_message = ""
+        self._update_install_btn: Optional[QPushButton] = None
+        self._update_later_btn: Optional[QPushButton] = None
+        self._update_status_note: Optional[QLabel] = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll, _content, self.body = _scroll_page()
@@ -939,6 +945,9 @@ class SettingsPage(QWidget):
         update_row.addWidget(check_button)
         self.body.addWidget(update_tile)
 
+        self._update_install_btn = None
+        self._update_later_btn = None
+        self._update_status_note = None
         if self.available_update is not None:
             info = self.available_update
             card = QFrame()
@@ -969,16 +978,31 @@ class SettingsPage(QWidget):
                 notes.setPlainText(info.notes)
                 notes.setFixedHeight(96)
                 card_body.addWidget(notes)
+            status_note = QLabel(self.update_error or self.update_download_text)
+            status_note.setObjectName("muted")
+            status_note.setWordWrap(True)
+            status_note.setVisible(bool(self.update_error or self.update_download_text))
+            self._update_status_note = status_note
+            card_body.addWidget(status_note)
             actions = QHBoxLayout()
             actions.setSpacing(10)
             later = QPushButton("Más tarde")
             later.setObjectName("ghost")
             later.setCursor(Qt.PointingHandCursor)
+            later.setEnabled(not self.update_downloading)
             later.clicked.connect(self.later_update)
-            install = QPushButton("Actualizar ahora")
+            install_label = (
+                "Descargando…"
+                if self.update_downloading
+                else ("Reintentar" if self.update_error else "Actualizar ahora")
+            )
+            install = QPushButton(install_label)
             install.setObjectName("primary")
             install.setCursor(Qt.PointingHandCursor)
+            install.setEnabled(not self.update_downloading)
             install.clicked.connect(self.install_update)
+            self._update_later_btn = later
+            self._update_install_btn = install
             actions.addWidget(later)
             actions.addStretch(1)
             actions.addWidget(install)
@@ -1222,8 +1246,39 @@ class SettingsPage(QWidget):
     def set_update_available(self, info: UpdateInfo) -> None:
         self.available_update = info
         self.update_checking = False
+        self.update_downloading = False
+        self.update_download_text = ""
+        self.update_error = ""
         self.update_message = ""
         self.refresh()
+
+    def set_update_downloading(self, done: int, total: int) -> None:
+        from ..updater import format_download_progress
+
+        self.update_downloading = True
+        self.update_error = ""
+        self.update_download_text = f"Descargando actualización: {format_download_progress(done, total)}"
+        if self._update_install_btn is not None:
+            self._update_install_btn.setText("Descargando…")
+            self._update_install_btn.setEnabled(False)
+        if self._update_later_btn is not None:
+            self._update_later_btn.setEnabled(False)
+        if self._update_status_note is not None:
+            self._update_status_note.setText(self.update_download_text)
+            self._update_status_note.setVisible(True)
+
+    def set_update_error(self, message: str) -> None:
+        self.update_downloading = False
+        self.update_download_text = ""
+        self.update_error = message
+        if self._update_install_btn is not None:
+            self._update_install_btn.setText("Reintentar")
+            self._update_install_btn.setEnabled(True)
+        if self._update_later_btn is not None:
+            self._update_later_btn.setEnabled(True)
+        if self._update_status_note is not None:
+            self._update_status_note.setText(message)
+            self._update_status_note.setVisible(True)
 
     def set_update_result(self, message: str) -> None:
         self.update_checking = False
@@ -1233,6 +1288,9 @@ class SettingsPage(QWidget):
     def dismiss_update(self) -> None:
         version = self.available_update.version if self.available_update is not None else ""
         self.available_update = None
+        self.update_downloading = False
+        self.update_download_text = ""
+        self.update_error = ""
         if version:
             self.update_message = (
                 f"Versión {version} aplazada. Puedes comprobarla de nuevo cuando quieras."
