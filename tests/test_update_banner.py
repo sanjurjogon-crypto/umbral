@@ -193,3 +193,40 @@ def test_banner_is_static_across_state_transitions_and_translucent() -> None:
     host.close()
     host.deleteLater()
     app.processEvents()
+
+
+def test_banner_is_larger_has_no_graphics_effect_and_button_click_hits_visually() -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QWidget
+
+    app = QApplication.instance() or QApplication([])
+    host = QWidget()
+    host.resize(1280, 800)
+    host.show()
+    banner = UpdateBanner(host)
+    clicks: list[str] = []
+    banner.install_clicked.connect(lambda: clicks.append("install"))
+    banner.postpone_clicked.connect(lambda: clicks.append("later"))
+
+    banner.show_update("8.27.1")
+    app.processEvents()
+
+    assert banner.graphicsEffect() is None
+    assert banner.width() >= 680
+    assert banner.height() >= 320
+
+    pos_before = banner.pos()
+    banner.reposition()
+    app.processEvents()
+    assert banner.pos() == pos_before
+
+    # Verify clicking the exact center of the visible action button hits cleanly
+    QTest.mouseClick(banner.action, Qt.LeftButton, pos=banner.action.rect().center())
+    QTest.mouseClick(banner.later, Qt.LeftButton, pos=banner.later.rect().center())
+    app.processEvents()
+    assert clicks == ["install", "later"]
+
+    host.close()
+    host.deleteLater()
+    app.processEvents()

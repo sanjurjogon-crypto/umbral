@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import Game
+from ..paths import assets_dir
 
 
 def _shade(color: QColor, factor: float) -> QColor:
@@ -918,15 +919,11 @@ class UpdateBanner(QFrame):
         super().__init__(parent)
         self.setObjectName("updateBannerShell")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(568)
+        self.setFixedWidth(700)
         self._version = ""
         self._target = QPoint(0, 0)
         self._locked_height = 0
-        self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(44)
-        self._shadow.setOffset(0, 12)
-        self._shadow.setColor(QColor(0, 0, 0, 195))
-        self.setGraphicsEffect(self._shadow)
+        self._last_parent_size: Optional[QSize] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 24, 24, 24)
@@ -935,8 +932,23 @@ class UpdateBanner(QFrame):
         outer.addWidget(self._panel)
 
         body = QVBoxLayout(self._panel)
-        body.setContentsMargins(22, 20, 22, 20)
-        body.setSpacing(8)
+        body.setContentsMargins(30, 26, 30, 26)
+        body.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        badge = QLabel()
+        icon_path = assets_dir() / "umbral.svg"
+        if icon_path.exists():
+            badge.setPixmap(
+                QPixmap(str(icon_path)).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            header.addWidget(badge)
+        self.eyebrow = QLabel("ACTUALIZACIÓN DE UMBRAL")
+        self.eyebrow.setObjectName("bannerEyebrow")
+        header.addWidget(self.eyebrow)
+        header.addStretch(1)
+        body.addLayout(header)
 
         self.title = QLabel("¡Estás de suerte! Ya que:")
         self.title.setObjectName("bannerTitle")
@@ -960,22 +972,24 @@ class UpdateBanner(QFrame):
         body.addWidget(self.detail)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(10)
+        self.progress_bar.setFixedHeight(12)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.hide()
         body.addWidget(self.progress_bar)
 
         body.addStretch(1)
-        body.addSpacing(6)
+        body.addSpacing(8)
         actions = QHBoxLayout()
-        actions.setSpacing(10)
+        actions.setSpacing(12)
         self.action = QPushButton("Actualizar ahora")
         self.action.setObjectName("bannerPrimary")
+        self.action.setMinimumHeight(42)
         self.action.setCursor(Qt.PointingHandCursor)
         self.action.clicked.connect(self.install_clicked)
         self.later = QPushButton("Ahora no")
         self.later.setObjectName("bannerGhost")
+        self.later.setMinimumHeight(42)
         self.later.setCursor(Qt.PointingHandCursor)
         self.later.clicked.connect(self.postpone_clicked)
         actions.addWidget(self.action)
@@ -984,21 +998,41 @@ class UpdateBanner(QFrame):
         body.addLayout(actions)
         self.hide()
 
+    def paintEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        del event
+        panel_rect = self._panel.geometry()
+        if panel_rect.isEmpty():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        for spread, alpha in ((18, 28), (13, 44), (8, 70), (4, 110)):
+            shadow_rect = panel_rect.adjusted(-spread, -spread + 4, spread, spread + 8)
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            painter.drawRoundedRect(shadow_rect, 4, 4)
+
     def current_version(self) -> str:
         return self._version
 
     def _lock_geometry_if_needed(self, reset: bool = False) -> None:
         if reset or self._locked_height <= 0:
+            self.ensurePolished()
+            self._panel.ensurePolished()
             self.setMinimumHeight(0)
             self.setMaximumHeight(16777215)
+            if self.layout() is not None:
+                self.layout().activate()
             self.adjustSize()
-            self._locked_height = self.height()
+            self._locked_height = max(self.height(), 328)
             self.setFixedHeight(self._locked_height)
             self._target = self._target_position()
+            parent = self.parentWidget()
+            self._last_parent_size = parent.size() if parent is not None else None
             self.move(self._target)
 
     def show_update(self, version: str, notes: str = "") -> None:
         self._version = version
+        self.eyebrow.setText("ACTUALIZACIÓN DE UMBRAL")
         self.title.setText("¡Estás de suerte! Ya que:")
         self.line1.setText("- Gonzalo es el puto amo")
         self.line2.setText("- Hay una nueva actualización de Umbral disponible")
@@ -1020,6 +1054,7 @@ class UpdateBanner(QFrame):
 
     def show_progress(self, done: int, total: int) -> None:
         self._lock_geometry_if_needed()
+        self.eyebrow.setText("DESCARGANDO ACTUALIZACIÓN")
         self.line1.hide()
         self.line2.hide()
         if total > 0:
@@ -1044,6 +1079,7 @@ class UpdateBanner(QFrame):
 
     def show_installing(self) -> None:
         self._lock_geometry_if_needed()
+        self.eyebrow.setText("APLICANDO ACTUALIZACIÓN")
         self.line1.hide()
         self.line2.hide()
         self.title.setText(f"Instalando Umbral {self._version}…")
@@ -1062,6 +1098,7 @@ class UpdateBanner(QFrame):
 
     def show_error(self, message: str) -> None:
         self._lock_geometry_if_needed()
+        self.eyebrow.setText("ERROR DE ACTUALIZACIÓN")
         self.title.setText("No se pudo actualizar")
         self.line1.hide()
         self.line2.hide()
@@ -1079,6 +1116,11 @@ class UpdateBanner(QFrame):
     def reposition(self) -> None:
         if not self.isVisible():
             return
+        parent = self.parentWidget()
+        current_size = parent.size() if parent is not None else None
+        if current_size is not None and current_size == self._last_parent_size:
+            return
+        self._last_parent_size = current_size
         self._target = self._target_position()
         self.move(self._target)
 
