@@ -83,3 +83,71 @@ def test_write_rotates_backups(monkeypatch, tmp_path: Path) -> None:
     store_module._write_json(library, {"games": [{"id": "dos"}]})
     assert (tmp_path / "library.json.bak1").is_file()
     assert (tmp_path / "library.json.bak2").is_file()
+
+
+def test_stale_cover_path_is_cleared_on_load(monkeypatch, tmp_path: Path) -> None:
+    _point_store(monkeypatch, tmp_path)
+    rom = _sega_rom(tmp_path / "game.bin")
+    entry = _game(rom)
+    entry["cover"] = str(tmp_path / "deleted-cover.jpg")
+    (tmp_path / "library.json").write_text(
+        json.dumps({"games": [entry]}), encoding="utf-8"
+    )
+    store = store_module.Store()
+    assert len(store.games) == 1
+    assert store.games[0].cover == ""
+
+
+def test_export_and_import_library_merges_playtime_and_settings(monkeypatch, tmp_path: Path) -> None:
+    _point_store(monkeypatch, tmp_path)
+    store = store_module.Store()
+    rom = _sega_rom(tmp_path / "game.bin")
+    existing = store_module.Game.from_dict(_game(rom))
+    existing.playtime_seconds = 120
+    existing.sessions = 1
+    store.games = [existing]
+    store.settings["scan_folders"] = ["C:/Games"]
+    store.save_library()
+    store.save_settings()
+
+    backup_file = tmp_path / "backup.json"
+    backup_payload = {
+        "version": 1,
+        "games": [
+            {
+                **_game(rom),
+                "playtime_seconds": 3600,
+                "sessions": 5,
+                "favorite": True,
+                "progress": "finished",
+                "notes": "Completado al 100%",
+            },
+            {
+                "id": "snes-chrono",
+                "title": "Chrono Trigger",
+                "system": "SNES",
+                "system_key": "snes",
+                "executable": "C:/emulador/snes9x.exe",
+                "rom_path": "C:/roms/chrono.sfc",
+                "source": "manual",
+            },
+        ],
+        "settings": {
+            "scan_folders": ["C:/Games", "D:/Roms"],
+            "emulator_paths": {"snes9x": "C:/emulador/snes9x.exe"},
+        },
+    }
+    backup_file.write_text(json.dumps(backup_payload), encoding="utf-8")
+
+    added, updated = store.import_library(backup_file)
+    assert (added, updated) == (1, 1)
+    assert store.get("genesis-test").playtime_seconds == 3600
+    assert store.get("genesis-test").favorite is True
+    assert store.get("genesis-test").notes == "Completado al 100%"
+    assert store.get("snes-chrono") is not None
+    assert store.settings["scan_folders"] == ["C:/Games", "D:/Roms"]
+
+    exported = tmp_path / "exported.json"
+    store.export_library(exported)
+    parsed = json.loads(exported.read_text(encoding="utf-8"))
+    assert len(parsed["games"]) == 2

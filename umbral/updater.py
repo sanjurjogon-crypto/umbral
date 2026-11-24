@@ -132,6 +132,16 @@ def _info_from_payload(payload: dict) -> Optional[UpdateInfo]:
     )
 
 
+def _is_trusted_github_url(url: str) -> bool:
+    return url.startswith(
+        (
+            "https://github.com/",
+            "https://objects.githubusercontent.com/",
+            "https://release-assets.githubusercontent.com/",
+        )
+    )
+
+
 def check_for_update(current: str = __version__, timeout: float = 8.0) -> Optional[UpdateInfo]:
     try:
         payload = _request_json(API_LATEST, timeout=timeout)
@@ -150,8 +160,12 @@ def check_for_update(current: str = __version__, timeout: float = 8.0) -> Option
     info = _info_from_payload(payload)
     if info is None or not is_newer(info.version, current):
         return None
-    if not info.asset_url.startswith("https://github.com/"):
+    if not _is_trusted_github_url(info.asset_url):
         raise UpdateError("El release apunta a una dirección no válida.")
+    if info.sha_url and not _is_trusted_github_url(info.sha_url):
+        raise UpdateError("La firma del release apunta a una dirección no válida.")
+    if info.page_url and not info.page_url.startswith("https://github.com/"):
+        raise UpdateError("La página del release apunta a una dirección no válida.")
     return info
 
 
@@ -203,6 +217,8 @@ def _download_bytes(
             raise UpdateError("La descarga quedó vacía.")
         if expected_size and done != expected_size:
             raise UpdateError("La descarga no coincide con el tamaño esperado.")
+        if total and done != total:
+            raise UpdateError("La descarga quedó incompleta.")
         with temporary.open("rb") as handle:
             if handle.read(2) != b"MZ":
                 raise UpdateError("El archivo descargado no es un ejecutable válido.")
@@ -227,6 +243,10 @@ def download_update(
     progress: Optional[Callable[[int, int], None]] = None,
     cancel_event: Optional[threading.Event] = None,
 ) -> Path:
+    if not _is_trusted_github_url(info.asset_url):
+        raise UpdateError("La dirección de descarga no es válida.")
+    if info.sha_url and not _is_trusted_github_url(info.sha_url):
+        raise UpdateError("La dirección de la firma no es válida.")
     target = update_dir() / f"Umbral-{slug_version(info.version)}.exe"
     for old in update_dir().glob("Umbral-*.exe"):
         if old != target:

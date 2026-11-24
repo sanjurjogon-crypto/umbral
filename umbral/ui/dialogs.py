@@ -206,6 +206,8 @@ class GameDetailDialog(QDialog):
         ]
         if self.game.rom_path:
             lines.append(f"Juego: {self.game.rom_path}")
+        if self.game.notes:
+            lines.append(f"Notas: {self.game.notes}")
         return "\n".join(lines)
 
     def _toggle_recipe(self) -> None:
@@ -270,7 +272,10 @@ class GameDetailDialog(QDialog):
         for folder in candidates:
             try:
                 if folder and Path(folder).is_dir():
-                    os.startfile(folder)
+                    if hasattr(os, "startfile"):
+                        os.startfile(folder)
+                    else:
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
                     return
             except OSError:
                 continue
@@ -291,6 +296,7 @@ class AddGameDialog(QDialog):
         self._emulators = list(emulators or [])
         self._filling = False
         self._auto_title = ""
+        self._initial_minutes = (game.playtime_seconds // 60) if game else 0
         self.setWindowTitle("Editar juego" if game else "Añadir juego")
         self.setModal(True)
         self.setMinimumWidth(690)
@@ -367,6 +373,18 @@ class AddGameDialog(QDialog):
         self.accent_combo = QComboBox()
         for name, color in ACCENTS:
             self.accent_combo.addItem(name, color)
+        self.cover_edit = QLineEdit()
+        self.cover_edit.setPlaceholderText("Opcional · deja vacío para buscarla automáticamente")
+        self.progress_combo = QComboBox()
+        self.progress_combo.addItem("Automático", "")
+        self.progress_combo.addItem("En curso", "playing")
+        self.progress_combo.addItem("Terminado", "finished")
+        self.playtime_spin = QSpinBox()
+        self.playtime_spin.setRange(0, 999_999)
+        self.playtime_spin.setSuffix(" min")
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setFixedHeight(56)
+        self.notes_edit.setPlaceholderText("Notas personales o detalles del juego")
         self._row(grid, 0, "Subtítulo", self.subtitle_edit)
         self._row(grid, 1, "Carpeta de trabajo", self._file_row(self.working_edit, "dir"))
         self._row(grid, 2, "Argumentos", self.arguments_edit)
@@ -374,6 +392,10 @@ class AddGameDialog(QDialog):
         self._row(grid, 4, "Año", self.year_spin)
         self._row(grid, 5, "Descripción", self.description_edit)
         self._row(grid, 6, "Color", self.accent_combo)
+        self._row(grid, 7, "Carátula", self._file_row(self.cover_edit, "image"))
+        self._row(grid, 8, "Estado", self.progress_combo)
+        self._row(grid, 9, "Tiempo jugado", self.playtime_spin)
+        self._row(grid, 10, "Notas", self.notes_edit)
         self.advanced.hide()
         body.addWidget(self.advanced)
 
@@ -413,6 +435,13 @@ class AddGameDialog(QDialog):
         browse.setCursor(Qt.PointingHandCursor)
         if mode == "exe":
             browse.clicked.connect(lambda: self._browse_file(line_edit, "Ejecutables (*.exe);;Todos los archivos (*)"))
+        elif mode == "image":
+            browse.clicked.connect(
+                lambda: self._browse_file(
+                    line_edit,
+                    "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp);;Todos los archivos (*)",
+                )
+            )
         else:
             browse.clicked.connect(lambda: self._browse_dir(line_edit))
         row.addWidget(browse)
@@ -597,7 +626,22 @@ class AddGameDialog(QDialog):
         self.description_edit.setPlainText(game.description)
         accent_index = self.accent_combo.findData(game.accent)
         self.accent_combo.setCurrentIndex(accent_index if accent_index >= 0 else 0)
-        if game.working_dir or game.arguments or game.genre or game.year or game.description:
+        self.cover_edit.setText(game.cover)
+        progress_index = self.progress_combo.findData(game.progress)
+        self.progress_combo.setCurrentIndex(progress_index if progress_index >= 0 else 0)
+        self.playtime_spin.setValue(self._initial_minutes)
+        self.notes_edit.setPlainText(game.notes)
+        if (
+            game.working_dir
+            or game.arguments
+            or game.genre
+            or game.year
+            or game.description
+            or game.cover
+            or game.progress
+            or game.notes
+            or game.playtime_seconds
+        ):
             self.advanced_button.setChecked(True)
 
     def _save(self) -> None:
@@ -617,6 +661,8 @@ class AddGameDialog(QDialog):
 
         system_label = self.system_combo.currentText().strip() or "Otro"
         system_key = str(self.system_combo.currentData() or "otros")
+        if rom and executable and rom == executable and system_key in {"pc", "ports"}:
+            rom = ""
         if rom:
             rom_path = Path(rom)
             if rom_path.is_file():
@@ -664,6 +710,15 @@ class AddGameDialog(QDialog):
         working_dir = self.working_edit.text().strip()
         if not working_dir and executable:
             working_dir = str(Path(executable).parent)
+        cover = self.cover_edit.text().strip()
+        if cover and not Path(cover).is_file():
+            QMessageBox.warning(
+                self, "Carátula no encontrada", f"No existe la imagen indicada:\n{cover}"
+            )
+            return
+        progress = str(self.progress_combo.currentData() or "")
+        minutes = int(self.playtime_spin.value())
+        notes = self.notes_edit.toPlainText().strip()
         if self._existing:
             game = self._existing
             game.title = title
@@ -678,9 +733,14 @@ class AddGameDialog(QDialog):
             game.year = year
             game.description = description
             game.accent = accent
+            game.cover = cover
+            game.progress = progress
+            game.notes = notes
+            if minutes != self._initial_minutes:
+                game.playtime_seconds = minutes * 60
         else:
             game = Game(
-                id=slugify(f"{system_key}-{title}-manual-{int(time.time())}"),
+                id=slugify(f"{system_key}-{title}-manual-{time.time_ns() // 1_000_000}"),
                 title=title,
                 system=system_label,
                 system_key=system_key,
@@ -693,7 +753,11 @@ class AddGameDialog(QDialog):
                 year=year,
                 description=description,
                 accent=accent,
+                cover=cover,
+                progress=progress,
+                playtime_seconds=minutes * 60,
                 source="manual",
+                notes=notes,
             )
         self._game = game
         super().accept()
@@ -1161,7 +1225,7 @@ class GameScanDialog(QDialog):
         body.addWidget(title)
 
         intro = QLabel(
-            "Umbral ha buscado juegos de PC, de Steam, de Epic Games, de emuladores y ports. "
+            "Umbral ha buscado juegos de PC, de Steam, de Epic Games, de GOG, de emuladores y ports. "
             "Los ejecutables de PC se comprueban en Steam, itch.io y PCGamingWiki. "
             "Marca los que quieras añadir."
         )
@@ -1181,7 +1245,7 @@ class GameScanDialog(QDialog):
         unknown = [item for item in candidates if not item.online_ok]
 
         if self.stores:
-            rows.addWidget(self._section("Steam y Epic Games"))
+            rows.addWidget(self._section("Steam, Epic Games y GOG"))
             for game in self.stores:
                 rows.addWidget(self._emulated_row(game))
 
@@ -1333,7 +1397,7 @@ class GameScanDialog(QDialog):
         meta.setWordWrap(True)
         text.addWidget(meta)
 
-        if game.source in {"steam", "epic"}:
+        if game.source in {"steam", "epic", "gog"}:
             origin = game.notes or game.executable
         else:
             origin = game.rom_path or game.executable or game.emulator

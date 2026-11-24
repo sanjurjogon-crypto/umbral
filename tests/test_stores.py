@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import umbral.stores as stores
@@ -60,3 +61,61 @@ def test_steam_tools_are_skipped(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(stores, "steam_roots", lambda: [root])
     assert stores.steam_games() == []
+
+
+def test_gog_info_game_is_detected(monkeypatch, tmp_path: Path) -> None:
+    game_dir = tmp_path / "Hollow Knight"
+    game_dir.mkdir()
+    exe = game_dir / "hollow_knight.exe"
+    exe.write_bytes(b"MZ")
+    info = game_dir / "goggame-1308320804.info"
+    info.write_text(
+        json.dumps(
+            {
+                "gameId": "1308320804",
+                "name": "Hollow Knight",
+                "playTasks": [
+                    {
+                        "category": "game",
+                        "isPrimary": True,
+                        "path": "hollow_knight.exe",
+                        "arguments": "--skip-intro",
+                        "workingDir": ".",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(stores, "_gog_registry_games", lambda: [])
+    monkeypatch.setattr(stores, "gog_roots", lambda _folders=None: [tmp_path])
+
+    games = stores.gog_games([str(tmp_path)])
+    assert len(games) == 1
+    assert games[0].title == "Hollow Knight"
+    assert games[0].source == "gog"
+    assert games[0].system_key == "gog"
+    assert games[0].executable == str(exe)
+    assert games[0].arguments == ["--skip-intro"]
+
+
+def test_epic_folder_fallback_skips_services_and_detects_games(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(stores, "epic_manifests_dir", lambda: tmp_path / "missing-manifests")
+    monkeypatch.setattr(stores, "_launcher_installed_locations", lambda: [])
+
+    game_dir = tmp_path / "rocketleague"
+    (game_dir / ".egstore").mkdir(parents=True)
+    exe = game_dir / "Binaries" / "Win64" / "RocketLeague.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+
+    eos_dir = tmp_path / "Epic Online Services"
+    (eos_dir / ".egstore").mkdir(parents=True)
+    eos_exe = eos_dir / "EOSOverlayRenderer-Win64-Shipping.exe"
+    eos_exe.write_bytes(b"MZ")
+
+    games = stores.epic_games(roots=[tmp_path])
+    assert [game.title for game in games] == ["Rocket League"]
+    assert games[0].executable == str(exe)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -592,8 +593,9 @@ def detect(
         if path.exists():
             roots.append(path)
     unique_roots = _unique_roots(roots)
-    local = Path(os.environ.get("LOCALAPPDATA", ""))
-    emulator_roots = _unique_roots([*unique_roots, local / "Programs"])
+    local_env = os.environ.get("LOCALAPPDATA", "").strip()
+    extra_emu_roots = [*unique_roots, Path(local_env) / "Programs"] if local_env else unique_roots
+    emulator_roots = _unique_roots(extra_emu_roots)
 
     exe_index = composite(emulator_roots)
     media_index = composite(unique_roots)
@@ -671,12 +673,28 @@ def detect(
     if dusklight is not None:
         games.append(_dusklight_game(dusklight))
 
-    games.extend(store_games())
-    diagnostics.append(f"Tiendas: {sum(1 for game in games if game.source in {'steam', 'epic'})} juegos de Steam y Epic.")
+    games.extend(store_games(scan_folders))
+    diagnostics.append(
+        f"Tiendas: {sum(1 for game in games if game.source in {'steam', 'epic', 'gog'})} juegos de Steam, Epic y GOG."
+    )
 
     deduplicated: dict[str, Game] = {}
     for game in games:
-        deduplicated.setdefault(game.id, game)
+        existing = deduplicated.get(game.id)
+        if existing is None:
+            deduplicated[game.id] = game
+            continue
+        if (
+            game.rom_path
+            and existing.rom_path
+            and os.path.normcase(game.rom_path) != os.path.normcase(existing.rom_path)
+        ):
+            digest = hashlib.sha1(os.path.normcase(game.rom_path).encode("utf-8")).hexdigest()[:6]
+            rom_stem = Path(game.rom_path).stem
+            game.id = f"{game.id}-{digest}"
+            if rom_stem and rom_stem.lower() != game.title.lower():
+                game.title = rom_stem
+            deduplicated.setdefault(game.id, game)
 
     return Detection(
         games=sorted(deduplicated.values(), key=lambda item: item.title.lower()),
