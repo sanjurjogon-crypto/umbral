@@ -598,7 +598,9 @@ def apply_update(new_exe: Path) -> None:
     if not powershell:
         raise UpdateError("Windows no tiene PowerShell disponible para aplicar la actualización.")
     script = _replacement_script(target, new_exe, os.getpid())
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+    # CREATE_NO_WINDOW (not DETACHED_PROCESS): powershell.exe silently aborts when
+    # spawned with DETACHED_PROCESS + DEVNULL handles from a GUI (--noconsole) app.
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
         subprocess, "CREATE_NEW_PROCESS_GROUP", 0
     )
     try:

@@ -175,6 +175,36 @@ def test_fetch_covers_respects_stop_event(monkeypatch, tmp_path: Path) -> None:
     assert called == 0
 
 
+@pytest.mark.skipif(updater.os.name != "nt", reason="Windows-specific creationflags")
+def test_apply_update_on_windows_uses_create_no_window_not_detached(monkeypatch, tmp_path: Path) -> None:
+    import subprocess
+
+    target_exe = tmp_path / "Umbral (1).exe"
+    new_exe = tmp_path / "Umbral-new.exe"
+    target_exe.write_bytes(b"MZ" + b"\x00" * 64)
+    new_exe.write_bytes(b"MZ" + b"\x00" * 64)
+
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "executable", str(target_exe))
+    monkeypatch.setattr(updater.shutil, "which", lambda name: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" if "powershell" in name else None)
+
+    captured: dict[str, object] = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(updater.subprocess, "Popen", fake_popen)
+    updater.apply_update(new_exe)
+
+    flags = captured["kwargs"]["creationflags"]  # type: ignore[index]
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    detached = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    assert flags & create_no_window == create_no_window
+    assert flags & detached == 0
+
+
 def test_posix_replacement_script_and_elf_download(monkeypatch, tmp_path: Path) -> None:
     target = tmp_path / "Umbral-linux-x86_64"
     new_bin = tmp_path / "Umbral-8.27.0-linux"
