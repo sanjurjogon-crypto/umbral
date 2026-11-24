@@ -6,8 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .models import Game
-from .paths import library_file, settings_file
+from .models import Game, now_iso
+from .paths import library_file, path_key as _path_key, settings_file
 from .rom_rules import is_ambiguous, plausible
 
 BACKUP_COUNT = 3
@@ -32,13 +32,6 @@ def _backup_paths(path: Path) -> list[Path]:
         path.with_name(f"{path.name}.bak{index}")
         for index in range(1, BACKUP_COUNT + 1)
     ]
-
-
-def _path_key(value: str) -> str:
-    try:
-        return os.path.normcase(os.path.abspath(value))
-    except OSError:
-        return os.path.normcase(value)
 
 
 def _read_json(path: Path, default: Any) -> tuple[Any, Path | None]:
@@ -131,6 +124,10 @@ class Store:
                 game.system = "Epic Games"
                 game.system_key = "epic"
                 game.subtitle = "Epic Games"
+            elif game.source == "gog":
+                game.system = "GOG"
+                game.system_key = "gog"
+                game.subtitle = "GOG"
             elif (
                 game.source == "manual"
                 and game.system_key == "otros"
@@ -144,6 +141,9 @@ class Store:
         for game in self.games:
             if game.executable.lower().endswith("dusklight.exe") and game.emulator != "Dusklight":
                 game.emulator = "Dusklight"
+                changed = True
+            if game.cover and not Path(game.cover).is_file():
+                game.cover = ""
                 changed = True
         kept: list[Game] = []
         removed = 0
@@ -185,6 +185,99 @@ class Store:
 
     def save_settings(self) -> None:
         _write_json(settings_file(), self.settings)
+
+    def export_library(self, destination: Path) -> Path:
+        payload = {
+            "version": 1,
+            "app": "Umbral",
+            "exported_at": now_iso(),
+            "games": [game.to_dict() for game in self.games],
+            "settings": dict(self.settings),
+        }
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        os.replace(temporary, target)
+        return target
+
+    def import_library(self, source: Path) -> tuple[int, int]:
+        path = Path(source)
+        with path.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        if not isinstance(raw, dict) or not isinstance(raw.get("games"), list):
+            raise ValueError("El archivo no es una copia válida de Umbral.")
+
+        added = 0
+        updated = 0
+        for item in raw["games"]:
+            if not isinstance(item, dict) or not item.get("id") or not item.get("title"):
+                continue
+            incoming = Game.from_dict(item)
+            existing = self.get(incoming.id)
+            if existing is None:
+                self.upsert(incoming)
+                added += 1
+                continue
+            changed = False
+            if incoming.playtime_seconds > existing.playtime_seconds:
+                existing.playtime_seconds = incoming.playtime_seconds
+                changed = True
+            if incoming.sessions > existing.sessions:
+                existing.sessions = incoming.sessions
+                changed = True
+            if incoming.last_played and incoming.last_played > (existing.last_played or ""):
+                existing.last_played = incoming.last_played
+                changed = True
+            if incoming.favorite and not existing.favorite:
+                existing.favorite = True
+                changed = True
+            if incoming.progress and not existing.progress:
+                existing.progress = incoming.progress
+                changed = True
+            for attr in ("notes", "genre", "description"):
+                if getattr(incoming, attr) and not getattr(existing, attr):
+                    setattr(existing, attr, getattr(incoming, attr))
+                    changed = True
+            if incoming.year and not existing.year:
+                existing.year = incoming.year
+                changed = True
+            if incoming.cover and not existing.cover and Path(incoming.cover).is_file():
+                existing.cover = incoming.cover
+                changed = True
+            if changed:
+                updated += 1
+
+        imported_settings = raw.get("settings")
+        if isinstance(imported_settings, dict):
+            for key in ("scan_folders", "hidden_games", "hidden_paths"):
+                values = imported_settings.get(key)
+                if isinstance(values, list):
+                    current = self.settings.setdefault(key, [])
+                    for entry in values:
+                        if entry not in current:
+                            current.append(entry)
+            emu_paths = imported_settings.get("emulator_paths")
+            if isinstance(emu_paths, dict):
+                current_paths = self.settings.setdefault("emulator_paths", {})
+                for key, value in emu_paths.items():
+                    if key not in current_paths and value:
+                        current_paths[key] = value
+            custom = imported_settings.get("custom_emulators")
+            if isinstance(custom, list):
+                current_custom = self.settings.setdefault("custom_emulators", [])
+                known_keys = {
+                    str(item.get("key")) for item in current_custom if isinstance(item, dict)
+                }
+                for item in custom:
+                    if isinstance(item, dict) and str(item.get("key")) not in known_keys:
+                        current_custom.append(item)
+                        known_keys.add(str(item.get("key")))
+
+        self.save_library()
+        self.save_settings()
+        return added, updated
 
     def get(self, game_id: str) -> Game | None:
         for game in self.games:

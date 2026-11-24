@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import umbral.stores as stores
@@ -60,3 +61,39 @@ def test_steam_tools_are_skipped(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr(stores, "steam_roots", lambda: [root])
     assert stores.steam_games() == []
+
+
+def test_gog_info_game_is_detected(monkeypatch, tmp_path: Path) -> None:
+    game_dir = tmp_path / "Hollow Knight"
+    game_dir.mkdir()
+    exe = game_dir / "hollow_knight.exe"
+    exe.write_bytes(b"MZ")
+    info = game_dir / "goggame-1308320804.info"
+    info.write_text(
+        json.dumps(
+            {
+                "gameId": "1308320804",
+                "name": "Hollow Knight",
+                "playTasks": [
+                    {
+                        "category": "game",
+                        "isPrimary": True,
+                        "path": "hollow_knight.exe",
+                        "arguments": "--skip-intro",
+                        "workingDir": ".",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(stores, "_gog_registry_games", lambda: [])
+    monkeypatch.setattr(stores, "gog_roots", lambda _folders=None: [tmp_path])
+
+    games = stores.gog_games([str(tmp_path)])
+    assert len(games) == 1
+    assert games[0].title == "Hollow Knight"
+    assert games[0].source == "gog"
+    assert games[0].system_key == "gog"
+    assert games[0].executable == str(exe)
+    assert games[0].arguments == ["--skip-intro"]

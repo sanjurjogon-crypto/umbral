@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -27,14 +30,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..cover_worker import CoverWorker
-from ..covers import cover_needs_refresh, game_cover
+from ..covers import clear_cover_cache, cover_needs_refresh, game_cover
 from .. import __version__
 from ..consoles import CONSOLE_EXTENSIONS
-from ..detect import DETECTION_VERSION
+from ..detect import DETECTION_VERSION, working_dir_for
 from ..downloads import Download, emulator_for, mark_seen
 from ..launcher import LaunchError, ProcessWatcher, diagnostic_text, launch_game, validate
 from ..models import Emulator, Game, now_iso, slugify
-from ..paths import assets_dir, data_dir
+from ..paths import assets_dir, data_dir, path_key as _path_key
 from ..relink import missing_parts, relink
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
@@ -54,13 +57,6 @@ from .style import active, is_dark, set_active
 from .theme import qss
 from .update_dialog import CheckWorker, DownloadWorker
 from .widgets import Backdrop, Toast, UpdateBanner
-
-
-def _path_key(value: str) -> str:
-    try:
-        return os.path.normcase(os.path.abspath(value))
-    except OSError:
-        return os.path.normcase(value)
 
 
 def _now_iso() -> str:
@@ -247,6 +243,7 @@ class MainWindow(QMainWindow):
         for page in (self.home, self.library):
             page.play_requested.connect(self._play)
             page.details_requested.connect(self._details)
+            page.context_requested.connect(self._show_game_menu)
             page.add_requested.connect(self._add_game)
         self.health.rescan_requested.connect(self._rescan)
         self.health.relink_requested.connect(self._relink_game)
@@ -258,6 +255,8 @@ class MainWindow(QMainWindow):
         self.settings_page.style_changed.connect(self._set_style)
         self.settings_page.open_data.connect(self._open_data)
         self.settings_page.export_diagnostics.connect(self._export_diagnostics)
+        self.settings_page.export_library.connect(self._export_library)
+        self.settings_page.import_library.connect(self._import_library)
         self.settings_page.check_updates.connect(lambda: self._check_updates(manual=True))
         self.settings_page.install_update.connect(self._install_update)
         self.settings_page.later_update.connect(self._postpone_update)
@@ -487,10 +486,13 @@ class MainWindow(QMainWindow):
         lines = [
             f"Umbral {__version__}",
             f"Fecha: {datetime.now().isoformat(timespec='seconds')}",
+            f"Sistema: {platform.platform()}",
+            f"Python: {sys.version.split()[0]}",
             f"Datos: {data_dir()}",
             "",
             "Biblioteca:",
             f"  Juegos: {len(self.store.games)}",
+            f"  Con incidencias: {sum(1 for game in self.store.games if validate(game))}",
             "",
             "Emuladores:",
         ]
@@ -634,7 +636,11 @@ class MainWindow(QMainWindow):
         self._rebuild_systems()
 
     def _emulator_candidates(self, game: Game) -> list[tuple[Emulator, EmulatorProfile]]:
-        if game.source in {"steam", "epic", "standalone"}:
+        if game.source in {"steam", "epic", "gog", "standalone"}:
+            return []
+        if game.emulator_locked:
+            return []
+        if game.source == "manual" and game.executable and Path(game.executable).is_file():
             return []
         if not game.rom_path and game.system_key != "ports":
             return []
@@ -664,6 +670,9 @@ class MainWindow(QMainWindow):
         return result
 
     def _play(self, game: Game) -> None:
+        if any(watcher.game_id == game.id and watcher.isRunning() for watcher in self.watchers):
+            self.toast.show_message(f"{game.title} ya está en ejecución.")
+            return
         candidates = self._emulator_candidates(game)
         if len(candidates) > 1:
             dialog = EmulatorChoiceDialog(
@@ -678,7 +687,8 @@ class MainWindow(QMainWindow):
             game.emulator = chosen.name
             game.executable = chosen.executable
             game.arguments = list(profile.arguments)
-            game.working_dir = str(Path(chosen.executable).parent)
+            game.working_dir = str(working_dir_for(profile, chosen.executable))
+            game.emulator_locked = True
             self.store.save_library()
         issues = validate(game)
         if issues:
@@ -698,9 +708,11 @@ class MainWindow(QMainWindow):
         if game.source in {"steam", "epic"}:
             return
 
-        watcher = ProcessWatcher(process, log_path)
+        watcher = ProcessWatcher(process, log_path, game_id=game.id)
         watcher.finished_ok.connect(
-            lambda code, seconds, path, target=game: self._on_process_finished(target, int(code), int(seconds), Path(path))
+            lambda code, seconds, path, game_id=game.id: self._on_process_finished(
+                game_id, int(code), int(seconds), Path(path)
+            )
         )
         watcher.finished.connect(lambda worker=watcher: self._cleanup_watcher(worker))
         watcher.start()
@@ -749,7 +761,10 @@ class MainWindow(QMainWindow):
         self.settings_page.set_update_available(info)
         self._announce_update(info)
 
-    def _on_process_finished(self, game: Game, code: int, seconds: int, log_path: Path) -> None:
+    def _on_process_finished(self, game_id: str, code: int, seconds: int, log_path: Path) -> None:
+        game = self.store.get(game_id)
+        if game is None:
+            return
         if seconds >= 5:
             game.touch_play(seconds)
             self.store.save_library()
@@ -807,14 +822,86 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(300, self._fetch_missing_covers)
 
     def _edit_game(self, game: Game) -> None:
+        previous_cover = game.cover
         dialog = AddGameDialog(self, game, store=self.store, emulators=self.emulators)
         if dialog.exec() == QDialog.Accepted:
             edited = dialog.game()
             if edited:
+                if previous_cover and not edited.cover:
+                    clear_cover_cache(edited)
                 self.store.upsert(edited)
                 self.store.save_library()
                 self._refresh_all()
                 self.toast.show_message("Ficha actualizada.")
+                if not edited.cover:
+                    QTimer.singleShot(300, self._fetch_missing_covers)
+
+    def _show_game_menu(self, game: Game, global_pos) -> None:
+        menu = QMenu(self)
+        play_action = menu.addAction("Jugar ahora")
+        details_action = menu.addAction("Ver ficha")
+        menu.addSeparator()
+        fav_action = menu.addAction("Quitar de favoritos" if game.favorite else "Añadir a favoritos")
+        done_action = menu.addAction(
+            "Desmarcar terminado" if game.progress == "finished" else "Marcar terminado"
+        )
+        edit_action = menu.addAction("Editar ficha")
+        folder_action = menu.addAction("Abrir carpeta")
+        menu.addSeparator()
+        remove_action = menu.addAction("Quitar de Umbral")
+
+        chosen = menu.exec(global_pos)
+        if chosen is None:
+            return
+        if chosen is play_action:
+            self._play(game)
+        elif chosen is details_action:
+            self._details(game)
+        elif chosen is fav_action:
+            game.favorite = not game.favorite
+            self._save_and_refresh()
+        elif chosen is done_action:
+            game.progress = "" if game.progress == "finished" else "finished"
+            self._save_and_refresh()
+        elif chosen is edit_action:
+            self._edit_game(game)
+        elif chosen is folder_action:
+            self._open_game_folder(game)
+        elif chosen is remove_action:
+            answer = QMessageBox.question(
+                self,
+                "Quitar de Umbral",
+                f"¿Quitar «{game.title}» de la biblioteca?\n\n"
+                "No se borra ningún archivo del juego.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer == QMessageBox.Yes:
+                self._remove_game(game)
+
+    def _open_game_folder(self, game: Game) -> None:
+        candidates: list[str] = []
+        if game.rom_path:
+            rom = Path(game.rom_path)
+            candidates.append(str(rom if rom.is_dir() else rom.parent))
+        if game.working_dir:
+            candidates.append(game.working_dir)
+        if game.executable:
+            candidates.append(str(Path(game.executable).parent))
+        for folder in candidates:
+            if folder and Path(folder).is_dir():
+                self._open_path(Path(folder))
+                return
+        self.toast.show_message("No se encontró la carpeta del juego.")
+
+    def _open_path(self, path: Path) -> None:
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(path)
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        except OSError:
+            pass
 
     def _rescan(self) -> None:
         self._detect_and_merge(announce=True)
@@ -828,7 +915,7 @@ class MainWindow(QMainWindow):
         label = "la ROM o carpeta del juego" if part == "rom" else "el ejecutable del emulador o del port"
         if part == "rom":
             allowed = CONSOLE_EXTENSIONS.get(game.system_key, ())
-            if game.system_key in {"pc", "ports"}:
+            if game.system_key in {"pc", "ports"} and not Path(game.rom_path).suffix:
                 path = QFileDialog.getExistingDirectory(
                     self, f"Selecciona la carpeta para {game.title}"
                 )
@@ -936,8 +1023,8 @@ class MainWindow(QMainWindow):
                 or _path_key(game.executable) not in hidden_paths
             )
         ]
-        store_fresh = [game for game in new_games if game.source in {"steam", "epic"}]
-        emulated_fresh = [game for game in new_games if game.source not in {"steam", "epic"}]
+        store_fresh = [game for game in new_games if game.source in {"steam", "epic", "gog"}]
+        emulated_fresh = [game for game in new_games if game.source not in {"steam", "epic", "gog"}]
         downloaded_known = {_path_key(game.rom_path) for game in self.store.games if game.rom_path}
         pending = [
             download
@@ -971,7 +1058,7 @@ class MainWindow(QMainWindow):
             _path_key(game.executable)
             for game in self.store.games
             if game.executable
-            and game.system_key in {"pc", "ports", "steam", "epic"}
+            and game.system_key in {"pc", "ports", "steam", "epic", "gog"}
         }
         for item in selection:
             game: Optional[Game] = None
@@ -1068,10 +1155,49 @@ class MainWindow(QMainWindow):
         self.toast.show_message(f"Estilo {active().name} aplicado.")
 
     def _open_data(self) -> None:
+        self._open_path(data_dir())
+
+    def _export_library(self) -> None:
+        from PySide6.QtCore import QStandardPaths
+
+        folder = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or str(data_dir())
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar biblioteca",
+            str(Path(folder) / "umbral-biblioteca.json"),
+            "Biblioteca de Umbral (*.json)",
+        )
+        if not target:
+            return
         try:
-            os.startfile(data_dir())
-        except OSError:
-            pass
+            self.store.export_library(Path(target))
+        except OSError as exc:
+            self.toast.show_message(f"No se pudo exportar la biblioteca: {exc}")
+            return
+        self.toast.show_message(f"Biblioteca exportada ({len(self.store.games)} juegos).")
+
+    def _import_library(self) -> None:
+        from PySide6.QtCore import QStandardPaths
+
+        folder = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or str(data_dir())
+        source, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar biblioteca",
+            folder,
+            "Biblioteca de Umbral (*.json)",
+        )
+        if not source:
+            return
+        try:
+            added, updated = self.store.import_library(Path(source))
+        except (OSError, ValueError) as exc:
+            self.toast.show_message(f"No se pudo importar la biblioteca: {exc}")
+            return
+        self._refresh_all()
+        self.toast.show_message(
+            f"Importación completada: {added} añadidos, {updated} actualizados."
+        )
+        QTimer.singleShot(400, self._fetch_missing_covers)
 
     def _auto_check_updates(self) -> None:
         if self._updating:
@@ -1231,6 +1357,19 @@ class MainWindow(QMainWindow):
             self.update_banner.reposition()
 
     def closeEvent(self, event) -> None:
+        for watcher in list(self.watchers):
+            if watcher.isRunning():
+                elapsed = watcher.elapsed_seconds()
+                if elapsed >= 5:
+                    target = self.store.get(watcher.game_id)
+                    if target is not None:
+                        target.touch_play(elapsed)
+                try:
+                    watcher.finished_ok.disconnect()
+                    watcher.finished.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+                watcher.setParent(None)
         self.store.save_library()
         self.store.save_settings()
         for worker in (self.detect_worker, self.scan_worker):

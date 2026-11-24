@@ -26,8 +26,7 @@ from .. import __version__
 from ..consoles import SYSTEM_LABELS
 from ..launcher import validate
 from ..models import Emulator, Game
-from ..profiles import EmulatorProfile
-from ..profiles import PROFILE_BY_KEY
+from ..profiles import EmulatorProfile, PROFILE_BY_KEY, all_profiles
 from ..store import Store, format_seconds
 from ..updater import UpdateInfo, relative_time
 from .shelf import ShelfCanvas
@@ -120,6 +119,7 @@ def _scroll_page() -> tuple[QScrollArea, QWidget, QVBoxLayout]:
 class HomePage(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
+    context_requested = Signal(object, object)
     add_requested = Signal()
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
@@ -209,12 +209,14 @@ class HomePage(QWidget):
         row = CardRow(title, games)
         row.play_requested.connect(self.play_requested)
         row.details_requested.connect(self.details_requested)
+        row.context_requested.connect(self.context_requested)
         self.rows.addWidget(row)
 
 
 class LibraryPage(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
+    context_requested = Signal(object, object)
     add_requested = Signal()
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
@@ -285,6 +287,7 @@ class LibraryPage(QWidget):
         self.canvas = ShelfCanvas(self)
         self.canvas.activated.connect(self.play_requested)
         self.canvas.details_requested.connect(self.details_requested)
+        self.canvas.context_requested.connect(self.context_requested)
         self.canvas.selection_changed.connect(self._on_selection)
 
         self.info = QWidget(self)
@@ -434,19 +437,41 @@ class LibraryPage(QWidget):
                 if query in game.title.lower()
                 or query in game.subtitle.lower()
                 or query in game.genre.lower()
+                or query in game.system.lower()
+                or query in game.emulator.lower()
+                or query in game.notes.lower()
+                or (game.year is not None and query in str(game.year))
             ]
         games = sorted(games, key=lambda game: game.title.lower())
         reverse = not self._sort_asc
         if self._sort_key == "played":
-            games.sort(key=lambda game: game.last_played or "", reverse=reverse)
+            present = sorted(
+                (game for game in games if game.last_played),
+                key=lambda game: game.last_played,
+                reverse=reverse,
+            )
+            missing = [game for game in games if not game.last_played]
+            games = present + missing
         elif self._sort_key == "hours":
             games.sort(key=lambda game: game.playtime_seconds, reverse=reverse)
         elif self._sort_key == "sessions":
             games.sort(key=lambda game: game.sessions, reverse=reverse)
         elif self._sort_key == "added":
-            games.sort(key=lambda game: game.added_at or "", reverse=reverse)
+            present = sorted(
+                (game for game in games if game.added_at),
+                key=lambda game: game.added_at,
+                reverse=reverse,
+            )
+            missing = [game for game in games if not game.added_at]
+            games = present + missing
         elif self._sort_key == "year":
-            games.sort(key=lambda game: game.year or 0, reverse=reverse)
+            present = sorted(
+                (game for game in games if game.year),
+                key=lambda game: game.year or 0,
+                reverse=reverse,
+            )
+            missing = [game for game in games if not game.year]
+            games = present + missing
         else:
             games.sort(key=lambda game: game.title.lower(), reverse=reverse)
         return games
@@ -640,8 +665,14 @@ class HealthPage(QWidget):
             if not emulator.found:
                 issues.append(("warn", emulator.name, emulator.note or "No se encontró el ejecutable.", None))
 
+        profiles_by_key = {
+            profile.key: profile for profile in all_profiles(self.store.settings)
+        }
         for emulator in self.emulators:
-            if emulator.key in ("hookshot", "retroarch"):
+            profile = profiles_by_key.get(emulator.key)
+            if profile is not None and not profile.auto_scan:
+                continue
+            if emulator.key == "retroarch":
                 continue
             if not any(game.system_key == emulator.system_key for game in self.store.games):
                 issues.append(
@@ -654,7 +685,7 @@ class HealthPage(QWidget):
                 )
 
         for emulator in self.emulators:
-            profile = PROFILE_BY_KEY.get(emulator.key)
+            profile = profiles_by_key.get(emulator.key) or PROFILE_BY_KEY.get(emulator.key)
             if not profile or not profile.firmware_paths:
                 continue
             if not any(path.exists() for path in profile.expanded_firmware_paths(emulator.executable)):
@@ -700,6 +731,8 @@ class SettingsPage(QWidget):
     manage_emulators = Signal()
     open_data = Signal()
     export_diagnostics = Signal()
+    export_library = Signal()
+    import_library = Signal()
     check_updates = Signal()
     install_update = Signal()
     later_update = Signal()
@@ -959,9 +992,19 @@ class SettingsPage(QWidget):
         export.setObjectName("ghost")
         export.setCursor(Qt.PointingHandCursor)
         export.clicked.connect(self.export_diagnostics)
+        export_lib = QPushButton("Exportar biblioteca")
+        export_lib.setObjectName("ghost")
+        export_lib.setCursor(Qt.PointingHandCursor)
+        export_lib.clicked.connect(self.export_library)
+        import_lib = QPushButton("Importar biblioteca")
+        import_lib.setObjectName("ghost")
+        import_lib.setCursor(Qt.PointingHandCursor)
+        import_lib.clicked.connect(self.import_library)
         data_row.addWidget(open_data)
         data_row.addWidget(rescan)
         data_row.addWidget(export)
+        data_row.addWidget(export_lib)
+        data_row.addWidget(import_lib)
         data_row.addStretch(1)
         self.body.addLayout(data_row)
         note = QLabel(
@@ -973,7 +1016,10 @@ class SettingsPage(QWidget):
         self.body.addStretch(1)
 
     def _open_release_page(self) -> None:
-        if self.available_update is not None:
+        if (
+            self.available_update is not None
+            and self.available_update.page_url.startswith("https://github.com/")
+        ):
             QDesktopServices.openUrl(QUrl(self.available_update.page_url))
 
     def set_update_checking(self, checking: bool) -> None:

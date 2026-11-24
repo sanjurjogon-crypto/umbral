@@ -493,6 +493,7 @@ class CoverArt(QWidget):
 class GameCard(QFrame):
     play_requested = Signal(object)
     details_requested = Signal(object)
+    context_requested = Signal(object, object)
 
     def __init__(self, game: Game, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -573,6 +574,11 @@ class GameCard(QFrame):
         self.play_requested.emit(self.game)
         super().mouseDoubleClickEvent(event)
 
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        self._details_timer.stop()
+        self.context_requested.emit(self.game, event.globalPos())
+        event.accept()
+
 
 class SectionHeader(QWidget):
     def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
@@ -593,6 +599,7 @@ class SectionHeader(QWidget):
 class CardRow(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
+    context_requested = Signal(object, object)
 
     def __init__(self, title: str, games: list[Game], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -617,6 +624,7 @@ class CardRow(QWidget):
             card = GameCard(game)
             card.play_requested.connect(self.play_requested)
             card.details_requested.connect(self.details_requested)
+            card.context_requested.connect(self.context_requested)
             row.addWidget(card)
         row.addStretch(1)
         scroll.setWidget(inner)

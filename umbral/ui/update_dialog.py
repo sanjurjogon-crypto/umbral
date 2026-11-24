@@ -184,7 +184,8 @@ class UpdateDownloadDialog(QDialog):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
 
-        QDesktopServices.openUrl(QUrl(self.info.page_url))
+        if self.info.page_url.startswith("https://github.com/"):
+            QDesktopServices.openUrl(QUrl(self.info.page_url))
 
     def closeEvent(self, event) -> None:
         if self.worker.isRunning():

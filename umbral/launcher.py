@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import time
 from datetime import datetime
@@ -11,6 +12,8 @@ from PySide6.QtCore import QThread, Signal
 from .job import create_job_for_process, wait_for_job
 from .models import Game, slugify
 from .paths import logs_dir
+
+MAX_LOG_FILES = 50
 
 
 class LaunchError(Exception):
@@ -54,6 +57,19 @@ def diagnostic_text(game: Game, log_path: Path | None = None) -> str:
     return "\n".join(lines)
 
 
+def _prune_logs(keep: int = MAX_LOG_FILES) -> None:
+    try:
+        files = sorted(
+            (item for item in logs_dir().glob("*.log") if item.is_file()),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for old in files[keep:]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def launch_game(game: Game) -> tuple[subprocess.Popen, Path]:
     issues = validate(game)
     if issues:
@@ -62,6 +78,13 @@ def launch_game(game: Game) -> tuple[subprocess.Popen, Path]:
     command = build_command(game)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = logs_dir() / f"{stamp}_{slugify(game.title)}.log"
+    _prune_logs()
+
+    cmd_text = (
+        subprocess.list2cmdline(command)
+        if os.name == "nt"
+        else shlex.join(command)
+    )
 
     log_handle = None
     try:
@@ -69,7 +92,7 @@ def launch_game(game: Game) -> tuple[subprocess.Popen, Path]:
         log_handle.write("Umbral · registro de lanzamiento\n")
         log_handle.write(f"Fecha: {datetime.now().isoformat(timespec='seconds')}\n")
         log_handle.write(f"Juego: {game.title} · {game.subtitle}\n")
-        log_handle.write(f"Comando: {subprocess.list2cmdline(command)}\n")
+        log_handle.write(f"Comando: {cmd_text}\n")
         log_handle.write(f"Carpeta: {game.working_dir}\n")
         log_handle.write("-" * 60 + "\n")
         log_handle.flush()
@@ -94,7 +117,7 @@ def launch_game(game: Game) -> tuple[subprocess.Popen, Path]:
                 pass
         raise LaunchError(
             "No se pudo iniciar el proceso.",
-            f"Comando: {subprocess.list2cmdline(command)}\nError: {error}",
+            f"Comando: {cmd_text}\nError: {error}",
         ) from error
     finally:
         if log_handle:
@@ -109,15 +132,18 @@ def launch_game(game: Game) -> tuple[subprocess.Popen, Path]:
 class ProcessWatcher(QThread):
     finished_ok = Signal(int, int, str)
 
-    def __init__(self, process: subprocess.Popen, log_path: Path) -> None:
+    def __init__(self, process: subprocess.Popen, log_path: Path, game_id: str = "") -> None:
         super().__init__()
         self._process = process
         self._log_path = str(log_path)
+        self.game_id = game_id
+        self.started_at = time.monotonic()
+        self._job = create_job_for_process(self._process)
+
+    def elapsed_seconds(self) -> int:
+        return max(1, int(time.monotonic() - self.started_at))
 
     def run(self) -> None:
-        started = time.monotonic()
-        job = create_job_for_process(self._process)
         code = self._process.wait()
-        wait_for_job(job)
-        seconds = max(1, int(time.monotonic() - started))
-        self.finished_ok.emit(int(code), seconds, self._log_path)
+        wait_for_job(self._job)
+        self.finished_ok.emit(int(code), self.elapsed_seconds(), self._log_path)

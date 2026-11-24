@@ -176,6 +176,21 @@ def game_cover(game: Game) -> Path | None:
     return None
 
 
+def clear_cover_cache(game: Game) -> None:
+    target = cover_path(game)
+    try:
+        if target.is_file():
+            target.unlink()
+    except OSError:
+        pass
+    with _CACHE_LOCK:
+        cache = _load_cache()
+        key = slugify(game.id)
+        if key in cache:
+            cache.pop(key, None)
+            _save_cache(cache)
+
+
 def cover_needs_refresh(game: Game) -> bool:
     target = cover_path(game)
     manual = Path(game.cover) if game.cover else None

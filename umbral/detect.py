@@ -673,8 +673,10 @@ def detect(
     if dusklight is not None:
         games.append(_dusklight_game(dusklight))
 
-    games.extend(store_games())
-    diagnostics.append(f"Tiendas: {sum(1 for game in games if game.source in {'steam', 'epic'})} juegos de Steam y Epic.")
+    games.extend(store_games(scan_folders))
+    diagnostics.append(
+        f"Tiendas: {sum(1 for game in games if game.source in {'steam', 'epic', 'gog'})} juegos de Steam, Epic y GOG."
+    )
 
     deduplicated: dict[str, Game] = {}
     for game in games:

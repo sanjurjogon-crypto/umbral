@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from umbral.detect import profile_for_rom
-from umbral.profiles import PROFILES
+from umbral.detect import detect, profile_for_rom
+from umbral.profiles import PROFILES, profile_from_dict
 
 
 def _sega_rom(path: Path, size: int = 0x4000) -> Path:
@@ -30,3 +30,35 @@ def test_shader_data_does_not_map_to_emulator(tmp_path: Path) -> None:
     data = tmp_path / "pipelines.bin"
     data.write_bytes(bytes(range(256)) * 128)
     assert profile_for_rom(data, PROFILES) is None
+
+
+def test_duplicate_rom_titles_are_preserved(monkeypatch, tmp_path: Path) -> None:
+    import umbral.detect as detect_mod
+
+    emu = tmp_path / "snes9x.exe"
+    emu.write_bytes(b"MZ")
+    rom1 = tmp_path / "Chrono Trigger (USA).sfc"
+    rom2 = tmp_path / "Chrono Trigger (Japan).sfc"
+    rom1.write_bytes(b"\x00" * 1024)
+    rom2.write_bytes(b"\x00" * 1024)
+
+    monkeypatch.setattr(detect_mod, "_default_roots", lambda: [tmp_path])
+    monkeypatch.setattr(detect_mod, "store_games", lambda _folders=None: [])
+    result = detect(emulator_paths={"snes9x": str(emu)}, scan_folders=[str(tmp_path)])
+    roms = {game.rom_path for game in result.games}
+    assert str(rom1) in roms
+    assert str(rom2) in roms
+
+
+def test_custom_emulator_extensions_without_dot_are_normalized() -> None:
+    profile = profile_from_dict(
+        {
+            "key": "custom-test",
+            "name": "TestEmu",
+            "system_key": "gba",
+            "executable": "C:/emu/test.exe",
+            "rom_extensions": ["gba", ".zip"],
+        }
+    )
+    assert profile is not None
+    assert profile.rom_extensions == (".gba", ".zip")

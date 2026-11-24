@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 from pathlib import Path
+from typing import Iterable
 
 from .models import Game, slugify
 
 STEAM_ACCENT = "#66c0f4"
 EPIC_ACCENT = "#c7c9cc"
+GOG_ACCENT = "#a87cd8"
 
 STEAM_TOOL_NAMES = (
     "steamworks common redistributables",
@@ -201,5 +204,167 @@ def epic_games() -> list[Game]:
     return list(games.values())
 
 
-def store_games() -> list[Game]:
-    return [*steam_games(), *epic_games()]
+def _gog_info_game(info_file: Path) -> Game | None:
+    try:
+        data = json.loads(info_file.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    game_id = str(data.get("gameId") or "").strip()
+    title = str(data.get("name") or "").strip()
+    if not game_id or not title:
+        return None
+    folder = info_file.parent
+    tasks = data.get("playTasks") or []
+    if not isinstance(tasks, list):
+        return None
+    chosen: dict | None = None
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        if task.get("isHidden"):
+            continue
+        if task.get("isPrimary") and task.get("category") == "game":
+            chosen = task
+            break
+        if chosen is None and task.get("category") == "game":
+            chosen = task
+        elif chosen is None and task.get("path"):
+            chosen = task
+    if chosen is None:
+        return None
+    rel_exe = str(chosen.get("path") or "").strip()
+    if not rel_exe:
+        return None
+    exe_path = Path(rel_exe)
+    if not exe_path.is_absolute():
+        exe_path = folder / exe_path
+    if not exe_path.is_file():
+        return None
+    raw_args = str(chosen.get("arguments") or "").strip()
+    arguments = shlex.split(raw_args, posix=False) if raw_args else []
+    rel_wd = str(chosen.get("workingDir") or "").strip()
+    working_dir = (folder / rel_wd) if rel_wd and not Path(rel_wd).is_absolute() else (Path(rel_wd) if rel_wd else exe_path.parent)
+    if not working_dir.is_dir():
+        working_dir = exe_path.parent
+    return Game(
+        id=slugify(f"pc-gog-{game_id}"),
+        title=title,
+        system="GOG",
+        system_key="gog",
+        subtitle="GOG",
+        description=f"Juego de GOG instalado en {folder}.",
+        executable=str(exe_path),
+        arguments=arguments,
+        working_dir=str(working_dir),
+        rom_path="",
+        emulator="GOG",
+        accent=GOG_ACCENT,
+        source="gog",
+        notes=f"GOG ID: {game_id}",
+    )
+
+
+def _gog_registry_games() -> list[Game]:
+    try:
+        import winreg
+    except ImportError:
+        return []
+    games: list[Game] = []
+    registry_roots = (
+        r"SOFTWARE\WOW6432Node\GOG.com\Games",
+        r"SOFTWARE\GOG.com\Games",
+    )
+    for subkey in registry_roots:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey) as root:
+                index = 0
+                while True:
+                    try:
+                        game_id = winreg.EnumKey(root, index)
+                    except OSError:
+                        break
+                    index += 1
+                    try:
+                        with winreg.OpenKey(root, game_id) as handle:
+                            def _val(name: str) -> str:
+                                try:
+                                    value, _ = winreg.QueryValueEx(handle, name)
+                                    return str(value or "").strip()
+                                except OSError:
+                                    return ""
+
+                            title = _val("gameName")
+                            exe = _val("exe")
+                            folder = _val("path")
+                            working_dir = _val("workingDir")
+                            launch_param = _val("launchParam")
+                    except OSError:
+                        continue
+                    if not title or not exe or not Path(exe).is_file():
+                        continue
+                    wd = Path(working_dir) if working_dir and Path(working_dir).is_dir() else Path(exe).parent
+                    games.append(
+                        Game(
+                            id=slugify(f"pc-gog-{game_id}"),
+                            title=title,
+                            system="GOG",
+                            system_key="gog",
+                            subtitle="GOG",
+                            description=f"Juego de GOG instalado en {folder or wd}.",
+                            executable=exe,
+                            arguments=shlex.split(launch_param, posix=False) if launch_param else [],
+                            working_dir=str(wd),
+                            rom_path="",
+                            emulator="GOG",
+                            accent=GOG_ACCENT,
+                            source="gog",
+                            notes=f"GOG ID: {game_id}",
+                        )
+                    )
+        except OSError:
+            continue
+    return games
+
+
+def gog_roots(scan_folders: Iterable[str] | None = None) -> list[Path]:
+    candidates = [
+        Path(r"C:\GOG Games"),
+        Path(r"C:\Program Files (x86)\GOG Galaxy\Games"),
+        Path(r"C:\Program Files\GOG Galaxy\Games"),
+    ]
+    for folder in scan_folders or []:
+        if folder:
+            candidates.append(Path(folder))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in candidates:
+        key = os.path.normcase(str(root))
+        if key in seen or not root.is_dir():
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
+
+
+def gog_games(scan_folders: Iterable[str] | None = None) -> list[Game]:
+    games: dict[str, Game] = {}
+    for game in _gog_registry_games():
+        games.setdefault(game.id, game)
+    for root in gog_roots(scan_folders):
+        base_parts = len(root.parts)
+        for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=lambda _e: None):
+            depth = len(Path(dirpath).parts) - base_parts
+            if depth >= 3:
+                dirnames[:] = []
+            for filename in filenames:
+                if filename.lower().startswith("goggame-") and filename.lower().endswith(".info"):
+                    game = _gog_info_game(Path(dirpath) / filename)
+                    if game is not None and game.id not in games:
+                        games[game.id] = game
+    return list(games.values())
+
+
+def store_games(scan_folders: Iterable[str] | None = None) -> list[Game]:
+    return [*steam_games(), *epic_games(), *gog_games(scan_folders)]
