@@ -286,3 +286,48 @@ def test_settings_page_lists_hidden_games_and_emits_restore(monkeypatch, tmp_pat
     page.halo_check.setChecked(False)
     assert store.settings["shelf_halo"] is False
     assert halo_events == [False]
+
+
+def test_main_window_chrome_insets_and_sidebar_indicators(monkeypatch, tmp_path: Path) -> None:
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+    win.store.games = [
+        Game(id="g1", title="Zelda", system="Ports", system_key="ports", favorite=True),
+        Game(id="g2", title="Hades", system="Steam", system_key="steam", source="steam"),
+    ]
+    win.resize(1280, 760)
+    win.show()
+    app.processEvents()
+
+    assert win.library._inset_left == win._sidebar_width
+    assert win.library._inset_top == win._topbar_height
+    assert win.sidebar.width() == win._sidebar_width
+    assert win.topbar.x() == win._sidebar_width
+
+    win._navigate("home")
+    app.processEvents()
+    assert win.stack.currentWidget() is win.home
+
+    win._navigate("library")
+    app.processEvents()
+    assert win.stack.currentWidget() is win.library
+
+    first_btn = win._system_buttons.get("")
+    win._filter_system("steam")
+    app.processEvents()
+    # System filter button instance reused cleanly across transitions (no full teardown)
+    assert win._system_buttons.get("") is first_btn
+    assert win.library.current_filter() == "steam"
+
+    win.close()
+    win.deleteLater()
+    app.processEvents()

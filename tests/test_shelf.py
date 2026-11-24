@@ -124,11 +124,32 @@ def test_shelf_canvas_renders_mixed_cases_tilt_and_badges(tmp_path: Path) -> Non
     assert canvas._halo_enabled is False
     assert not canvas.grab().isNull()
 
-    from umbral.ui.shelf import _perspective_quad
+    from umbral.ui.shelf import _perspective_quad, render_debanded_backdrop
     quad_left = _perspective_quad(200.0, 300.0, 0.85, -1.0)
     # Left & right vertical edges stay truly vertical (not trapezoidally pinched)
     assert abs(quad_left[0].x() - quad_left[3].x()) < 0.01
     assert abs(quad_left[1].x() - quad_left[2].x()) < 0.01
+    # Continuous turn interpolation has zero discontinuity across center (turn = -0.01 vs +0.01)
+    q_neg = _perspective_quad(200.0, 300.0, 0.12, -0.01)
+    q_pos = _perspective_quad(200.0, 300.0, 0.12, 0.01)
+    for p1, p2 in zip(q_neg, q_pos):
+        assert abs(p1.y() - p2.y()) < 1.0
+
+    # Sharp cover backdrop preserves high-frequency edge contrast (not gaussian-blurred away)
+    sharp_src = tmp_path / "sharp_grid.png"
+    grid_img = QImage(400, 400, QImage.Format_RGB32)
+    for y in range(400):
+        for x in range(400):
+            grid_img.setPixelColor(x, y, QColor(240, 220, 120) if (x // 8) % 2 == 0 else QColor(20, 20, 30))
+    grid_img.save(str(sharp_src))
+    bg = render_debanded_backdrop(
+        640, 360, 320.0, 180.0, 222.0, 300.0, str(sharp_src), None, QColor("#d4af37"), True
+    )
+    assert bg.size().width() == 640 and bg.size().height() == 360
+    sample = bg.toImage()
+    # Adjacent stripe regions should preserve clear contrast difference
+    vals = [sample.pixelColor(x, 180).red() for x in range(280, 360, 4)]
+    assert max(vals) - min(vals) > 25
 
     canvas.step(1)
     assert canvas.index == 1

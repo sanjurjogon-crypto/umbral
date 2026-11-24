@@ -17,8 +17,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Verificar sintaxis y compilación
+        run: python -m compileall -q main.py umbral tests
+      - name: Comprobar dependencias críticas
+        run: python -c "import PySide6, PIL, numpy, umbral; print('OK:', umbral.__version__)"
       - name: Ejecutar tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest
+        run: python -m pytest -v --tb=short
 
