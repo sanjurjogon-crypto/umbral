@@ -136,8 +136,12 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QFrame#sidebar {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 __SIDEBAR__, stop:1 __SIDEBAR_2__);
+        background: rgba(10, 9, 7, 0.62);
         border-right: __THIN__px solid __BORDER__;
+    }
+    QFrame#topbar {
+        background: transparent;
+        border: none;
     }
     QScrollArea#sidebarScroll {
         background: transparent;
@@ -145,6 +149,11 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     }
     QWidget#sidebarContent {
         background: transparent;
+    }
+    QFrame#navIndicator, QFrame#sysIndicator {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 __ACCENT_SOFT__, stop:1 rgba(0, 0, 0, 0));
+        border-left: 2px solid __ACCENT__;
+        border-radius: __RADIUS__px;
     }
     QFrame#accentBar {
         background: __ACCENT__;
@@ -225,6 +234,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         border-radius: __RADIUS__px;
     }
     QPushButton#nav {
+        background: transparent;
         text-align: left;
         padding: 11px 14px;
         border-radius: __RADIUS__px;
@@ -241,14 +251,16 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         background: __HOVER_BG__;
     }
     QPushButton#nav:checked {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 __ACCENT_SOFT__, stop:1 transparent);
+        background: transparent;
         color: __ACCENT_2__;
-        border-left: 2px solid __ACCENT__;
+        border-left: 2px solid transparent;
     }
     QPushButton#system {
+        background: transparent;
         text-align: left;
         padding: 7px 14px;
         border-radius: __RADIUS__px;
+        border-left: 2px solid transparent;
         color: __MUTED__;
         font-size: 13px;
     }
@@ -258,8 +270,8 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     }
     QPushButton#system:checked {
         color: __ACCENT_2__;
-        background: __ACCENT_SOFT__;
-        border-left: 2px solid __ACCENT__;
+        background: transparent;
+        border-left: 2px solid transparent;
     }
     QPushButton#chip {
         border: __THIN__px solid __BORDER__;

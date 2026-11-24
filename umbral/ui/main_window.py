@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, QUrl
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -109,13 +109,16 @@ class MainWindow(QMainWindow):
         root = Backdrop()
         self.backdrop = root
         root.setObjectName("root")
-        outer = QHBoxLayout(root)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        self._sidebar_width = 238
+        self._topbar_height = 84
+        self._systems_signature: tuple = ()
+        self._system_buttons: dict[str, QPushButton] = {}
 
-        sidebar = QFrame()
+        self.stack = QStackedWidget(root)
+
+        sidebar = QFrame(root)
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(238)
+        self.sidebar = sidebar
         sidebar_shell = QVBoxLayout(sidebar)
         sidebar_shell.setContentsMargins(0, 0, 0, 0)
         sidebar_shell.setSpacing(0)
@@ -128,11 +131,20 @@ class MainWindow(QMainWindow):
         side_content = QWidget()
         side_content.setObjectName("sidebarContent")
         side_content.setAutoFillBackground(False)
+        self._side_content = side_content
         side = QVBoxLayout(side_content)
         side.setContentsMargins(18, 22, 18, 18)
         side.setSpacing(6)
         sidebar_scroll.setWidget(side_content)
         sidebar_shell.addWidget(sidebar_scroll)
+
+        self._nav_indicator = QFrame(side_content)
+        self._nav_indicator.setObjectName("navIndicator")
+        self._nav_indicator.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._nav_indicator.hide()
+        self._nav_anim = QPropertyAnimation(self._nav_indicator, b"geometry", self)
+        self._nav_anim.setDuration(190)
+        self._nav_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         brand_row = QHBoxLayout()
         brand_row.setSpacing(10)
@@ -181,9 +193,18 @@ class MainWindow(QMainWindow):
         systems_label.setObjectName("tiny")
         systems_label.setStyleSheet("font-weight: 700;")
         systems_layout.addWidget(systems_label)
-        self.systems_box = QVBoxLayout()
+        self._systems_container = QWidget()
+        self.systems_box = QVBoxLayout(self._systems_container)
+        self.systems_box.setContentsMargins(0, 0, 0, 0)
         self.systems_box.setSpacing(1)
-        systems_layout.addLayout(self.systems_box)
+        self._sys_indicator = QFrame(self._systems_container)
+        self._sys_indicator.setObjectName("sysIndicator")
+        self._sys_indicator.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._sys_indicator.hide()
+        self._sys_anim = QPropertyAnimation(self._sys_indicator, b"geometry", self)
+        self._sys_anim.setDuration(170)
+        self._sys_anim.setEasingCurve(QEasingCurve.OutCubic)
+        systems_layout.addWidget(self._systems_container)
         side.addWidget(self.systems_section)
 
         side.addStretch(1)
@@ -206,13 +227,9 @@ class MainWindow(QMainWindow):
         credit.setStyleSheet(f"color: {active().accent_2};")
         side.addWidget(credit)
 
-        content = QWidget()
-        content_body = QVBoxLayout(content)
-        content_body.setContentsMargins(0, 0, 0, 0)
-        content_body.setSpacing(0)
-
-        topbar = QFrame()
-        topbar.setFixedHeight(84)
+        topbar = QFrame(root)
+        topbar.setObjectName("topbar")
+        self.topbar = topbar
         top = QHBoxLayout(topbar)
         top.setContentsMargins(32, 18, 32, 10)
         top.setSpacing(14)
@@ -232,14 +249,15 @@ class MainWindow(QMainWindow):
         scan_button.setCursor(Qt.PointingHandCursor)
         scan_button.clicked.connect(self._scan_pc_games)
         top.addWidget(scan_button)
-        content_body.addWidget(topbar)
 
-        self.stack = QStackedWidget()
         self.home = HomePage(self.store)
         self.library = LibraryPage(self.store)
         self.stats = StatsPage(self.store)
         self.health = HealthPage(self.store)
         self.settings_page = SettingsPage(self.store)
+        for padded_page in (self.home, self.stats, self.health, self.settings_page):
+            padded_page.setContentsMargins(self._sidebar_width, self._topbar_height, 0, 0)
+        self.library.set_chrome_insets(self._sidebar_width, self._topbar_height)
 
         for page in (self.home, self.library):
             page.play_requested.connect(self._play)
@@ -255,6 +273,7 @@ class MainWindow(QMainWindow):
         self.settings_page.manage_emulators.connect(self._manage_emulators)
         self.settings_page.accent_changed.connect(self._set_accent)
         self.settings_page.style_changed.connect(self._set_style)
+        self.settings_page.halo_changed.connect(self._set_halo)
         self.settings_page.open_data.connect(self._open_data)
         self.settings_page.export_diagnostics.connect(self._export_diagnostics)
         self.settings_page.export_library.connect(self._export_library)
@@ -274,24 +293,45 @@ class MainWindow(QMainWindow):
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
-        content_body.addWidget(self.stack, 1)
 
-        outer.addWidget(sidebar)
-        outer.addWidget(content, 1)
         self.setCentralWidget(root)
+        self.sidebar.raise_()
+        self.topbar.raise_()
 
         self.toast = Toast(self)
         self.update_banner = UpdateBanner(self)
         self.update_banner.install_clicked.connect(self._install_update)
         self.update_banner.postpone_clicked.connect(self._postpone_update)
+        self._layout_chrome()
 
         search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         search_shortcut.activated.connect(self._focus_search)
         rescan_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
         rescan_shortcut.activated.connect(self._rescan)
 
+    def _layout_chrome(self) -> None:
+        if not hasattr(self, "stack"):
+            return
+        root = self.centralWidget()
+        width = root.width() if root is not None and root.width() > 0 else self.width()
+        height = root.height() if root is not None and root.height() > 0 else self.height()
+        self.stack.setGeometry(0, 0, width, height)
+        self.sidebar.setGeometry(0, 0, self._sidebar_width, height)
+        self.topbar.setGeometry(
+            self._sidebar_width, 0, max(0, width - self._sidebar_width), self._topbar_height
+        )
+        self.sidebar.raise_()
+        self.topbar.raise_()
+        if hasattr(self, "toast") and self.toast.isVisible():
+            self.toast.raise_()
+        if hasattr(self, "update_banner") and self.update_banner.isVisible():
+            self.update_banner.raise_()
+
     def showEvent(self, event) -> None:  # noqa: N802 - API de Qt
         super().showEvent(event)
+        self._layout_chrome()
+        self._sync_nav_indicator(animate=False)
+        self._sync_sys_indicator(animate=False)
         self._apply_titlebar()
 
     def _apply_titlebar(self) -> None:
@@ -529,8 +569,44 @@ class MainWindow(QMainWindow):
         self.settings_page.refresh()
         self._rebuild_systems()
 
+    def _move_indicator(
+        self, indicator: QFrame, anim: QPropertyAnimation, target: Optional[QPushButton], animate: bool = True
+    ) -> None:
+        if target is None or not target.isVisibleTo(target.parentWidget()):
+            indicator.hide()
+            return
+        dest = target.geometry()
+        if dest.width() <= 0 or dest.height() <= 0:
+            QTimer.singleShot(
+                0, lambda ind=indicator, an=anim, btn=target: self._move_indicator(ind, an, btn, animate=False)
+            )
+            return
+        indicator.lower()
+        indicator.show()
+        anim.stop()
+        if not animate or indicator.geometry().height() <= 0:
+            indicator.setGeometry(dest)
+            return
+        anim.setStartValue(indicator.geometry())
+        anim.setEndValue(dest)
+        anim.start()
+
+    def _sync_nav_indicator(self, animate: bool = True) -> None:
+        target = self.nav_buttons.get(self._current_page_key)
+        self._move_indicator(self._nav_indicator, self._nav_anim, target, animate=animate)
+
+    def _sync_sys_indicator(self, animate: bool = True) -> None:
+        key = self._current_page_key
+        page = self.pages.get(key, self.library)
+        active_sys = ""
+        if key == "favorites":
+            active_sys = self.library.current_filter()
+        elif page in (self.home, self.library):
+            active_sys = page.current_filter()
+        target = self._system_buttons.get(active_sys)
+        self._move_indicator(self._sys_indicator, self._sys_anim, target, animate=animate)
+
     def _rebuild_systems(self) -> None:
-        clear_layout(self.systems_box)
         key = self._current_page_key
         page = self.pages.get(key, self.library)
         games = self.store.games
@@ -542,7 +618,7 @@ class MainWindow(QMainWindow):
             entry = counts.setdefault(game.system_key, [game.system, 0])
             entry[1] += 1
         systems = sorted(
-            ((key, value[0], value[1]) for key, value in counts.items()),
+            ((sys_key, value[0], value[1]) for sys_key, value in counts.items()),
             key=lambda item: (-item[2], item[1]),
         )
         active = ""
@@ -550,31 +626,47 @@ class MainWindow(QMainWindow):
             active = self.library.current_filter()
         elif page in (self.home, self.library):
             active = page.current_filter()
-        if systems:
-            total = QPushButton("Todos")
-            total.setObjectName("system")
-            total.setCheckable(True)
-            total.setChecked(not active)
-            total.setCursor(Qt.PointingHandCursor)
-            total.clicked.connect(lambda _checked=False: self._filter_system(""))
-            self.systems_box.addWidget(total)
-            for system_key, label, count in systems:
-                button = QPushButton(f"{label}   {count}")
-                button.setObjectName("system")
-                button.setCheckable(True)
-                button.setChecked(active == system_key)
-                button.setCursor(Qt.PointingHandCursor)
-                button.clicked.connect(
-                    lambda _checked=False, value=system_key: self._filter_system(value)
-                )
-                self.systems_box.addWidget(button)
+
+        signature = tuple(systems)
+        if signature != self._systems_signature:
+            self._systems_signature = signature
+            self._system_buttons = {}
+            clear_layout(self.systems_box)
+            if systems:
+                total = QPushButton("Todos")
+                total.setObjectName("system")
+                total.setCheckable(True)
+                total.setCursor(Qt.PointingHandCursor)
+                total.clicked.connect(lambda _checked=False: self._filter_system(""))
+                self.systems_box.addWidget(total)
+                self._system_buttons[""] = total
+                for system_key, label, count in systems:
+                    button = QPushButton(f"{label}   {count}")
+                    button.setObjectName("system")
+                    button.setCheckable(True)
+                    button.setCursor(Qt.PointingHandCursor)
+                    button.clicked.connect(
+                        lambda _checked=False, value=system_key: self._filter_system(value)
+                    )
+                    self.systems_box.addWidget(button)
+                    self._system_buttons[system_key] = button
+            else:
+                empty = QLabel("Sin sistemas todavía")
+                empty.setObjectName("tiny")
+                self.systems_box.addWidget(empty)
+            animate_sys = False
         else:
-            empty = QLabel("Sin sistemas todavía")
-            empty.setObjectName("tiny")
-            self.systems_box.addWidget(empty)
+            animate_sys = True
+
+        for sys_key, button in self._system_buttons.items():
+            button.setChecked(sys_key == active)
 
         filterable = key in ("home", "library", "favorites")
         self.systems_section.setVisible(filterable)
+        if filterable:
+            self._sync_sys_indicator(animate=animate_sys)
+        else:
+            self._sys_indicator.hide()
 
     def _filter_system(self, key: str) -> None:
         page = self.pages.get(self._current_page_key, self.library)
@@ -600,11 +692,13 @@ class MainWindow(QMainWindow):
             page = self.pages.get(key, self.home)
             index = self.stack.indexOf(page)
 
-        self.stack.setCurrentIndex(index)
+        if self.stack.currentIndex() != index:
+            self.stack.setCurrentIndex(index)
         if key in ("library", "favorites"):
             self.library.focus_canvas()
         for name, button in self.nav_buttons.items():
-            button.setChecked(name == key)
+            button.setChecked(name == self._current_page_key)
+        self._sync_nav_indicator(animate=True)
         self._rebuild_systems()
 
     def _focus_search(self) -> None:
@@ -1153,6 +1247,9 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self.toast.show_message(f"Estilo {active().name} aplicado.")
 
+    def _set_halo(self, enabled: bool) -> None:
+        self.library.canvas.set_halo_enabled(enabled)
+
     def _add_scan_folder(self) -> None:
         self.settings_page._add_folder()
 
@@ -1408,6 +1505,9 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._layout_chrome()
+        self._sync_nav_indicator(animate=False)
+        self._sync_sys_indicator(animate=False)
         if hasattr(self, "toast"):
             self.toast.reposition()
         if hasattr(self, "update_banner"):

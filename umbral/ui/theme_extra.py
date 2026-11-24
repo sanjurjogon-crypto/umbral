@@ -49,8 +49,8 @@ def extra_qss(style: GameStyle) -> str:
         border-bottom-color: {accent};
     }}
     QPushButton#ghost {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {softer}, stop:1 transparent);
-        border: {thin}px solid {style.border};
+        background: rgba(14, 12, 10, 0.44);
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
         border-bottom: 2px solid {style.border_soft};
         color: {style.muted};
         padding: 9px 18px;
@@ -61,12 +61,13 @@ def extra_qss(style: GameStyle) -> str:
         {transform}
     }}
     QPushButton#ghost:hover {{
+        background: {softer};
         border-color: {accent};
         color: {accent};
     }}
     QPushButton#chip {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {softer}, stop:1 transparent);
-        border: {thin}px solid {style.border};
+        background: rgba(14, 12, 10, 0.44);
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
         border-bottom: 2px solid {style.border_soft};
         color: {style.muted};
         padding: 6px 16px;
@@ -81,7 +82,7 @@ def extra_qss(style: GameStyle) -> str:
         border-color: {hair};
     }}
     QPushButton#chip:checked {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {soft}, stop:1 {softer});
+        background: rgba(212, 175, 55, 0.18);
         border-color: {accent};
         color: {accent_2};
         border-bottom: 2px solid {accent};
@@ -113,19 +114,19 @@ def extra_qss(style: GameStyle) -> str:
         background: transparent;
     }}
     QPushButton#nav:hover {{
-        border-bottom-color: {style.border_soft};
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {softer}, stop:1 transparent);
+        border-bottom-color: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.05);
     }}
     QPushButton#nav:checked {{
-        border-left: 2px solid {accent};
-        border-bottom: 1px solid {hair};
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {soft}, stop:0.7 {softer}, stop:1 transparent);
+        border-left: 2px solid transparent;
+        border-bottom: 1px solid transparent;
+        background: transparent;
         color: {accent_2};
     }}
     QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.bg}, stop:1 {style.surface_2});
-        border: {thin}px solid {style.border};
-        border-top: 2px solid {style.border_soft};
+        background: rgba(12, 11, 9, 0.48);
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
+        border-top: 2px solid rgba(255, 255, 255, 0.08);
         border-radius: {radius}px;
         padding: 8px 12px;
         color: {style.text};
@@ -135,10 +136,11 @@ def extra_qss(style: GameStyle) -> str:
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus {{
         border: {thin}px solid {accent};
         border-top: 2px solid {accent};
+        background: rgba(16, 14, 11, 0.65);
     }}
     QFrame#sidebar {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {style.sidebar}, stop:0.85 {style.sidebar_2}, stop:1 {style.bg});
-        border-right: 2px solid {style.border_soft};
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(10, 9, 7, 0.72), stop:0.85 rgba(10, 9, 7, 0.56), stop:1 rgba(10, 9, 7, 0.46));
+        border-right: 1px solid {hair};
     }}
     QLabel#toast {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.surface_3}, stop:1 {style.surface});
@@ -246,8 +248,8 @@ def extra_qss(style: GameStyle) -> str:
     }}
     QComboBox {{
         padding: 8px 34px 8px 12px;
-        background: {style.bg};
-        border: {thin}px solid {style.border};
+        background: rgba(12, 11, 9, 0.48);
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
         color: {style.text};
     }}
     QComboBox:hover {{

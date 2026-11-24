@@ -111,12 +111,24 @@ def test_shelf_canvas_renders_mixed_cases_tilt_and_badges(tmp_path: Path) -> Non
 
     rendered = canvas.grab()
     assert not rendered.isNull()
-    # Base artwork and reflection caches populated for visible cases (including neighbors)
-    assert canvas.items[0].art_cache is not None
-    assert canvas.items[1].art_cache is not None
-    assert canvas.items[2].art_cache is None
+    # Complete 3D front & alpha-faded reflection caches populated for visible cases (including neighbors)
+    assert canvas.items[0].front_cache is not None
+    assert canvas.items[1].front_cache is not None
+    assert canvas.items[2].front_cache is not None
     assert canvas.items[0].refl_cache is not None
     assert canvas.items[1].refl_cache is not None
+    assert canvas.items[2].refl_cache is not None
+
+    # Halo toggle & rotated-rectangle perspective check
+    canvas.set_halo_enabled(False)
+    assert canvas._halo_enabled is False
+    assert not canvas.grab().isNull()
+
+    from umbral.ui.shelf import _perspective_quad
+    quad_left = _perspective_quad(200.0, 300.0, 0.85, -1.0)
+    # Left & right vertical edges stay truly vertical (not trapezoidally pinched)
+    assert abs(quad_left[0].x() - quad_left[3].x()) < 0.01
+    assert abs(quad_left[1].x() - quad_left[2].x()) < 0.01
 
     canvas.step(1)
     assert canvas.index == 1

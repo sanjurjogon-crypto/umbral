@@ -235,6 +235,8 @@ class LibraryPage(QWidget):
         self._favorites_only = False
         self._favorites_filter = ""
         self._state_filter = ""
+        self._inset_left = 0
+        self._inset_top = 0
         self._hide_demos = bool(store.settings.get("hide_demos", False))
         self._view_mode = str(store.settings.get("library_view", "shelf"))
         if self._view_mode not in {"shelf", "grid"}:
@@ -324,6 +326,7 @@ class LibraryPage(QWidget):
         self._sync_order_button()
 
         self.canvas = ShelfCanvas(self)
+        self.canvas.set_halo_enabled(bool(store.settings.get("shelf_halo", True)))
         self.canvas.activated.connect(self.play_requested)
         self.canvas.details_requested.connect(self.details_requested)
         self.canvas.context_requested.connect(self.context_requested)
@@ -406,18 +409,28 @@ class LibraryPage(QWidget):
             return layout.totalHeightForWidth(width)
         return layout.sizeHint().height()
 
+    def set_chrome_insets(self, left: int, top: int) -> None:
+        self._inset_left = max(0, int(left))
+        self._inset_top = max(0, int(top))
+        self.canvas.set_chrome_insets(self._inset_left, self._inset_top)
+        self._layout_overlays()
+
     def _layout_overlays(self) -> None:
         if not hasattr(self, "canvas"):
             return
         width = self.width()
         height = self.height()
+        left = self._inset_left
+        top = self._inset_top
+        inner_w = max(0, width - left)
+        inner_h = max(0, height - top)
         self.canvas.setGeometry(0, 0, width, height)
         header_h = self.header.sizeHint().height()
-        self.header.setGeometry(0, 0, width, header_h)
+        self.header.setGeometry(left, top, inner_w, header_h)
         if hasattr(self, "grid_scroll"):
-            self.grid_scroll.setGeometry(0, header_h, width, max(0, height - header_h))
-        bottom_h = self._bottom_height(width)
-        self.bottom.setGeometry(0, height - bottom_h, width, bottom_h)
+            self.grid_scroll.setGeometry(left, top + header_h, inner_w, max(0, inner_h - header_h))
+        bottom_h = self._bottom_height(inner_w)
+        self.bottom.setGeometry(left, height - bottom_h, inner_w, bottom_h)
         if self._view_mode == "grid" and hasattr(self, "grid_scroll"):
             self.grid_scroll.lower()
         else:
@@ -425,15 +438,18 @@ class LibraryPage(QWidget):
         self.header.raise_()
         self.bottom.raise_()
         if hasattr(self, "_empty"):
-            self._empty.setGeometry(0, 0, width, height)
+            self._empty.setGeometry(left, top, inner_w, inner_h)
             if self._empty.isVisible():
                 self._empty.raise_()
 
     def set_mode(self, favorites_only: bool) -> None:
+        changed = self._favorites_only != favorites_only
+        had_filter = bool(self._favorites_filter)
         self._favorites_only = favorites_only
         self._favorites_filter = ""
         self.title_label.setText("Favoritos" if favorites_only else "Biblioteca")
-        self.refresh()
+        if changed or had_filter or not self.canvas.items:
+            self.refresh()
 
     def current_filter(self) -> str:
         return self._favorites_filter if self._favorites_only else self._filter
@@ -880,6 +896,7 @@ class SettingsPage(QWidget):
     import_library = Signal()
     unhide_game_requested = Signal(str)
     unhide_path_requested = Signal(str)
+    halo_changed = Signal(bool)
     check_updates = Signal()
     install_update = Signal()
     later_update = Signal()
@@ -1176,6 +1193,13 @@ class SettingsPage(QWidget):
         covers_button.clicked.connect(self.covers_requested)
         self.body.addWidget(covers_button, 0, Qt.AlignLeft)
 
+        self.body.addWidget(SectionHeader("Estantería 3D"))
+        halo_check = QCheckBox("Mostrar halo de color alrededor de los juegos en la Estantería 3D")
+        halo_check.setChecked(bool(self.store.settings.get("shelf_halo", True)))
+        halo_check.toggled.connect(self._toggle_halo)
+        self.halo_check = halo_check
+        self.body.addWidget(halo_check)
+
         self.body.addWidget(SectionHeader("Juegos ocultos"))
         hidden_ids = [str(item) for item in self.store.settings.get("hidden_games", []) if str(item)]
         hidden_paths = [str(item) for item in self.store.settings.get("hidden_paths", []) if str(item)]
@@ -1396,6 +1420,11 @@ class SettingsPage(QWidget):
     def _toggle_steam(self, checked: bool) -> None:
         self.store.settings["steam_scrape"] = bool(checked)
         self.store.save_settings()
+
+    def _toggle_halo(self, checked: bool) -> None:
+        self.store.settings["shelf_halo"] = bool(checked)
+        self.store.save_settings()
+        self.halo_changed.emit(bool(checked))
 
     def _add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Selecciona una carpeta de juegos")

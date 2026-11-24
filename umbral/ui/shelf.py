@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+from PIL import Image, ImageFilter
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
@@ -38,7 +40,6 @@ from ..covers import game_cover
 from ..icons import exe_pixmap
 from ..models import Game
 from ..profiles import PROFILES
-from .scenes import paint_scene
 from .style import active as active_style
 
 CASE_W = 222.0
@@ -71,6 +72,9 @@ HALO_MAIN = QColor(201, 164, 95, 34)
 HALO_SOFT = QColor(140, 100, 50, 12)
 SPINE_COLOR = QColor(201, 164, 95)
 ACCENT_TEXT = "#e7d6ad"
+
+_RAW_COVER_CACHE: OrderedDict[str, tuple[float, QPixmap, QColor]] = OrderedDict()
+_ICON_CACHE: dict[str, Optional[QPixmap]] = {}
 
 
 @dataclass(frozen=True)
@@ -375,6 +379,31 @@ def _dominant_color(pixmap: Optional[QPixmap], fallback: QColor) -> QColor:
     return QColor(fallback)
 
 
+def _cached_cover_data(
+    game: Game, fallback: QColor
+) -> tuple[Optional[QPixmap], str, QColor]:
+    path = game_cover(game)
+    if path is None:
+        return None, "", QColor(fallback)
+    key = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None, "", QColor(fallback)
+    entry = _RAW_COVER_CACHE.get(key)
+    if entry is not None and entry[0] == mtime:
+        _RAW_COVER_CACHE.move_to_end(key)
+        return entry[1], key, QColor(entry[2])
+    pixmap = QPixmap(key)
+    if pixmap.isNull():
+        return None, "", QColor(fallback)
+    dom = _dominant_color(pixmap, fallback)
+    _RAW_COVER_CACHE[key] = (mtime, pixmap, dom)
+    if len(_RAW_COVER_CACHE) > 120:
+        _RAW_COVER_CACHE.popitem(last=False)
+    return pixmap, key, dom
+
+
 def apply_style(style_key: str) -> None:
     global TRI, SQUARE, CROSS, CIRCLE, SELECT_GLOW, UI_FONT
     global PC_BAND, PC_BAND_LIGHT, CANVAS_BG, WASH_TOP, WASH_MID, WASH_BOTTOM
@@ -402,9 +431,6 @@ def apply_style(style_key: str) -> None:
     HALO_SOFT.setAlpha(12)
     SPINE_COLOR = accent
     ACCENT_TEXT = style.accent_2
-
-
-_ICON_CACHE: dict[str, Optional[QPixmap]] = {}
 
 
 def _exe_badge(executable: str) -> Optional[QPixmap]:
@@ -498,19 +524,24 @@ def _perspective_quad(
     hover_x: float = 0.0,
     hover_y: float = 0.0,
 ) -> list[QPointF]:
+    """Compute a clean 3D-rotated rectangular box quad without trapezoid top-pinching."""
     half_w = width / 2.0
     half_h = height / 2.0
-    inset = half_w * 0.11 * tilt
-    top_inset = inset
-    bottom_inset = inset * 0.18
-    shift = side * half_w * 0.045 * tilt
-    mouse_dx = hover_x * half_w * 0.05
-    mouse_dy = hover_y * half_h * 0.038
+    foreshorten = half_w * 0.135 * tilt
+    taper = half_h * 0.048 * tilt
+    if side < 0:
+        left_dy, right_dy = taper, -taper
+    elif side > 0:
+        left_dy, right_dy = -taper, taper
+    else:
+        left_dy = right_dy = 0.0
+    yaw = hover_x * half_h * 0.030
+    pitch = hover_y * half_w * 0.026
     return [
-        QPointF(-half_w + top_inset + shift * 0.4 + mouse_dx * 0.45, -half_h + inset * 0.12 - mouse_dy),
-        QPointF(half_w - top_inset * 0.35 + shift + mouse_dx * 0.45, -half_h - inset * 0.12 + mouse_dy * 0.65),
-        QPointF(half_w - bottom_inset + shift - mouse_dx * 0.45, half_h - inset * 0.05 - mouse_dy * 0.65),
-        QPointF(-half_w + bottom_inset * 0.35 + shift * 0.4 - mouse_dx * 0.45, half_h + inset * 0.05 + mouse_dy),
+        QPointF(-half_w + foreshorten + pitch, -half_h + left_dy - yaw),
+        QPointF(half_w - foreshorten - pitch, -half_h + right_dy + yaw),
+        QPointF(half_w - foreshorten + pitch, half_h - right_dy - yaw),
+        QPointF(-half_w + foreshorten - pitch, half_h - left_dy + yaw),
     ]
 
 
@@ -547,16 +578,125 @@ def _quad_transform(source: list[QPointF], quad: list[QPointF]) -> QTransform:
     return QTransform(h11, h21, h31, h12, h22, h32, h13, h23, 1.0)
 
 
+def _pillow_blur_cover(
+    cover_path: str, pixmap: Optional[QPixmap], target_w: int, target_h: int
+) -> Optional[np.ndarray]:
+    """Generate a high-resolution Gaussian-blurred RGB array from cover artwork without square pixelation."""
+    img: Optional[Image.Image] = None
+    try:
+        if cover_path:
+            with Image.open(cover_path) as loaded:
+                img = loaded.convert("RGB")
+        elif pixmap is not None and not pixmap.isNull():
+            qimg = pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+            stride = qimg.bytesPerLine()
+            raw = bytes(qimg.constBits())
+            arr = np.frombuffer(raw, dtype=np.uint8).reshape((qimg.height(), stride))[:, : qimg.width() * 3]
+            img = Image.fromarray(arr.reshape((qimg.height(), qimg.width(), 3)), mode="RGB")
+    except OSError:
+        img = None
+    if img is None:
+        return None
+
+    work_w = max(320, min(640, target_w // 2 if target_w >= 640 else target_w))
+    work_h = max(180, int(round(work_w * (target_h / max(1, target_w)))))
+    src_w, src_h = img.size
+    if src_w <= 0 or src_h <= 0:
+        return None
+    scale = max(work_w / src_w, work_h / src_h)
+    scaled_w = max(work_w, int(round(src_w * scale)))
+    scaled_h = max(work_h, int(round(src_h * scale)))
+    resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+    left = max(0, (scaled_w - work_w) // 2)
+    top = max(0, (scaled_h - work_h) // 3)
+    cropped = resized.crop((left, top, left + work_w, top + work_h))
+    blurred = cropped.filter(ImageFilter.GaussianBlur(radius=24))
+    full = blurred.resize((target_w, target_h), Image.Resampling.BILINEAR)
+    return np.asarray(full, dtype=np.float32)
+
+
+def render_debanded_backdrop(
+    width: int,
+    height: int,
+    center_x: float,
+    center_y: float,
+    cover_w: float,
+    cover_h: float,
+    cover_path: str,
+    pixmap: Optional[QPixmap],
+    dominant: QColor,
+    halo_enabled: bool,
+) -> QPixmap:
+    """Render a smooth high-res backdrop with triangular-PDF debanding and film grain."""
+    w = max(16, int(width))
+    h = max(16, int(height))
+
+    y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+    x_norm = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
+
+    top_c = QColor(WASH_TOP)
+    bottom_c = QColor(WASH_BOTTOM)
+    base = np.empty((h, w, 3), dtype=np.float32)
+    for ch, (t_v, b_v) in enumerate(
+        (
+            (top_c.red(), bottom_c.red()),
+            (top_c.green(), bottom_c.green()),
+            (top_c.blue(), bottom_c.blue()),
+        )
+    ):
+        base[:, :, ch] = t_v + (b_v - t_v) * y_norm[:, 0][:, None]
+
+    cover_arr = _pillow_blur_cover(cover_path, pixmap, w, h)
+    if cover_arr is not None:
+        # Vertical atmospheric blend keeping cover vibrant in center and deeper under top/bottom chrome
+        veil = 0.24 + 0.34 * np.exp(-((y_norm - 0.44) / 0.32) ** 2)
+        base = base * (1.0 - veil[:, :, None]) + cover_arr * veil[:, :, None]
+
+    if halo_enabled:
+        dom = np.array([dominant.red(), dominant.green(), dominant.blue()], dtype=np.float32)
+        cx_n = center_x / w
+        cy_n = center_y / h
+        rx = max(0.28, (cover_w * 2.15) / w)
+        ry = max(0.32, (cover_h * 1.45) / h)
+        r2 = ((x_norm - cx_n) / rx) ** 2 + ((y_norm - cy_n) / ry) ** 2
+        glow = 0.28 * np.exp(-r2 * 1.35)
+
+        spot_ry = max(0.45, (cover_h * 1.75) / h)
+        spot_r2 = ((x_norm - cx_n) / (rx * 0.85)) ** 2 + ((y_norm - 0.14) / spot_ry) ** 2
+        spotlight = 0.14 * np.exp(-spot_r2 * 1.55)
+
+        halo_w = np.clip(glow + spotlight, 0.0, 0.45)[:, :, None]
+        spot_tint = np.clip(dom * 1.25 + 24.0, 0.0, 255.0)
+        base = base * (1.0 - halo_w) + spot_tint[None, None, :] * halo_w
+
+    # Gentle cinematic edge vignette
+    vx = (x_norm - 0.5) / 0.56
+    vy = (y_norm - 0.46) / 0.58
+    vig = 1.0 - 0.42 * np.clip((vx * vx + vy * vy) * 0.55, 0.0, 1.0)
+    base *= vig[:, :, None]
+
+    # Triangular-PDF deband dither + subtle monochrome film grain prevents 8-bit color banding rings
+    rng = np.random.default_rng(2026)
+    u1 = rng.random((h, w), dtype=np.float32)
+    u2 = rng.random((h, w), dtype=np.float32)
+    grain = (u1 + u2 - 1.0) * 3.1
+    base = np.clip(base + grain[:, :, None], 0.0, 255.0).astype(np.uint8)
+
+    qimg = QImage(base.data, w, h, w * 3, QImage.Format_RGB888).copy()
+    return QPixmap.fromImage(qimg)
+
+
 @dataclass
 class ShelfItem:
     game: Game
     pixmap: Optional[QPixmap]
+    cover_path: str
     profile: CaseProfile
     dominant: QColor
-    art_cache: Optional[QPixmap] = None
-    art_cache_size: tuple[int, int] = (0, 0)
+    front_cache: Optional[QPixmap] = None
+    front_cache_key: tuple = ()
     refl_cache: Optional[QPixmap] = None
-    refl_cache_size: tuple[int, int] = (0, 0)
+    refl_cache_key: tuple = ()
 
 
 class ShelfCanvas(QWidget):
@@ -583,27 +723,47 @@ class ShelfCanvas(QWidget):
         self._tilt_y = 0.0
         self._tilt_target_x = 0.0
         self._tilt_target_y = 0.0
+        self._inset_left = 0
+        self._inset_top = 0
+        self._halo_enabled = True
         self._backdrop_mix = 1.0
-        self._prev_backdrop_pixmap: Optional[QPixmap] = None
-        self._prev_backdrop_color: Optional[QColor] = None
+        self._prev_backdrop_item: Optional[ShelfItem] = None
         self._active_backdrop_id: str = ""
-        self._backdrop_cache: OrderedDict[tuple[str, int, int], QPixmap] = OrderedDict()
+        self._backdrop_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
 
         self._anim = QPropertyAnimation(self, b"position", self)
-        self._anim.setDuration(400)
+        self._anim.setDuration(380)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._hover_anim = QPropertyAnimation(self, b"hover_lift", self)
-        self._hover_anim.setDuration(220)
+        self._hover_anim.setDuration(200)
         self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._bg_anim = QPropertyAnimation(self, b"backdrop_mix", self)
-        self._bg_anim.setDuration(420)
+        self._bg_anim.setDuration(360)
         self._bg_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         self._tilt_timer = QTimer(self)
         self._tilt_timer.setInterval(16)
         self._tilt_timer.timeout.connect(self._step_tilt)
+
+    def set_chrome_insets(self, left: int, top: int) -> None:
+        left_val = max(0, int(left))
+        top_val = max(0, int(top))
+        if (left_val, top_val) == (self._inset_left, self._inset_top):
+            return
+        self._inset_left = left_val
+        self._inset_top = top_val
+        self._backdrop_cache.clear()
+        self.update()
+
+    def set_halo_enabled(self, enabled: bool) -> None:
+        flag = bool(enabled)
+        if flag == self._halo_enabled:
+            return
+        self._halo_enabled = flag
+        self._backdrop_cache.clear()
+        self.update()
 
     def get_float(self) -> float:
         return self._float
@@ -649,12 +809,11 @@ class ShelfCanvas(QWidget):
         fallback = QColor(active_style().accent)
         items: list[ShelfItem] = []
         for game in games:
-            pixmap = self._load(game)
             profile = case_profile(game)
-            dominant = _dominant_color(pixmap, QColor(profile.header_accent or fallback.name()))
-            items.append(ShelfItem(game, pixmap, profile, dominant))
+            item_fallback = QColor(profile.header_accent or fallback.name())
+            pixmap, cover_path, dominant = _cached_cover_data(game, item_fallback)
+            items.append(ShelfItem(game, pixmap, cover_path, profile, dominant))
         self.items = items
-        self._backdrop_cache.clear()
         self.index = 0
         if previous is not None:
             for position, item in enumerate(self.items):
@@ -666,8 +825,7 @@ class ShelfCanvas(QWidget):
         self._target = self._float
         current_item = self._current_item()
         self._active_backdrop_id = current_item.game.id if current_item else ""
-        self._prev_backdrop_pixmap = None
-        self._prev_backdrop_color = None
+        self._prev_backdrop_item = None
         self._backdrop_mix = 1.0
         self._sync()
         self._emit_selection()
@@ -706,12 +864,13 @@ class ShelfCanvas(QWidget):
         self._anim.start()
         self.update()
 
-    def _start_backdrop_transition(self, previous: Optional[ShelfItem], current: Optional[ShelfItem]) -> None:
+    def _start_backdrop_transition(
+        self, previous: Optional[ShelfItem], current: Optional[ShelfItem]
+    ) -> None:
         cur_id = current.game.id if current is not None else ""
         if cur_id == self._active_backdrop_id:
             return
-        self._prev_backdrop_pixmap = previous.pixmap if previous is not None else None
-        self._prev_backdrop_color = previous.dominant if previous is not None else None
+        self._prev_backdrop_item = previous
         self._active_backdrop_id = cur_id
         self._bg_anim.stop()
         self._backdrop_mix = 0.0
@@ -729,10 +888,11 @@ class ShelfCanvas(QWidget):
         if not self.items:
             return
         previous_item = self._current_item()
+        old_index = self.index
         new_index = max(0, min(self.index + delta, len(self.items) - 1))
         self.index = new_index
         current_item = self._current_item()
-        if new_index != (self.items.index(previous_item) if previous_item in self.items else -1):
+        if new_index != old_index:
             self._start_backdrop_transition(previous_item, current_item)
         self._sync()
         self._emit_selection()
@@ -863,11 +1023,11 @@ class ShelfCanvas(QWidget):
             event.accept()
 
     def _layout(self):
-        width = self.width()
-        height = self.height()
-        center_x = width / 2.0
-        center_y = height * 0.445
-        scale = min(width / 1240.0, 1.18)
+        usable_w = max(320.0, float(self.width() - self._inset_left))
+        usable_h = max(240.0, float(self.height() - self._inset_top))
+        center_x = self._inset_left + usable_w / 2.0
+        center_y = self._inset_top + usable_h * 0.445
+        scale = min(usable_w / 1240.0, 1.18)
         cover_w = CASE_W * max(0.72, scale)
         cover_h = CASE_H * max(0.72, scale) + cover_w * TITLE_BAND_RATIO
         gap = cover_w * 0.86
@@ -903,7 +1063,6 @@ class ShelfCanvas(QWidget):
     ) -> QRectF:
         width = cover_w * item.profile.w_scale * geometry["scale"]
         height = cover_h * item.profile.h_scale * geometry["scale"]
-        # Align bottom edges along a consistent shelf plane so taller/shorter cases rest naturally
         shelf_floor = center_y + cover_h * 0.50
         bottom = shelf_floor - geometry["lift"] - (cover_h * 0.50 * (1.0 - geometry["scale"]))
         top = bottom - height
@@ -930,23 +1089,46 @@ class ShelfCanvas(QWidget):
                     best = position
         return best
 
-    def _blurred_backdrop(self, key: str, pixmap: QPixmap, size: QSize) -> QPixmap:
-        cache_key = (key, size.width(), size.height())
+    def _backdrop_for(
+        self,
+        item: Optional[ShelfItem],
+        center_x: float,
+        center_y: float,
+        cover_w: float,
+        cover_h: float,
+    ) -> QPixmap:
+        key_id = item.game.id if item is not None else "__none__"
+        cov_key = item.cover_path if item is not None else ""
+        cache_key = (
+            key_id,
+            cov_key,
+            self.width(),
+            self.height(),
+            int(center_x),
+            int(center_y),
+            self._halo_enabled,
+        )
         cached = self._backdrop_cache.get(cache_key)
         if cached is not None:
             self._backdrop_cache.move_to_end(cache_key)
             return cached
-        small_w = max(18, size.width() // 18)
-        small_h = max(12, size.height() // 18)
-        tiny = pixmap.scaled(small_w, small_h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        blurred = tiny.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        sx = max(0, (blurred.width() - size.width()) // 2)
-        sy = max(0, (blurred.height() - size.height()) // 2)
-        cropped = blurred.copy(sx, sy, size.width(), size.height())
-        self._backdrop_cache[cache_key] = cropped
-        if len(self._backdrop_cache) > 24:
+        fallback = QColor(active_style().accent)
+        rendered = render_debanded_backdrop(
+            self.width(),
+            self.height(),
+            center_x,
+            center_y,
+            cover_w,
+            cover_h,
+            cov_key,
+            item.pixmap if item is not None else None,
+            item.dominant if item is not None else fallback,
+            self._halo_enabled,
+        )
+        self._backdrop_cache[cache_key] = rendered
+        if len(self._backdrop_cache) > 18:
             self._backdrop_cache.popitem(last=False)
-        return cropped
+        return rendered
 
     def paintEvent(self, event) -> None:  # noqa: N802 - API de Qt
         painter = QPainter(self)
@@ -959,15 +1141,6 @@ class ShelfCanvas(QWidget):
         current_item = self._current_item()
 
         self._paint_backdrop(painter, current_item, center_x, center_y, cover_w, cover_h)
-        paint_scene(
-            painter,
-            QRectF(self.rect()),
-            center_x,
-            center_y,
-            cover_w,
-            cover_h,
-            active_style(),
-        )
         self._paint_floor(painter, current_item, center_x, center_y, cover_w, cover_h)
 
         order: list[tuple[int, float, dict]] = []
@@ -1004,70 +1177,11 @@ class ShelfCanvas(QWidget):
 
         painter.end()
 
-    def _art_pixmap_for(
-        self, item: ShelfItem, base_w: int, base_h: int
-    ) -> Optional[QPixmap]:
-        if item.pixmap is None or item.pixmap.isNull():
-            return None
-        size = (max(1, base_w), max(1, base_h))
-        if item.art_cache is not None and item.art_cache_size == size:
-            return item.art_cache
-        src_size = QSize(size[0], size[1])
-        rendered = QPixmap(src_size)
-        rendered.fill(QColor("#080705"))
-        buf = QPainter(rendered)
-        buf.setRenderHint(QPainter.SmoothPixmapTransform)
-        ratio = item.pixmap.width() / max(1, item.pixmap.height())
-        target_ratio = size[0] / max(1.0, size[1])
-        if ratio > target_ratio * 1.25:
-            small = QSize(max(1, int(size[0] * 0.12)), max(1, int(size[1] * 0.12)))
-            backdrop = item.pixmap.scaled(
-                small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
-            ).scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            buf.setOpacity(0.42)
-            buf.drawPixmap(
-                QPointF((size[0] - backdrop.width()) / 2.0, (size[1] - backdrop.height()) / 2.0),
-                backdrop,
-            )
-            buf.setOpacity(1.0)
-            scaled = item.pixmap.scaled(src_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            buf.drawPixmap(
-                QPointF((size[0] - scaled.width()) / 2.0, (size[1] - scaled.height()) / 2.0),
-                scaled,
-            )
-        else:
-            src = item.pixmap.scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            sx = max(0, (src.width() - size[0]) // 2)
-            sy = max(0, (src.height() - size[1]) // 2)
-            buf.drawPixmap(0, 0, src.copy(sx, sy, size[0], size[1]))
-        buf.end()
-        item.art_cache = rendered
-        item.art_cache_size = size
-        return rendered
-
-    def _refl_pixmap_for(
-        self, item: ShelfItem, base_w: int, base_h: int
-    ) -> Optional[QPixmap]:
-        if item.pixmap is None or item.pixmap.isNull():
-            return None
-        size = (max(1, base_w), max(1, base_h))
-        if item.refl_cache is not None and item.refl_cache_size == size:
-            return item.refl_cache
-        src_h = item.pixmap.height()
-        slice_h = max(1, int(src_h * 0.50))
-        bottom_slice = item.pixmap.copy(0, src_h - slice_h, item.pixmap.width(), slice_h)
-        flipped = bottom_slice.transformed(QTransform().scale(1.0, -1.0)).scaled(
-            QSize(size[0], size[1]), Qt.IgnoreAspectRatio, Qt.SmoothTransformation
-        )
-        item.refl_cache = flipped
-        item.refl_cache_size = size
-        return flipped
-
     def _blended_dominant(self, current_item: Optional[ShelfItem]) -> QColor:
         fallback = QColor(active_style().accent)
         target_color = current_item.dominant if current_item is not None else fallback
-        if self._prev_backdrop_color is not None and self._backdrop_mix < 1.0:
-            return _mix(self._prev_backdrop_color, target_color, self._backdrop_mix)
+        if self._prev_backdrop_item is not None and self._backdrop_mix < 1.0:
+            return _mix(self._prev_backdrop_item.dominant, target_color, self._backdrop_mix)
         return target_color
 
     def _paint_backdrop(
@@ -1079,63 +1193,20 @@ class ShelfCanvas(QWidget):
         cover_w: float,
         cover_h: float,
     ) -> None:
-        rect = QRectF(self.rect())
-        wash = QLinearGradient(0, 0, 0, rect.height())
-        wash.setColorAt(0.0, QColor(WASH_TOP))
-        wash.setColorAt(0.5, QColor(WASH_MID))
-        wash.setColorAt(1.0, QColor(WASH_BOTTOM))
-        painter.fillRect(rect, QBrush(wash))
-
-        size = self.size()
         mix = _smooth(self._backdrop_mix)
-        if self._prev_backdrop_pixmap is not None and not self._prev_backdrop_pixmap.isNull() and mix < 0.99:
-            prev_blur = self._blurred_backdrop("prev", self._prev_backdrop_pixmap, size)
+        if self._prev_backdrop_item is not None and mix < 0.99:
+            prev_bg = self._backdrop_for(
+                self._prev_backdrop_item, center_x, center_y, cover_w, cover_h
+            )
+            painter.drawPixmap(0, 0, prev_bg)
+            cur_bg = self._backdrop_for(current_item, center_x, center_y, cover_w, cover_h)
             painter.save()
-            painter.setOpacity(0.42 * (1.0 - mix))
-            painter.drawPixmap(0, 0, prev_blur)
+            painter.setOpacity(mix)
+            painter.drawPixmap(0, 0, cur_bg)
             painter.restore()
-        if current_item is not None and current_item.pixmap is not None and not current_item.pixmap.isNull():
-            cur_blur = self._blurred_backdrop(current_item.game.id, current_item.pixmap, size)
-            painter.save()
-            painter.setOpacity(0.42 * mix)
-            painter.drawPixmap(0, 0, cur_blur)
-            painter.restore()
-
-        # Rich gradient veil so top header and bottom info stay legible while keeping cover color vivid
-        veil = QLinearGradient(0, 0, 0, rect.height())
-        veil.setColorAt(0.0, QColor(8, 7, 6, 175))
-        veil.setColorAt(0.28, QColor(8, 7, 6, 80))
-        veil.setColorAt(0.60, QColor(6, 5, 4, 130))
-        veil.setColorAt(1.0, QColor(4, 4, 3, 225))
-        painter.fillRect(rect, QBrush(veil))
-
-        dominant = self._blended_dominant(current_item)
-        # Ambient color aura behind centered box
-        glow = QRadialGradient(center_x, center_y, max(rect.width() * 0.55, cover_w * 1.9))
-        c1 = QColor(dominant)
-        c1.setAlpha(95)
-        c2 = QColor(dominant)
-        c2.setAlpha(32)
-        glow.setColorAt(0.0, c1)
-        glow.setColorAt(0.48, c2)
-        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.fillRect(rect, QBrush(glow))
-
-        # Overhead spotlight cone onto centered box
-        spot = QRadialGradient(center_x, rect.top() + rect.height() * 0.08, cover_h * 1.55)
-        s1 = QColor(dominant).lighter(145)
-        s1.setAlpha(58)
-        spot.setColorAt(0.0, s1)
-        spot.setColorAt(0.6, QColor(dominant.red(), dominant.green(), dominant.blue(), 14))
-        spot.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.fillRect(rect, QBrush(spot))
-
-        vignette = QRadialGradient(
-            rect.width() * 0.5, rect.height() * 0.46, max(rect.width(), rect.height()) * 0.72
-        )
-        vignette.setColorAt(0.35, QColor(0, 0, 0, 0))
-        vignette.setColorAt(1.0, QColor(0, 0, 0, 175))
-        painter.fillRect(rect, QBrush(vignette))
+            return
+        cur_bg = self._backdrop_for(current_item, center_x, center_y, cover_w, cover_h)
+        painter.drawPixmap(0, 0, cur_bg)
 
     def _paint_floor(
         self,
@@ -1148,33 +1219,154 @@ class ShelfCanvas(QWidget):
     ) -> None:
         rect = QRectF(self.rect())
         floor_y = center_y + cover_h * 0.50 + 2
-        dominant = self._blended_dominant(current_item)
+        dominant = self._blended_dominant(current_item) if self._halo_enabled else QColor(active_style().accent)
 
         floor_rect = QRectF(0, floor_y, rect.width(), max(0.0, rect.bottom() - floor_y))
         marble = QLinearGradient(0, floor_y, 0, rect.bottom())
-        marble.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), 28))
-        marble.setColorAt(0.25, QColor(12, 11, 10, 165))
-        marble.setColorAt(1.0, QColor(4, 4, 3, 235))
+        tint_alpha = 26 if self._halo_enabled else 10
+        marble.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), tint_alpha))
+        marble.setColorAt(0.28, QColor(11, 10, 9, 175))
+        marble.setColorAt(1.0, QColor(4, 4, 3, 240))
         painter.fillRect(floor_rect, QBrush(marble))
 
         sheen = QLinearGradient(0, floor_y, rect.width(), floor_y)
         sheen.setColorAt(0.0, QColor(0, 0, 0, 0))
-        sheen.setColorAt(0.28, QColor(dominant.red(), dominant.green(), dominant.blue(), 45))
-        sheen.setColorAt(0.50, QColor(255, 250, 238, 85))
-        sheen.setColorAt(0.72, QColor(dominant.red(), dominant.green(), dominant.blue(), 45))
+        sheen.setColorAt(
+            0.30,
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 42 if self._halo_enabled else 18),
+        )
+        sheen.setColorAt(0.55, QColor(255, 250, 238, 72))
+        sheen.setColorAt(
+            0.78,
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 42 if self._halo_enabled else 18),
+        )
         sheen.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setPen(QPen(QBrush(sheen), 1.3))
+        painter.setPen(QPen(QBrush(sheen), 1.2))
         painter.drawLine(QPointF(0, floor_y), QPointF(rect.width(), floor_y))
 
-        painter.save()
-        shadow = QRadialGradient(center_x, floor_y + 6, cover_w * 1.05)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 165))
-        shadow.setColorAt(0.6, QColor(0, 0, 0, 75))
-        shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(shadow))
-        painter.drawEllipse(QPointF(center_x, floor_y + 6), cover_w * 0.84, 24)
-        painter.restore()
+    def _front_pixmap_for(
+        self, item: ShelfItem, base_w: int, base_h: int
+    ) -> QPixmap:
+        """Render and cache the complete 3D box front design (title, art, console band, badge, border)."""
+        style = active_style()
+        key = (
+            max(48, base_w),
+            max(48, base_h),
+            item.game.title,
+            item.game.favorite,
+            item.game.state,
+            item.cover_path,
+            style.key,
+        )
+        if item.front_cache is not None and item.front_cache_key == key:
+            return item.front_cache
+
+        width = float(key[0])
+        height = float(key[1])
+        pix = QPixmap(key[0], key[1])
+        pix.fill(Qt.transparent)
+        buf = QPainter(pix)
+        buf.setRenderHint(QPainter.Antialiasing)
+        buf.setRenderHint(QPainter.SmoothPixmapTransform)
+        buf.setRenderHint(QPainter.TextAntialiasing)
+
+        frame = QRectF(0.0, 0.0, width, height)
+        profile = item.profile
+        radius = profile.radius
+        pc_case = _is_pc_case(item.game)
+        band_h = height * (0.145 if pc_case else 0.125)
+        title_h = width * TITLE_BAND_RATIO
+
+        title = QRectF(0.0, 0.0, width, title_h)
+        art = QRectF(0.0, title_h, width, height - band_h - title_h)
+        band = QRectF(0.0, height - band_h, width, band_h)
+
+        outer = QPainterPath()
+        outer.addRoundedRect(frame, radius, radius)
+        buf.setClipPath(outer)
+
+        if item.pixmap is not None and not item.pixmap.isNull():
+            src_size = art.size().toSize()
+            ratio = item.pixmap.width() / max(1, item.pixmap.height())
+            target_ratio = art.width() / max(1.0, art.height())
+            if ratio > target_ratio * 1.25:
+                buf.fillRect(art, QColor("#080705"))
+                small = QSize(max(1, int(src_size.width() * 0.14)), max(1, int(src_size.height() * 0.14)))
+                backdrop = item.pixmap.scaled(
+                    small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                ).scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                buf.setOpacity(0.42)
+                buf.drawPixmap(
+                    QPointF(art.center().x() - backdrop.width() / 2.0, art.center().y() - backdrop.height() / 2.0),
+                    backdrop,
+                )
+                buf.setOpacity(1.0)
+                scaled = item.pixmap.scaled(src_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                buf.drawPixmap(
+                    QPointF(art.center().x() - scaled.width() / 2.0, art.center().y() - scaled.height() / 2.0),
+                    scaled,
+                )
+            else:
+                src = item.pixmap.scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                sx = max(0, (src.width() - src_size.width()) // 2)
+                sy = max(0, (src.height() - src_size.height()) // 2)
+                buf.drawPixmap(art.topLeft(), src.copy(sx, sy, src_size.width(), src_size.height()))
+        else:
+            self._paint_placeholder(buf, art, item)
+
+        self._paint_title_band(buf, title, item)
+        if pc_case:
+            self._paint_pc_band(buf, band, item)
+        else:
+            self._paint_color_band(buf, band, item, width)
+        self._paint_status_badges(buf, art, item)
+
+        frame_line = (
+            QColor(profile.header_accent)
+            if profile.key in {"switch", "switch2", "3ds", "ps3"}
+            else QColor(style.text)
+        )
+        frame_line.setAlpha(75)
+        buf.setPen(QPen(frame_line, 1.3))
+        buf.setBrush(Qt.NoBrush)
+        buf.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
+        buf.end()
+
+        item.front_cache = pix
+        item.front_cache_key = key
+        return pix
+
+    def _refl_pixmap_for(
+        self, item: ShelfItem, base_w: int, base_h: int
+    ) -> QPixmap:
+        """Build a flipped, softly alpha-faded copy of the complete 3D box front (zero hard bottom cut)."""
+        front = self._front_pixmap_for(item, base_w, base_h)
+        refl_h = max(32, int(round(front.height() * 0.68)))
+        key = (*item.front_cache_key, refl_h)
+        if item.refl_cache is not None and item.refl_cache_key == key:
+            return item.refl_cache
+
+        flipped_full = front.transformed(QTransform().scale(1.0, -1.0))
+        cropped = flipped_full.copy(0, 0, front.width(), min(refl_h, flipped_full.height()))
+
+        out = QPixmap(front.width(), refl_h)
+        out.fill(Qt.transparent)
+        p = QPainter(out)
+        p.drawPixmap(0, 0, cropped)
+        # Smooth continuous alpha mask fading completely to 0 before the bottom edge
+        mask = QLinearGradient(0, 0, 0, refl_h)
+        mask.setColorAt(0.0, QColor(0, 0, 0, 195))
+        mask.setColorAt(0.28, QColor(0, 0, 0, 110))
+        mask.setColorAt(0.68, QColor(0, 0, 0, 28))
+        mask.setColorAt(0.92, QColor(0, 0, 0, 0))
+        mask.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+        p.fillRect(0, 0, out.width(), refl_h, QBrush(mask))
+        p.end()
+
+        item.refl_cache = out
+        item.refl_cache_key = key
+        return out
 
     def _paint_reflection(
         self,
@@ -1188,7 +1380,7 @@ class ShelfCanvas(QWidget):
         selected: bool,
     ) -> None:
         focus = geometry["focus"]
-        strength = max(0.45, focus) * (1.0 - min(0.50, geometry["dim"] * 0.60))
+        strength = max(0.42, focus) * (1.0 - min(0.55, geometry["dim"] * 0.65))
         if strength <= 0.08:
             return
         target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
@@ -1204,17 +1396,20 @@ class ShelfCanvas(QWidget):
         quad = _perspective_quad(
             target.width(), target.height(), tilt_amount, side, hover_x=hover_x, hover_y=hover_y
         )
-        # Project reflection cleanly downward from the box's actual bottom perspective edge
-        bot_left = QPointF(target.center().x() + quad[3].x(), target.center().y() + quad[3].y() + 3.0)
-        bot_right = QPointF(target.center().x() + quad[2].x(), target.center().y() + quad[2].y() + 3.0)
-        refl_h = target.height() * 0.42
-        refl_rect = QRectF(target.left(), target.bottom() + 3.0, target.width(), refl_h)
+
+        # Anchor flipped 3D reflection directly under the bottom perspective edge of the case
+        bl = QPointF(target.center().x() + quad[3].x(), target.center().y() + quad[3].y() + 2.0)
+        br = QPointF(target.center().x() + quad[2].x(), target.center().y() + quad[2].y() + 2.0)
+        refl_h = target.height() * 0.68
+        l_drop = refl_h + (quad[3].y() - quad[2].y()) * 0.35
+        r_drop = refl_h + (quad[2].y() - quad[3].y()) * 0.35
         refl_quad = [
-            bot_left,
-            bot_right,
-            QPointF(bot_right.x() + side * target.width() * 0.02, bot_right.y() + refl_h),
-            QPointF(bot_left.x() + side * target.width() * 0.02, bot_left.y() + refl_h),
+            bl,
+            br,
+            QPointF(br.x(), br.y() + r_drop),
+            QPointF(bl.x(), bl.y() + l_drop),
         ]
+        refl_rect = QRectF(target.left(), target.bottom() + 2.0, target.width(), refl_h)
         source = [
             QPointF(refl_rect.left(), refl_rect.top()),
             QPointF(refl_rect.right(), refl_rect.top()),
@@ -1223,41 +1418,35 @@ class ShelfCanvas(QWidget):
         ]
         trans = _quad_transform(source, refl_quad)
 
+        base_w = max(48, int(round(cover_w * item.profile.w_scale)))
+        base_h = max(48, int(round(cover_h * item.profile.h_scale)))
+        refl_pix = self._refl_pixmap_for(item, base_w, base_h)
+
         painter.save()
         painter.setTransform(trans, False)
-        clip = QPainterPath()
-        clip.addRoundedRect(refl_rect, item.profile.radius, item.profile.radius)
-        painter.setClipPath(clip)
-
-        painter.setOpacity(0.58 * strength if selected else 0.46 * strength)
-        base_w = max(48, int(round(cover_w * item.profile.w_scale)))
-        base_h = max(48, int(round(cover_h * item.profile.h_scale * 0.34)))
-        band_slice_h = refl_h * 0.25
-        painter.fillRect(
-            QRectF(refl_rect.left(), refl_rect.top(), refl_rect.width(), band_slice_h),
-            QColor(item.profile.header_bg),
-        )
-        art_refl = QRectF(
-            refl_rect.left(),
-            refl_rect.top() + band_slice_h,
-            refl_rect.width(),
-            refl_h - band_slice_h,
-        )
-        refl_pix = self._refl_pixmap_for(item, base_w, base_h)
-        if refl_pix is not None and not refl_pix.isNull():
-            painter.drawPixmap(art_refl, refl_pix, QRectF(refl_pix.rect()))
+        painter.setOpacity(0.56 * strength if selected else 0.44 * strength)
+        # Mirror subtle 3D spine into floor too
+        depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
+        spine_grad = QLinearGradient(0, refl_rect.top(), 0, refl_rect.bottom())
+        spine_base = QColor(item.profile.spine_color)
+        spine_grad.setColorAt(0.0, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 170))
+        spine_grad.setColorAt(0.7, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 35))
+        spine_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+        spine_path = QPainterPath()
+        if side > 0.0:
+            spine_path.moveTo(refl_rect.left(), refl_rect.top())
+            spine_path.lineTo(refl_rect.left() - depth, refl_rect.top() - depth * 0.32)
+            spine_path.lineTo(refl_rect.left() - depth, refl_rect.bottom())
+            spine_path.lineTo(refl_rect.left(), refl_rect.bottom())
         else:
-            fallback = QLinearGradient(art_refl.topLeft(), art_refl.bottomLeft())
-            fallback.setColorAt(0.0, item.dominant)
-            fallback.setColorAt(1.0, QColor(0, 0, 0, 0))
-            painter.fillRect(art_refl, QBrush(fallback))
-
-        painter.setOpacity(1.0)
-        fade = QLinearGradient(0, refl_rect.top(), 0, refl_rect.bottom())
-        fade.setColorAt(0.0, QColor(6, 5, 4, 15))
-        fade.setColorAt(0.55, QColor(6, 5, 4, 135))
-        fade.setColorAt(1.0, QColor(4, 4, 3, 245))
-        painter.fillRect(refl_rect, QBrush(fade))
+            spine_path.moveTo(refl_rect.right(), refl_rect.top())
+            spine_path.lineTo(refl_rect.right() + depth, refl_rect.top() - depth * 0.32)
+            spine_path.lineTo(refl_rect.right() + depth, refl_rect.bottom())
+            spine_path.lineTo(refl_rect.right(), refl_rect.bottom())
+        spine_path.closeSubpath()
+        painter.setPen(Qt.NoPen)
+        painter.fillPath(spine_path, QBrush(spine_grad))
+        painter.drawPixmap(refl_rect, refl_pix, QRectF(refl_pix.rect()))
         painter.restore()
 
     def _paint_case(
@@ -1300,11 +1489,11 @@ class ShelfCanvas(QWidget):
 
         painter.save()
         painter.setTransform(trans, False)
-        self._paint_spine(painter, target, item)
+        self._paint_spine(painter, target, item, side)
         self._paint_front(painter, target, item, selected, geometry["focus"], cover_w, cover_h)
         painter.restore()
 
-        fade = min(0.82, geometry["dim"] * 1.05)
+        fade = min(0.74, geometry["dim"] * 0.92)
         if fade > 0.01:
             painter.save()
             painter.setTransform(trans, False)
@@ -1321,17 +1510,26 @@ class ShelfCanvas(QWidget):
         painter.setBrush(QBrush(shade))
         painter.drawRect(target)
 
-    def _paint_spine(self, painter: QPainter, target: QRectF, item: ShelfItem) -> None:
+    def _paint_spine(
+        self, painter: QPainter, target: QRectF, item: ShelfItem, side: float = -1.0
+    ) -> None:
         width = target.width()
         depth = CASE_DEPTH * (width / CASE_W) * 0.55 * item.profile.depth_scale
-        path = QPainterPath()
-        path.moveTo(target.right(), target.top())
-        path.lineTo(target.right() + depth, target.top() + depth * 0.35)
-        path.lineTo(target.right() + depth, target.bottom() - depth * 0.35)
-        path.lineTo(target.right(), target.bottom())
-        path.closeSubpath()
         base = QColor(item.profile.spine_color)
-        spine = QLinearGradient(target.right(), 0, target.right() + depth, 0)
+        path = QPainterPath()
+        if side > 0.0:
+            path.moveTo(target.left(), target.top())
+            path.lineTo(target.left() - depth, target.top() + depth * 0.32)
+            path.lineTo(target.left() - depth, target.bottom() - depth * 0.32)
+            path.lineTo(target.left(), target.bottom())
+            spine = QLinearGradient(target.left(), 0, target.left() - depth, 0)
+        else:
+            path.moveTo(target.right(), target.top())
+            path.lineTo(target.right() + depth, target.top() + depth * 0.32)
+            path.lineTo(target.right() + depth, target.bottom() - depth * 0.32)
+            path.lineTo(target.right(), target.bottom())
+            spine = QLinearGradient(target.right(), 0, target.right() + depth, 0)
+        path.closeSubpath()
         spine.setColorAt(0.0, base)
         spine.setColorAt(1.0, base.darker(190))
         painter.setPen(Qt.NoPen)
@@ -1350,69 +1548,40 @@ class ShelfCanvas(QWidget):
     ) -> None:
         frame = QRectF(target)
         width = frame.width()
-        height = frame.height()
         profile = item.profile
         radius = profile.radius
-        pc_case = _is_pc_case(item.game)
-        band_h = height * (0.145 if pc_case else 0.125)
-        title_h = width * TITLE_BAND_RATIO
-
-        title = QRectF(frame.left(), frame.top(), width, title_h)
-        art = QRectF(frame.left(), frame.top() + title_h, width, height - band_h - title_h)
-        band = QRectF(frame.left(), frame.bottom() - band_h, width, band_h)
-
-        outer = QPainterPath()
-        outer.addRoundedRect(frame, radius, radius)
-        painter.save()
-        painter.setClipPath(outer)
 
         base_w = max(48, int(round(cover_w * profile.w_scale)))
-        base_h_full = cover_h * profile.h_scale
-        base_band_h = base_h_full * (0.145 if pc_case else 0.125)
-        base_title_h = cover_w * profile.w_scale * TITLE_BAND_RATIO
-        base_art_h = max(48, int(round(base_h_full - base_band_h - base_title_h)))
-        cached_art = self._art_pixmap_for(item, base_w, base_art_h)
-        if cached_art is not None:
-            painter.drawPixmap(art, cached_art, QRectF(cached_art.rect()))
-        else:
-            self._paint_placeholder(painter, art, item)
+        base_h = max(48, int(round(cover_h * profile.h_scale)))
+        front = self._front_pixmap_for(item, base_w, base_h)
 
-        self._paint_title_band(painter, title, item)
+        painter.save()
+        outer = QPainterPath()
+        outer.addRoundedRect(frame, radius, radius)
+        painter.setClipPath(outer)
+        painter.drawPixmap(frame, front, QRectF(front.rect()))
 
-        if pc_case:
-            self._paint_pc_band(painter, band, item)
-        else:
-            self._paint_color_band(painter, band, item, width)
-
-        self._paint_status_badges(painter, art, item)
-
-        # Static + interactive specular sheen shifting with mouse tilt on focused box
+        # Subtle interactive plastic specular highlight shifting with cursor tilt
         sheen_shift = (self._tilt_x * 0.32 if selected else 0.0) * focus
         sheen = QLinearGradient(
             QPointF(frame.left() + width * (0.15 + sheen_shift), frame.top()),
             QPointF(frame.left() + width * (0.75 + sheen_shift), frame.bottom()),
         )
-        peak_alpha = int((42 if selected else 22) + abs(self._tilt_x) * 26 * focus)
+        peak_alpha = int((38 if selected else 18) + abs(self._tilt_x) * 24 * focus)
         sheen.setColorAt(0.0, QColor(255, 248, 232, 0))
         sheen.setColorAt(0.32, QColor(255, 248, 232, peak_alpha))
-        sheen.setColorAt(0.50, QColor(255, 255, 255, int(peak_alpha * 0.45)))
-        sheen.setColorAt(0.75, QColor(0, 0, 0, 12))
-        sheen.setColorAt(1.0, QColor(0, 0, 0, 42))
+        sheen.setColorAt(0.50, QColor(255, 255, 255, int(peak_alpha * 0.42)))
+        sheen.setColorAt(0.75, QColor(0, 0, 0, 10))
+        sheen.setColorAt(1.0, QColor(0, 0, 0, 34))
         painter.fillRect(frame, QBrush(sheen))
-
-        frame_line = QColor(profile.header_accent) if profile.key in {"switch", "switch2", "3ds", "ps3"} else QColor(active_style().text)
-        frame_line.setAlpha(120 if selected else 48)
-        painter.setPen(QPen(frame_line, 1.3))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
         painter.restore()
 
         if selected:
-            glow = QColor(item.dominant)
-            glow.setAlpha(165)
-            painter.setPen(QPen(glow, 1.8))
+            glow = QColor(item.dominant) if self._halo_enabled else QColor(active_style().accent)
+            glow.setAlpha(155 if self._halo_enabled else 105)
+            painter.setPen(QPen(glow, 1.6))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(frame.adjusted(-1.4, -1.4, 1.4, 1.4), radius + 1.2, radius + 1.2)
+            painter.drawRoundedRect(frame.adjusted(-1.2, -1.2, 1.2, 1.2), radius + 1.0, radius + 1.0)
 
     def _paint_status_badges(self, painter: QPainter, art: QRectF, item: ShelfItem) -> None:
         badges: list[tuple[str, QColor, QColor]] = []
@@ -1488,7 +1657,6 @@ class ShelfCanvas(QWidget):
             QPointF(rect.left(), rect.bottom()), QPointF(rect.right(), rect.bottom())
         )
 
-        # Tiny Switch/3DS/PS accent bar on left edge of header
         if profile.key in {"switch", "switch2", "3ds", "ps3", "ps2", "xbox", "xbox360"}:
             strip_w = max(3.0, rect.height() * 0.16)
             painter.fillRect(QRectF(rect.left(), rect.top(), strip_w, rect.height()), accent)
@@ -1683,29 +1851,31 @@ class ShelfCanvas(QWidget):
         strength = focus if selected else focus * 0.45
         if strength <= 0.02:
             return
-        base_y = target.bottom() + 3
+        base_y = target.bottom() + 2
         width = target.width()
         height = target.height()
-        accent = item.dominant if selected else QColor(active_style().accent)
 
-        pool = QRadialGradient(target.center().x(), base_y + 4, width * 0.68)
-        center = QColor(accent)
-        center.setAlpha(int(68 * strength))
-        edge = QColor(accent)
-        edge.setAlpha(int(20 * strength))
-        pool.setColorAt(0.0, center)
-        pool.setColorAt(0.55, edge)
-        pool.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(pool))
-        painter.drawEllipse(
-            QPointF(target.center().x(), base_y + 4), width * 0.68, height * 0.036
-        )
+        if self._halo_enabled:
+            accent = item.dominant if selected else QColor(active_style().accent)
+            pool = QRadialGradient(target.center().x(), base_y + 4, width * 0.68)
+            center = QColor(accent)
+            center.setAlpha(int(58 * strength))
+            edge = QColor(accent)
+            edge.setAlpha(int(16 * strength))
+            pool.setColorAt(0.0, center)
+            pool.setColorAt(0.55, edge)
+            pool.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(pool))
+            painter.drawEllipse(
+                QPointF(target.center().x(), base_y + 4), width * 0.68, height * 0.036
+            )
 
-        shadow = QRadialGradient(target.center().x(), base_y, width * 0.5)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, int(170 * max(0.3, strength))))
+        shadow = QRadialGradient(target.center().x(), base_y, width * 0.52)
+        shadow.setColorAt(0.0, QColor(0, 0, 0, int(175 * max(0.35, strength))))
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(shadow))
         painter.drawEllipse(
-            QPointF(target.center().x(), base_y), width * 0.42, height * 0.022
+            QPointF(target.center().x(), base_y), width * 0.44, height * 0.024
         )
