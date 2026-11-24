@@ -75,6 +75,8 @@ def main() -> int:
     if server is None:
         if _notify_existing():
             return 0
+        QLocalServer.removeServer(INSTANCE_KEY)
+        server = _listen(holder)
     window = MainWindow()
     holder["window"] = window
     window.showMaximized()

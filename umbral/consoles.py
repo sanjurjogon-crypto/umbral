@@ -49,7 +49,7 @@ SYSTEM_LABELS: dict[str, str] = {key: label for label, key in CONSOLES}
 CONSOLE_EXTENSIONS: dict[str, tuple[str, ...]] = {
     "switch2": (".nsp", ".xci"),
     "switch": (".nsp", ".xci"),
-    "wiiu": (".wud", ".wux", ".rpx"),
+    "wiiu": (".wud", ".wux", ".wua", ".rpx"),
     "wii": (".iso", ".rvz", ".wbfs"),
     "3ds": (".3ds", ".cia"),
     "nds": (".nds",),

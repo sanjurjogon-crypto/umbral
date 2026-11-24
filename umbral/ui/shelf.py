@@ -118,11 +118,16 @@ def _launcher_badge(executable: str) -> Optional[QPixmap]:
     path = Path(executable)
     if path.name.lower() != "longshot.exe":
         return None
-    for candidate in (
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "LongshotLauncher" / "LongshotLauncher.exe",
+    local_env = os.environ.get("LOCALAPPDATA", "").strip()
+    candidates = [
         path.parent / "LongshotLauncher.exe",
         path.parent.parent / "LongshotLauncher.exe",
-    ):
+    ]
+    if local_env:
+        candidates.insert(
+            0, Path(local_env) / "Programs" / "LongshotLauncher" / "LongshotLauncher.exe"
+        )
+    for candidate in candidates:
         if candidate.is_file():
             return exe_pixmap(str(candidate))
     return None
@@ -239,6 +244,7 @@ class ShelfCanvas(QWidget):
     activated = Signal(object)
     details_requested = Signal(object)
     selection_changed = Signal(object)
+    context_requested = Signal(object, object)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -362,6 +368,22 @@ class ShelfCanvas(QWidget):
             self.step(1)
             event.accept()
             return
+        if key == Qt.Key_Home and self.items:
+            self.step(-self.index)
+            event.accept()
+            return
+        if key == Qt.Key_End and self.items:
+            self.step(len(self.items) - 1 - self.index)
+            event.accept()
+            return
+        if key == Qt.Key_PageUp:
+            self.step(-5)
+            event.accept()
+            return
+        if key == Qt.Key_PageDown:
+            self.step(5)
+            event.accept()
+            return
         if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
             game = self.current_game()
             if game is not None:
@@ -415,6 +437,17 @@ class ShelfCanvas(QWidget):
         if game is not None:
             self.details_requested.emit(game)
         event.accept()
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        position = self._hit_test(QPointF(event.pos()))
+        if position >= 0 and position != self.index:
+            self.index = position
+            self._sync()
+            self._emit_selection()
+        game = self.items[position].game if position >= 0 else self.current_game()
+        if game is not None:
+            self.context_requested.emit(game, event.globalPos())
+            event.accept()
 
     def _layout(self):
         width = self.width()
@@ -833,6 +866,8 @@ class ShelfCanvas(QWidget):
             name = "STEAM"
         elif source == "epic":
             name = "EPIC GAMES"
+        elif source == "gog":
+            name = "GOG"
         elif item.game.emulator and not _is_pc_case(item.game):
             name = item.game.emulator
         else:

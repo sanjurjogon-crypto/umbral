@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from umbral.covers import _candidate_titles, is_image_bytes
+from umbral.covers import _candidate_titles, image_size, is_image_bytes
 from umbral.models import Game
 
 
@@ -52,3 +52,16 @@ def test_html_response_is_not_a_cover() -> None:
 def test_png_and_jpeg_are_covers() -> None:
     assert is_image_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32) is True
     assert is_image_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32) is True
+
+
+def test_webp_image_size_is_parsed(tmp_path: Path) -> None:
+    # Minimal VP8X header: 600x900 (stored as dimension - 1 in 24-bit little-endian)
+    payload = bytearray(30)
+    payload[0:4] = b"RIFF"
+    payload[8:16] = b"WEBPVP8X"
+    payload[24:27] = (599).to_bytes(3, "little")
+    payload[27:30] = (899).to_bytes(3, "little")
+    img = tmp_path / "cover.webp"
+    img.write_bytes(payload)
+    assert is_image_bytes(payload) is True
+    assert image_size(img) == (600, 900)

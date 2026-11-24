@@ -158,7 +158,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         system="PS2",
         system_key="ps2",
         exe_names=("pcsx2-qt.exe", "pcsx2.exe"),
-        rom_extensions=(".iso",),
+        rom_extensions=(".iso", ".chd"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\PCSX2\pcsx2-qt.exe",
             r"%PROGRAMFILES%\PCSX2\pcsx2-qt.exe",
@@ -178,7 +178,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
             "duckstation-qt.exe",
             "duckstation.exe",
         ),
-        rom_extensions=(".cue", ".pbp"),
+        rom_extensions=(".cue", ".pbp", ".chd"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe",
             r"%PROGRAMFILES%\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe",
@@ -193,7 +193,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         system="PSP",
         system_key="psp",
         exe_names=("ppssppwindows64.exe", "ppssppwindows.exe", "ppsspp.exe"),
-        rom_extensions=(".iso", ".cso"),
+        rom_extensions=(".iso", ".cso", ".pbp", ".chd"),
         search_paths=(
             r"%PROGRAMFILES%\PPSSPP\PPSSPPWindows64.exe",
             r"%LOCALAPPDATA%\Programs\PPSSPP\PPSSPPWindows64.exe",
@@ -209,7 +209,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         system_key="wiiu",
         exe_names=("cemu.exe",),
         arguments=("-g", "{rom}"),
-        rom_extensions=(".wud", ".wux"),
+        rom_extensions=(".wud", ".wux", ".wua", ".rpx"),
         search_paths=(
             r"%PROGRAMFILES%\Cemu\Cemu.exe",
             r"%LOCALAPPDATA%\Programs\Cemu\Cemu.exe",
@@ -232,6 +232,54 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         priority=40,
         accent="#74C0FC",
         description="Juego de Switch lanzado con Ryujinx.",
+    ),
+    EmulatorProfile(
+        key="eden",
+        name="Eden",
+        system="Switch",
+        system_key="switch",
+        exe_names=("eden.exe",),
+        arguments=("-f", "-g", "{rom}"),
+        rom_extensions=(".nsp", ".xci", ".nro"),
+        search_paths=(
+            r"%LOCALAPPDATA%\Programs\Eden\eden.exe",
+            r"%LOCALAPPDATA%\eden\eden.exe",
+        ),
+        priority=41,
+        accent="#74C0FC",
+        description="Juego de Switch lanzado con Eden.",
+    ),
+    EmulatorProfile(
+        key="sudachi",
+        name="Sudachi",
+        system="Switch",
+        system_key="switch",
+        exe_names=("sudachi.exe",),
+        arguments=("-f", "-g", "{rom}"),
+        rom_extensions=(".nsp", ".xci", ".nro"),
+        search_paths=(
+            r"%LOCALAPPDATA%\Programs\Sudachi\sudachi.exe",
+            r"%LOCALAPPDATA%\sudachi\sudachi.exe",
+        ),
+        priority=42,
+        accent="#74C0FC",
+        description="Juego de Switch lanzado con Sudachi.",
+    ),
+    EmulatorProfile(
+        key="yuzu",
+        name="Yuzu",
+        system="Switch",
+        system_key="switch",
+        exe_names=("yuzu.exe", "suyu.exe"),
+        arguments=("-f", "-g", "{rom}"),
+        rom_extensions=(".nsp", ".xci", ".nro"),
+        search_paths=(
+            r"%LOCALAPPDATA%\yuzu\yuzu-windows-msvc\yuzu.exe",
+            r"%LOCALAPPDATA%\Programs\yuzu\yuzu.exe",
+        ),
+        priority=44,
+        accent="#74C0FC",
+        description="Juego de Switch lanzado con Yuzu.",
     ),
     EmulatorProfile(
         key="melonds",
@@ -639,9 +687,12 @@ def profile_from_dict(data: object) -> EmulatorProfile | None:
         parts = [str(part) for part in raw_arguments]
     arguments = tuple(part for part in parts if part) or ("{rom}",)
     extensions = tuple(
-        str(item).strip().lower()
-        for item in (data.get("rom_extensions") or [])
-        if str(item).strip()
+        ext if ext.startswith(".") else f".{ext}"
+        for ext in (
+            str(item).strip().lower()
+            for item in (data.get("rom_extensions") or [])
+            if str(item).strip()
+        )
     )
     exe_names = (Path(executable).name.lower(),) if executable else ()
     return EmulatorProfile(

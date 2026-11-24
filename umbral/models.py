@@ -42,6 +42,7 @@ class Game:
     added_at: str = ""
     source: str = "auto"
     notes: str = ""
+    emulator_locked: bool = False
 
     def __post_init__(self) -> None:
         if not self.added_at:
@@ -105,7 +106,7 @@ class Game:
         )
         if (
             self.rom_path
-            and self.system_key not in {"pc", "ports", "steam", "epic"}
+            and self.system_key not in {"pc", "ports", "steam", "epic", "gog"}
             and not already_included
         ):
             arguments.append(self.rom_path)

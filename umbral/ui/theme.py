@@ -350,6 +350,25 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         selection-color: __ACCENT_2__;
         outline: none;
     }
+    QMenu {
+        background: __SURFACE_2__;
+        border: __THIN__px solid __BORDER__;
+        padding: 4px;
+    }
+    QMenu::item {
+        padding: 7px 18px;
+        color: __TEXT__;
+        border-radius: __RADIUS__px;
+    }
+    QMenu::item:selected {
+        background: __ACCENT_SOFT__;
+        color: __ACCENT_2__;
+    }
+    QMenu::separator {
+        height: 1px;
+        background: __BORDER_SOFT__;
+        margin: 4px 8px;
+    }
     QScrollArea {
         border: none;
         background: transparent;

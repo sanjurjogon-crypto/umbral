@@ -10,9 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.error import URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from .detect import _default_roots, _unique_roots, clean_title
@@ -245,18 +245,6 @@ FOLDER_MARKERS = {
     "www",
     "locales",
     "streamingassets",
-}
-
-PLACEHOLDER_COMPANIES = {
-    "epic games, inc.",
-    "epicgames",
-    "epic games",
-    "unity technologies",
-    "unity technologies apS",
-    "defaultcompany",
-    "default company",
-    "your company",
-    "microsoft corporation",
 }
 
 PUBLISHER_TAG_PATTERN = re.compile(
@@ -696,8 +684,8 @@ def _installer_folder(path: Path) -> bool:
     return bool(parts & INSTALLER_FOLDER_HINTS)
 
 
-def _read_steam_library() -> dict[str, str]:
-    installed: dict[str, str] = {}
+def _read_steam_library() -> dict[str, dict[str, Any]]:
+    installed: dict[str, dict[str, Any]] = {}
     for library in steam_roots():
         steamapps = library / "steamapps"
         if not steamapps.is_dir():
@@ -1090,6 +1078,9 @@ def verify_candidates(candidates: list[StandaloneCandidate], limit: int = 20) ->
 
 def open_url(url: str) -> bool:
     if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return False
     try:
         import webbrowser
