@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -14,6 +15,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+from PIL import Image, ImageFilter, UnidentifiedImageError
 
 from .models import Game, slugify
 from .paths import covers_dir, data_dir, safe_path
@@ -418,7 +421,15 @@ def _gamedb_cover(game_id: str, platform_ids: list[int]) -> dict | None:
         return None
     if url.startswith("//"):
         url = "https:" + url
-    url = url.replace("/t_thumb/", "/t_cover_big/")
+    if "/t_thumb/" in url:
+        url_2x = url.replace("/t_thumb/", "/t_cover_big_2x/")
+        url_1x = url.replace("/t_thumb/", "/t_cover_big/")
+        return {
+            "url": url_2x,
+            "urls": [url_2x, url_1x],
+            "title": str(data.get("name", "")),
+            "source": "IGDB",
+        }
     return {"url": url, "title": str(data.get("name", "")), "source": "IGDB"}
 
 
@@ -538,6 +549,67 @@ def _resolve_online(game: Game) -> dict | None:
     return None
 
 
+UPSCALE_MIN_WIDTH = 600
+UPSCALE_MIN_HEIGHT = 800
+UPSCALE_MAX_EDGE = 1400
+
+
+def upscale_cover_bytes(
+    payload: bytes,
+    min_width: int = UPSCALE_MIN_WIDTH,
+    min_height: int = UPSCALE_MIN_HEIGHT,
+    max_edge: int = UPSCALE_MAX_EDGE,
+) -> bytes:
+    """Upscale low-resolution cover images cleanly using Lanczos resampling and subtle sharpening."""
+    if not payload or not is_image_bytes(payload):
+        return payload
+    try:
+        with Image.open(io.BytesIO(payload)) as img:
+            width, height = img.size
+            if width <= 0 or height <= 0:
+                return payload
+            if width >= min_width and height >= min_height:
+                return payload
+            scale = max(min_width / width, min_height / height)
+            scale = min(scale, max_edge / max(width, height))
+            if scale <= 1.02:
+                return payload
+            new_w = max(width + 1, int(round(width * scale)))
+            new_h = max(height + 1, int(round(height * scale)))
+            converted = img.convert("RGBA") if "A" in img.getbands() else img.convert("RGB")
+            upscaled = converted.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            sharpened = upscaled.filter(ImageFilter.UnsharpMask(radius=1.1, percent=65, threshold=3))
+            buffer = io.BytesIO()
+            fmt = (img.format or "").upper()
+            if fmt == "PNG" and converted.mode == "RGBA":
+                sharpened.save(buffer, format="PNG", optimize=True)
+            else:
+                if sharpened.mode != "RGB":
+                    sharpened = sharpened.convert("RGB")
+                sharpened.save(buffer, format="JPEG", quality=92, optimize=True)
+            result = buffer.getvalue()
+            return result if len(result) >= 512 else payload
+    except (OSError, ValueError, UnidentifiedImageError):
+        return payload
+
+
+def _upscale_cover_file(path: Path) -> bool:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return False
+    upgraded = upscale_cover_bytes(raw)
+    if upgraded == raw:
+        return False
+    try:
+        temporary = path.with_name(path.name + ".up.tmp")
+        temporary.write_bytes(upgraded)
+        os.replace(temporary, path)
+    except OSError:
+        return False
+    return True
+
+
 def _download(url: str, target: Path) -> bool:
     try:
         payload = _request_bytes(url)
@@ -547,6 +619,7 @@ def _download(url: str, target: Path) -> bool:
         return False
     if not is_image_bytes(payload):
         return False
+    payload = upscale_cover_bytes(payload)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(target.name + ".tmp")
@@ -577,7 +650,8 @@ def _upgrade_portrait(game: Game, target: Path) -> bool:
     if local is not None:
         try:
             temporary = target.with_name(target.name + ".new")
-            shutil.copyfile(local, temporary)
+            raw = local.read_bytes()
+            temporary.write_bytes(upscale_cover_bytes(raw))
             os.replace(temporary, target)
             return True
         except OSError:
@@ -615,6 +689,21 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
         entry = store.get(key) if use_cache else None
 
     if target.is_file():
+        w, h = image_size(target)
+        if (
+            (w == 0 or w < UPSCALE_MIN_WIDTH or h < UPSCALE_MIN_HEIGHT)
+            and not (isinstance(entry, dict) and entry.get("upscaled"))
+        ):
+            _upscale_cover_file(target)
+            with _CACHE_LOCK:
+                store[key] = {
+                    **(entry if isinstance(entry, dict) else {}),
+                    "status": "ok",
+                    "upscaled": True,
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if cache is None:
+                    _save_cache(store)
         if (
             game.source == "steam"
             and is_landscape(target)
@@ -627,6 +716,7 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
                         "url": _steam_portrait_urls(_steam_app_id(game))[0],
                         "title": str((entry or {}).get("title", "")),
                         "source": "Steam",
+                        "upscaled": True,
                         "checked_at": datetime.now(timezone.utc).isoformat(),
                     }
                     if cache is None:

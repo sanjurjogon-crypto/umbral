@@ -601,21 +601,6 @@ class MainWindow(QMainWindow):
             index = self.stack.indexOf(page)
 
         self.stack.setCurrentIndex(index)
-        page_widget = self.stack.currentWidget()
-        if page_widget is not None:
-            fade = getattr(self, "_page_fade", None)
-            if fade is not None:
-                fade.stop()
-            effect = QGraphicsOpacityEffect(page_widget)
-            page_widget.setGraphicsEffect(effect)
-            animation = QPropertyAnimation(effect, b"opacity", page_widget)
-            animation.setDuration(180)
-            animation.setStartValue(0.35)
-            animation.setEndValue(1.0)
-            animation.setEasingCurve(QEasingCurve.OutCubic)
-            animation.finished.connect(lambda: page_widget.setGraphicsEffect(None))
-            self._page_fade = animation
-            animation.start()
         if key in ("library", "favorites"):
             self.library.focus_canvas()
         for name, button in self.nav_buttons.items():
