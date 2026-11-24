@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -942,6 +943,10 @@ class SettingsPage(QWidget):
         self._update_later_btn: Optional[QPushButton] = None
         self._update_status_note: Optional[QLabel] = None
         self._update_progress_bar: Optional[QProgressBar] = None
+        self._active_tab = "emulators"
+        self._tab_buttons: dict[str, QPushButton] = {}
+        self._tab_indices: dict[str, int] = {}
+        self._stack: Optional[QStackedWidget] = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll, _content, self.body = _scroll_page()
@@ -953,137 +958,92 @@ class SettingsPage(QWidget):
     def set_profiles(self, profiles: list[EmulatorProfile]) -> None:
         self.profiles = profiles
 
+    def set_section(self, key: str) -> None:
+        if key not in self._tab_indices:
+            return
+        self._active_tab = key
+        for tab_key, button in self._tab_buttons.items():
+            button.setChecked(tab_key == key)
+        if self._stack is not None:
+            self._stack.setCurrentIndex(self._tab_indices[key])
+
     def refresh(self) -> None:
         clear_layout(self.body)
+        self._tab_buttons.clear()
+        self._tab_indices.clear()
+        self._update_install_btn = None
+        self._update_later_btn = None
+        self._update_status_note = None
+        self._update_progress_bar = None
 
         title = QLabel("Ajustes")
         title.setObjectName("h2")
         self.body.addWidget(title)
 
-        self.body.addWidget(SectionHeader("Actualizaciones"))
-        update_tile = QFrame()
-        update_tile.setObjectName("tile")
-        update_row = QHBoxLayout(update_tile)
-        update_row.setContentsMargins(16, 12, 16, 12)
-        update_row.setSpacing(12)
-        update_text = QVBoxLayout()
-        update_text.setSpacing(2)
-        version_label = QLabel(f"Umbral {__version__}")
-        version_label.setStyleSheet("font-weight: 700;")
-        status_text = self.update_message
-        if not status_text:
-            last = relative_time(str(self.store.settings.get("update_last_check", "")))
-            status_text = f"Comprobado {last}" if last else "Sin comprobar todavía"
-        status_label = QLabel(status_text)
-        status_label.setObjectName("muted")
-        status_label.setWordWrap(True)
-        update_text.addWidget(version_label)
-        update_text.addWidget(status_label)
-        update_row.addLayout(update_text, 1)
-        check_button = QPushButton(
-            "Comprobando…" if self.update_checking else "Buscar actualizaciones"
+        tabs_row = QHBoxLayout()
+        tabs_row.setSpacing(8)
+        style = active_style()
+        tab_style = (
+            "QPushButton {"
+            " padding: 8px 16px;"
+            " border-radius: 8px;"
+            " background: rgba(255, 255, 255, 0.05);"
+            " border: 1px solid rgba(255, 255, 255, 0.09);"
+            f" color: {style.muted};"
+            " font-weight: 600;"
+            "}"
+            "QPushButton:hover {"
+            " background: rgba(255, 255, 255, 0.09);"
+            f" color: {style.text};"
+            "}"
+            "QPushButton:checked {"
+            f" background: {style.accent};"
+            f" border-color: {style.accent};"
+            f" color: {style.bg};"
+            " font-weight: 700;"
+            "}"
         )
-        check_button.setObjectName("ghost")
-        check_button.setCursor(Qt.PointingHandCursor)
-        check_button.setEnabled(not self.update_checking)
-        check_button.clicked.connect(self.check_updates)
-        update_row.addWidget(check_button)
-        self.body.addWidget(update_tile)
+        for key, label in (
+            ("emulators", "Emuladores"),
+            ("library", "Biblioteca"),
+            ("appearance", "Apariencia"),
+            ("maintenance", "Mantenimiento"),
+        ):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == self._active_tab)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(tab_style)
+            btn.clicked.connect(lambda _checked=False, k=key: self.set_section(k))
+            self._tab_buttons[key] = btn
+            tabs_row.addWidget(btn)
+        tabs_row.addStretch(1)
+        self.body.addLayout(tabs_row)
 
-        self._update_install_btn = None
-        self._update_later_btn = None
-        self._update_status_note = None
-        self._update_progress_bar = None
-        if self.available_update is not None:
-            info = self.available_update
-            card = QFrame()
-            card.setObjectName("updateCard")
-            style = active_style()
-            card.setStyleSheet(
-                "QFrame#updateCard {"
-                " background: rgba(14, 12, 10, 0.62);"
-                " border: 1px solid rgba(255, 255, 255, 0.14);"
-                f" border-top: 2px solid {style.accent};"
-                f" border-radius: {style.radius}px;"
-                " }"
-            )
-            card_body = QVBoxLayout(card)
-            card_body.setContentsMargins(16, 14, 16, 14)
-            card_body.setSpacing(10)
-            head = QHBoxLayout()
-            head.setSpacing(10)
-            heading = QLabel(f"Nueva versión {info.version}")
-            heading.setStyleSheet(
-                f"font-weight: 700; color: {active_style().accent};"
-            )
-            head.addWidget(heading, 1)
-            page_button = QPushButton("Ver en GitHub")
-            page_button.setObjectName("icon")
-            page_button.setCursor(Qt.PointingHandCursor)
-            page_button.clicked.connect(self._open_release_page)
-            head.addWidget(page_button)
-            card_body.addLayout(head)
-            if info.notes:
-                notes = QPlainTextEdit()
-                notes.setReadOnly(True)
-                notes.setPlainText(info.notes)
-                notes.setFixedHeight(96)
-                card_body.addWidget(notes)
-            status_note = QLabel(self.update_error or self.update_download_text)
-            status_note.setObjectName("muted")
-            status_note.setWordWrap(True)
-            status_note.setVisible(bool(self.update_error or self.update_download_text))
-            self._update_status_note = status_note
-            card_body.addWidget(status_note)
-            progress_bar = QProgressBar()
-            progress_bar.setFixedHeight(10)
-            progress_bar.setTextVisible(False)
-            if self.update_installing:
-                progress_bar.setRange(0, 100)
-                progress_bar.setValue(100)
-                progress_bar.setVisible(True)
-            elif self.update_downloading:
-                apply_download_progress(progress_bar, self.update_done_bytes, self.update_total_bytes)
-                progress_bar.setVisible(True)
-            else:
-                progress_bar.setRange(0, 100)
-                progress_bar.setVisible(False)
-            self._update_progress_bar = progress_bar
-            card_body.addWidget(progress_bar)
-            actions = QHBoxLayout()
-            actions.setSpacing(10)
-            later = QPushButton("Más tarde")
-            later.setObjectName("ghost")
-            later.setCursor(Qt.PointingHandCursor)
-            later.setEnabled(not (self.update_downloading or self.update_installing))
-            later.clicked.connect(self.later_update)
-            if self.update_installing:
-                install_label = "Instalando…"
-            elif self.update_downloading and self.update_total_bytes > 0:
-                percent = min(100, int(self.update_done_bytes * 100 / self.update_total_bytes))
-                install_label = f"Descargando {percent} %…"
-            elif self.update_downloading and self.update_done_bytes > 0:
-                install_label = "Descargando…"
-            elif self.update_downloading:
-                install_label = "Conectando…"
-            elif self.update_error:
-                install_label = "Reintentar"
-            else:
-                install_label = "Actualizar ahora"
-            install = QPushButton(install_label)
-            install.setObjectName("primary")
-            install.setCursor(Qt.PointingHandCursor)
-            install.setEnabled(not (self.update_downloading or self.update_installing))
-            install.clicked.connect(self.install_update)
-            self._update_later_btn = later
-            self._update_install_btn = install
-            actions.addWidget(later)
-            actions.addStretch(1)
-            actions.addWidget(install)
-            card_body.addLayout(actions)
-            self.body.addWidget(card)
+        stack = QStackedWidget()
+        self._stack = stack
+        builders = (
+            ("emulators", self._build_emulators_tab()),
+            ("library", self._build_library_tab()),
+            ("appearance", self._build_appearance_tab()),
+            ("maintenance", self._build_maintenance_tab()),
+        )
+        for idx, (key, page_widget) in enumerate(builders):
+            stack.addWidget(page_widget)
+            self._tab_indices[key] = idx
+        stack.setCurrentIndex(self._tab_indices.get(self._active_tab, 0))
+        self.body.addWidget(stack, 1)
 
-        self.body.addWidget(SectionHeader("Emuladores y ports"))
+    def _make_tab_container(self) -> tuple[QWidget, QVBoxLayout]:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 6, 0, 0)
+        layout.setSpacing(12)
+        return container, layout
+
+    def _build_emulators_tab(self) -> QWidget:
+        container, layout = self._make_tab_container()
+        layout.addWidget(SectionHeader("Emuladores y ports"))
         for emulator in self.emulators:
             frame = QFrame()
             frame.setObjectName("tile")
@@ -1113,20 +1073,20 @@ class SettingsPage(QWidget):
             browse.setCursor(Qt.PointingHandCursor)
             browse.clicked.connect(lambda _checked=False, key=emulator.key: self._browse_executable(key))
             row.addWidget(browse)
-            self.body.addWidget(frame)
+            layout.addWidget(frame)
 
         if not self.emulators:
             hint = QLabel("No hay emuladores detectados. Puedes indicar la ruta de cada uno a mano.")
             hint.setObjectName("tiny")
             hint.setWordWrap(True)
-            self.body.addWidget(hint)
+            layout.addWidget(hint)
         manage = QPushButton("Añadir o detectar emulador")
         manage.setObjectName("ghost")
         manage.setCursor(Qt.PointingHandCursor)
         manage.clicked.connect(self.manage_emulators)
-        self.body.addWidget(manage, 0, Qt.AlignLeft)
+        layout.addWidget(manage, 0, Qt.AlignLeft)
 
-        self.body.addWidget(SectionHeader("Compatibles por consola"))
+        layout.addWidget(SectionHeader("Compatibles por consola"))
         groups: dict[tuple[str, str], list[EmulatorProfile]] = {}
         for profile in self.profiles:
             groups.setdefault((profile.system_key, profile.system), []).append(profile)
@@ -1151,13 +1111,17 @@ class SettingsPage(QWidget):
                 line.setStyleSheet(f"color: {color};")
                 names.addWidget(line)
             row.addLayout(names, 1)
-            self.body.addWidget(frame)
+            layout.addWidget(frame)
         if not self.profiles:
             hint = QLabel("Sin perfiles compatibles todavía.")
             hint.setObjectName("tiny")
-            self.body.addWidget(hint)
+            layout.addWidget(hint)
+        layout.addStretch(1)
+        return container
 
-        self.body.addWidget(SectionHeader("Carpetas escaneadas"))
+    def _build_library_tab(self) -> QWidget:
+        container, layout = self._make_tab_container()
+        layout.addWidget(SectionHeader("Carpetas escaneadas"))
         folders = self.store.settings.get("scan_folders", [])
         for folder in folders:
             frame = QFrame()
@@ -1174,21 +1138,21 @@ class SettingsPage(QWidget):
             remove.setCursor(Qt.PointingHandCursor)
             remove.clicked.connect(lambda _checked=False, value=folder: self._remove_folder(value))
             row.addWidget(remove)
-            self.body.addWidget(frame)
+            layout.addWidget(frame)
         add_folder = QPushButton("Añadir carpeta")
         add_folder.setObjectName("ghost")
         add_folder.setCursor(Qt.PointingHandCursor)
         add_folder.clicked.connect(self._add_folder)
-        self.body.addWidget(add_folder, 0, Qt.AlignLeft)
+        layout.addWidget(add_folder, 0, Qt.AlignLeft)
         if not folders:
             hint = QLabel(
                 "Sin carpetas propias: Umbral revisa Descargas, Escritorio, Documentos y Juegos."
             )
             hint.setObjectName("tiny")
             hint.setWordWrap(True)
-            self.body.addWidget(hint)
+            layout.addWidget(hint)
 
-        self.body.addWidget(SectionHeader("Juegos de PC"))
+        layout.addWidget(SectionHeader("Juegos de PC"))
         pc_text = QLabel(
             "Umbral busca ejecutables de PC en tus carpetas y comprueba el nombre en Steam, "
             "itch.io y PCGamingWiki antes de proponerlos. También detecta descargas recientes "
@@ -1196,45 +1160,53 @@ class SettingsPage(QWidget):
         )
         pc_text.setObjectName("muted")
         pc_text.setWordWrap(True)
-        self.body.addWidget(pc_text)
+        layout.addWidget(pc_text)
         steam_check = QCheckBox("No proponer juegos que ya estén instalados en Steam")
         steam_check.setChecked(bool(self.store.settings.get("steam_scrape", True)))
         steam_check.toggled.connect(self._toggle_steam)
-        self.body.addWidget(steam_check)
+        layout.addWidget(steam_check)
         scan_pc = QPushButton("Buscar juegos de PC")
         scan_pc.setObjectName("ghost")
         scan_pc.setCursor(Qt.PointingHandCursor)
         scan_pc.clicked.connect(self.scan_pc_requested)
-        self.body.addWidget(scan_pc, 0, Qt.AlignLeft)
+        layout.addWidget(scan_pc, 0, Qt.AlignLeft)
+        layout.addStretch(1)
+        return container
 
-        self.body.addWidget(SectionHeader("Carátulas"))
+    def _build_appearance_tab(self) -> QWidget:
+        container, layout = self._make_tab_container()
+        layout.addWidget(SectionHeader("Carátulas"))
         covers_text = QLabel(
             "Umbral descarga la carátula oficial de cada juego desde IGDB, Steam o itch.io. "
             "Si un juego aparece con un monograma, aún no tiene carátula."
         )
         covers_text.setObjectName("muted")
         covers_text.setWordWrap(True)
-        self.body.addWidget(covers_text)
+        layout.addWidget(covers_text)
         covers_button = QPushButton("Buscar carátulas de nuevo")
         covers_button.setObjectName("ghost")
         covers_button.setCursor(Qt.PointingHandCursor)
         covers_button.clicked.connect(self.covers_requested)
-        self.body.addWidget(covers_button, 0, Qt.AlignLeft)
+        layout.addWidget(covers_button, 0, Qt.AlignLeft)
 
-        self.body.addWidget(SectionHeader("Estantería 3D"))
+        layout.addWidget(SectionHeader("Estantería 3D"))
         halo_check = QCheckBox("Mostrar halo de color alrededor de los juegos en la Estantería 3D")
         halo_check.setChecked(bool(self.store.settings.get("shelf_halo", True)))
         halo_check.toggled.connect(self._toggle_halo)
         self.halo_check = halo_check
-        self.body.addWidget(halo_check)
+        layout.addWidget(halo_check)
+        layout.addStretch(1)
+        return container
 
-        self.body.addWidget(SectionHeader("Juegos ocultos"))
+    def _build_maintenance_tab(self) -> QWidget:
+        container, layout = self._make_tab_container()
+        layout.addWidget(SectionHeader("Juegos ocultos"))
         hidden_ids = [str(item) for item in self.store.settings.get("hidden_games", []) if str(item)]
         hidden_paths = [str(item) for item in self.store.settings.get("hidden_paths", []) if str(item)]
         if not hidden_ids and not hidden_paths:
             empty_hidden = QLabel("No hay juegos ocultos.")
             empty_hidden.setObjectName("tiny")
-            self.body.addWidget(empty_hidden)
+            layout.addWidget(empty_hidden)
         else:
             for game_id in hidden_ids:
                 frame = QFrame()
@@ -1253,7 +1225,7 @@ class SettingsPage(QWidget):
                     lambda _checked=False, value=game_id: self.unhide_game_requested.emit(value)
                 )
                 row.addWidget(restore)
-                self.body.addWidget(frame)
+                layout.addWidget(frame)
             for path_value in hidden_paths:
                 frame = QFrame()
                 frame.setObjectName("tile")
@@ -1271,9 +1243,9 @@ class SettingsPage(QWidget):
                     lambda _checked=False, value=path_value: self.unhide_path_requested.emit(value)
                 )
                 row.addWidget(restore)
-                self.body.addWidget(frame)
+                layout.addWidget(frame)
 
-        self.body.addWidget(SectionHeader("Datos y mantenimiento"))
+        layout.addWidget(SectionHeader("Datos y mantenimiento"))
         data_row = QHBoxLayout()
         data_row.setSpacing(10)
         open_data = QPushButton("Abrir carpeta de datos")
@@ -1302,14 +1274,15 @@ class SettingsPage(QWidget):
         data_row.addWidget(export_lib)
         data_row.addWidget(import_lib)
         data_row.addStretch(1)
-        self.body.addLayout(data_row)
+        layout.addLayout(data_row)
         note = QLabel(
             "Umbral no mueve tus ROMs ni tus partidas. Solo guarda rutas, tiempos de juego y preferencias."
         )
         note.setObjectName("tiny")
         note.setWordWrap(True)
-        self.body.addWidget(note)
-        self.body.addStretch(1)
+        layout.addWidget(note)
+        layout.addStretch(1)
+        return container
 
     def _open_release_page(self) -> None:
         if (

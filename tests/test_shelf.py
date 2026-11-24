@@ -206,5 +206,16 @@ def test_all_console_cases_render_and_emulator_badge_works(tmp_path: Path) -> No
     assert emulator_badge_pixmap(legacy_gc, 24) is not None
     pc_game = Game(id="pc1", title="Celeste", system="PC", system_key="pc", emulator="Standalone")
     assert emulator_badge_pixmap(pc_game, 24) is None
+
+    # Switch 2 matches standard shelf proportions and PC + Steam share unified keepcase dimensions
+    sw2 = case_profile(Game(id="sw2", title="MK World", system="Switch 2", system_key="switch2"))
+    steam_prof = case_profile(Game(id="st1", title="Hades", system="Steam", system_key="steam", source="steam"))
+    pc_prof = case_profile(pc_game)
+    assert sw2.h_scale <= 1.02
+    assert (steam_prof.w_scale, steam_prof.h_scale, steam_prof.shell_color) == (
+        pc_prof.w_scale,
+        pc_prof.h_scale,
+        pc_prof.shell_color,
+    )
     canvas.close()
     app.processEvents()

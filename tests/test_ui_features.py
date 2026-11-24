@@ -339,3 +339,40 @@ def test_main_window_chrome_insets_and_sidebar_indicators(monkeypatch, tmp_path:
     win.close()
     win.deleteLater()
     app.processEvents()
+
+
+def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import SettingsPage
+    from umbral.ui.widgets import EmptyState
+
+    app = _app()
+    store = _store(monkeypatch, tmp_path, [])
+    page = SettingsPage(store)
+    page.refresh()
+
+    assert set(page._tab_buttons.keys()) == {"emulators", "library", "appearance", "maintenance"}
+    assert page._stack is not None
+    page.set_section("appearance")
+    assert page._active_tab == "appearance"
+    assert page._stack.currentIndex() == page._tab_indices["appearance"]
+
+    empty = EmptyState(
+        "Todavía no hay favoritos",
+        "Abre la ficha de un juego y pulsa la estrella para guardarlo aquí. "
+        "Puedes añadir tantos juegos como quieras desde cualquier sistema.",
+        "",
+    )
+    empty.set_text(
+        "Todavía no hay favoritos",
+        "Abre la ficha de un juego y pulsa la estrella para guardarlo aquí. "
+        "Puedes añadir tantos juegos como quieras desde cualquier sistema.",
+        "",
+    )
+    empty.resize(800, 500)
+    empty.show()
+    app.processEvents()
+    assert empty.description_label.height() >= empty.description_label.fontMetrics().lineSpacing() * 2
+    empty.close()
+    empty.deleteLater()
+    page.deleteLater()
+    app.processEvents()

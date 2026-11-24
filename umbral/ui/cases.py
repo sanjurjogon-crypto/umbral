@@ -58,35 +58,35 @@ class CaseProfile:
 CASE_PROFILES: dict[str, CaseProfile] = {
     "switch2": CaseProfile(
         key="switch2",
-        w_scale=0.76,
-        h_scale=1.09,
-        radius=6.5,
+        w_scale=0.88,
+        h_scale=1.00,
+        radius=5.5,
         spine_color="#d91e26",
         header_bg="#e60012",
         header_accent="#ff5a5f",
         header_text="#ffffff",
         band_label="SWITCH 2",
-        depth_scale=0.68,
+        depth_scale=0.76,
         shell_kind="translucent_tint",
         shell_color="#d91e26",
         shell_alpha=215,
-        bezel=(0.028, 0.024, 0.028, 0.024),
+        bezel=(0.025, 0.022, 0.025, 0.022),
     ),
     "switch": CaseProfile(
         key="switch",
-        w_scale=0.76,
-        h_scale=1.08,
-        radius=6.5,
+        w_scale=0.84,
+        h_scale=1.01,
+        radius=5.5,
         spine_color="#e60012",
         header_bg="#e60012",
         header_accent="#ff6b6b",
         header_text="#ffffff",
         band_label="SWITCH",
-        depth_scale=0.68,
+        depth_scale=0.72,
         shell_kind="translucent_clear",
         shell_color="#cfd9e3",
         shell_alpha=155,
-        bezel=(0.028, 0.024, 0.028, 0.024),
+        bezel=(0.026, 0.022, 0.026, 0.022),
     ),
     "3ds": CaseProfile(
         key="3ds",
@@ -506,81 +506,81 @@ CASE_PROFILES: dict[str, CaseProfile] = {
     ),
     "ports": CaseProfile(
         key="ports",
-        w_scale=0.98,
-        h_scale=0.98,
-        radius=4.0,
-        spine_color="#2a2214",
-        header_bg="#19150d",
+        w_scale=0.90,
+        h_scale=1.00,
+        radius=4.5,
+        spine_color="#181b20",
+        header_bg="#14171c",
         header_accent="#d4af37",
-        header_text="#efe0b4",
+        header_text="#e5e9f0",
         band_label="PORT",
         depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#19150d",
+        shell_color="#14171c",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
     "steam": CaseProfile(
         key="steam",
-        w_scale=1.00,
+        w_scale=0.90,
         h_scale=1.00,
-        radius=3.5,
-        spine_color="#1b2b3f",
-        header_bg="#14202e",
+        radius=4.5,
+        spine_color="#181b20",
+        header_bg="#14171c",
         header_accent="#66c0f4",
-        header_text="#d8ecff",
+        header_text="#e5e9f0",
         band_label="STEAM",
-        depth_scale=1.0,
+        depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#14202e",
+        shell_color="#14171c",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
     "epic": CaseProfile(
         key="epic",
-        w_scale=1.00,
+        w_scale=0.90,
         h_scale=1.00,
-        radius=3.5,
-        spine_color="#22252b",
-        header_bg="#16181d",
+        radius=4.5,
+        spine_color="#181b20",
+        header_bg="#14171c",
         header_accent="#d4d8df",
-        header_text="#f4f6f8",
+        header_text="#e5e9f0",
         band_label="EPIC GAMES",
-        depth_scale=1.0,
+        depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#16181d",
+        shell_color="#14171c",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
     "gog": CaseProfile(
         key="gog",
-        w_scale=1.00,
+        w_scale=0.90,
         h_scale=1.00,
-        radius=3.5,
-        spine_color="#3b2059",
-        header_bg="#26143b",
+        radius=4.5,
+        spine_color="#181b20",
+        header_bg="#14171c",
         header_accent="#b77bff",
-        header_text="#f2e7ff",
+        header_text="#e5e9f0",
         band_label="GOG",
-        depth_scale=1.0,
+        depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#26143b",
+        shell_color="#14171c",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
     "pc": CaseProfile(
         key="pc",
-        w_scale=1.00,
+        w_scale=0.90,
         h_scale=1.00,
-        radius=3.0,
-        spine_color="#221c13",
-        header_bg="#16120c",
+        radius=4.5,
+        spine_color="#181b20",
+        header_bg="#14171c",
         header_accent="#d4af37",
-        header_text="#efe0b4",
+        header_text="#e5e9f0",
         band_label="PC",
-        depth_scale=1.0,
+        depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#16120c",
+        shell_color="#14171c",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
@@ -689,7 +689,7 @@ def console_art_rect(frame: QRectF, profile: CaseProfile) -> QRectF:
     )
     key = profile.key
     if key == "switch2":
-        top_cut = inner.height() * 0.135
+        top_cut = inner.height() * 0.115
         return inner.adjusted(0.0, top_cut, 0.0, 0.0)
     if key == "switch":
         return inner
@@ -857,6 +857,16 @@ def _paint_shell_rim_overlay(
         painter.setPen(QPen(QColor(255, 255, 255, 36), 0.9))
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(frame.adjusted(0.8, 0.8, -0.8, -0.8), radius, radius)
+
+    if profile.shell_kind in {"translucent_clear", "translucent_tint", "jewel_clear", "keepcase"}:
+        # Subtle physical acrylic/polycarbonate sleeve reflection across the case face
+        sheen = QLinearGradient(frame.topLeft(), QPointF(frame.left() + w * 0.62, frame.top() + h * 0.58))
+        sheen.setColorAt(0.0, QColor(255, 255, 255, 26))
+        sheen.setColorAt(0.45, QColor(255, 255, 255, 10))
+        sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(sheen))
+        painter.drawRoundedRect(frame, radius, radius)
 
 
 def _draw_joycon_emblem(painter: QPainter, rect: QRectF, fg: QColor, bg: Optional[QColor] = None) -> None:
@@ -1040,7 +1050,7 @@ def _draw_gamecube_cube(painter: QPainter, center: QPointF, r: float) -> None:
 
 
 def _paint_switch2(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseProfile) -> None:
-    bar = QRectF(inner.left(), inner.top(), inner.width(), inner.height() * 0.135)
+    bar = QRectF(inner.left(), inner.top(), inner.width(), inner.height() * 0.115)
     grad = QLinearGradient(bar.topLeft(), bar.bottomLeft())
     grad.setColorAt(0.0, QColor("#ef0818"))
     grad.setColorAt(1.0, QColor("#bf000d"))

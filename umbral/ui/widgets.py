@@ -872,12 +872,15 @@ class EmptyState(QWidget):
         self.title_label = QLabel(title)
         self.title_label.setObjectName("h2")
         self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         body.addWidget(self.title_label)
         self.description_label = QLabel(description)
         self.description_label.setObjectName("muted")
         self.description_label.setAlignment(Qt.AlignCenter)
         self.description_label.setWordWrap(True)
-        self.description_label.setMaximumWidth(460)
+        self.description_label.setFixedWidth(460)
+        self.description_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Minimum)
         body.addWidget(self.description_label, 0, Qt.AlignHCenter)
         self.button: Optional[QPushButton] = None
         if button_text:
@@ -890,10 +893,17 @@ class EmptyState(QWidget):
     def set_text(self, title: str, description: str, button_text: str = "") -> None:
         self.title_label.setText(title)
         self.description_label.setText(description)
+        target_w = self.description_label.width() or self.description_label.maximumWidth() or 460
+        needed_h = self.description_label.heightForWidth(target_w)
+        if needed_h > 0:
+            self.description_label.setMinimumHeight(needed_h)
+        self.description_label.adjustSize()
+        self.description_label.updateGeometry()
         if self.button is not None:
             self.button.setVisible(bool(button_text))
             if button_text:
                 self.button.setText(button_text)
+        self.updateGeometry()
 
 
 def apply_download_progress(bar: QProgressBar, done: int, total: int) -> str:

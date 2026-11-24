@@ -218,6 +218,11 @@ class MainWindow(QMainWindow):
         settings_button.clicked.connect(lambda: self._navigate("settings"))
         self.nav_buttons["settings"] = settings_button
         side.addWidget(settings_button)
+        self.update_button = QPushButton("Buscar actualizaciones")
+        self.update_button.setObjectName("nav")
+        self.update_button.setCursor(Qt.PointingHandCursor)
+        self.update_button.clicked.connect(lambda: self._check_updates(manual=True))
+        side.addWidget(self.update_button)
         self.version_label = QLabel(f"v{__version__} · biblioteca local")
         self.version_label.setObjectName("tiny")
         side.addWidget(self.version_label)
@@ -1331,6 +1336,8 @@ class MainWindow(QMainWindow):
             if manual:
                 self.toast.show_message("Ya se está comprobando la actualización.")
             return
+        self.update_button.setEnabled(False)
+        self.update_button.setText("Comprobando…")
         self.settings_page.set_update_checking(True)
         worker = CheckWorker(__version__, self)
         worker.found.connect(
@@ -1349,6 +1356,8 @@ class MainWindow(QMainWindow):
             self.update_worker = None
 
     def _on_update_checked(self, info, manual: bool) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("Buscar actualizaciones")
         self.store.settings["update_last_check"] = _now_iso()
         if manual:
             self.store.settings.pop("update_dismissed_version", None)
@@ -1374,6 +1383,8 @@ class MainWindow(QMainWindow):
             self.settings_page.set_update_result("")
 
     def _on_update_failed(self, message: str, manual: bool) -> None:
+        self.update_button.setEnabled(True)
+        self.update_button.setText("Buscar actualizaciones")
         if manual:
             self.settings_page.set_update_result(message)
             self.toast.show_message(message, 6000)

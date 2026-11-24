@@ -88,65 +88,44 @@ def test_postpone_persists_dismissed_version_across_restore(monkeypatch, tmp_pat
     app.processEvents()
 
 
-def test_settings_page_shows_download_progress_and_error(monkeypatch, tmp_path) -> None:
-    from PySide6.QtWidgets import QPushButton
+def test_sidebar_update_button_triggers_check_and_updates_banner(monkeypatch, tmp_path) -> None:
+    from PySide6.QtWidgets import QLabel
 
-    import umbral.store as store_mod
-    from umbral.ui.pages import SettingsPage
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
 
-    monkeypatch.setattr(store_mod, "library_file", lambda: tmp_path / "library.json")
-    monkeypatch.setattr(store_mod, "settings_file", lambda: tmp_path / "settings.json")
+    from umbral.ui.main_window import MainWindow
+
     app = QApplication.instance() or QApplication([])
-    store = store_mod.Store()
-    page = SettingsPage(store)
+    window = MainWindow()
+    window.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+
+    assert window.update_button.text() == "Buscar actualizaciones"
+    assert window.update_button.isEnabled()
+
+    called: list[bool] = []
+    monkeypatch.setattr(window, "_check_updates", lambda manual=False: called.append(manual))
+    window.update_button.click()
+    assert called == [True]
+
     info = UpdateInfo(
-        version="8.23.1",
-        tag="v8.23.1",
-        notes="Corrección de actualización",
-        asset_url="https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.23.1/Umbral.exe",
+        version="8.29.0",
+        tag="v8.29.0",
+        notes="Novedades",
+        asset_url="https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.29.0/Umbral.exe",
         asset_name="Umbral.exe",
         size=1024,
         digest="",
         sha_url="",
-        page_url="https://github.com/sanjurjogon-crypto/umbral/releases/tag/v8.23.1",
+        page_url="https://github.com/sanjurjogon-crypto/umbral/releases/tag/v8.29.0",
         published_at="",
     )
-    page.set_update_available(info)
-    assert page._update_install_btn is not None
-    assert page._update_install_btn.text() == "Actualizar ahora"
+    window._on_update_checked(info, manual=True)
+    assert not window.update_banner.isHidden()
+    assert any("8.29.0" in lbl.text() for lbl in window.update_banner.findChildren(QLabel))
 
-    page.set_update_downloading(0, 0)
-    assert page._update_install_btn.text() == "Conectando…"
-    assert not page._update_install_btn.isEnabled()
-    assert "Solicitud recibida" in page._update_status_note.text()
-    assert page._update_progress_bar is not None
-    assert page._update_progress_bar.maximum() == 0
-
-    page.set_update_downloading(5 * 1024 * 1024, 10 * 1024 * 1024)
-    assert page._update_install_btn.text() == "Descargando 50 %…"
-    assert not page._update_install_btn.isEnabled()
-    assert "50 %" in page._update_status_note.text()
-    assert page._update_progress_bar.maximum() == 100
-    assert page._update_progress_bar.value() == 50
-
-    page.refresh()
-    assert page._update_install_btn is not None
-    assert not page._update_install_btn.isEnabled()
-    assert "50 %" in page._update_status_note.text()
-    assert page._update_progress_bar is not None
-    assert page._update_progress_bar.value() == 50
-
-    page.set_update_installing()
-    assert page._update_install_btn.text() == "Instalando…"
-    assert page._update_progress_bar.value() == 100
-
-    page.set_update_error("Fallo de red")
-    assert page._update_install_btn.text() == "Reintentar"
-    assert page._update_install_btn.isEnabled()
-    assert page._update_status_note.text() == "Fallo de red"
-    assert not page._update_progress_bar.isVisibleTo(page)
-
-    page.deleteLater()
+    window.close()
+    window.deleteLater()
     app.processEvents()
 
 
