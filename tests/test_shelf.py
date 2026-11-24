@@ -160,7 +160,7 @@ def test_shelf_canvas_renders_mixed_cases_tilt_and_badges(tmp_path: Path) -> Non
 
 def test_all_console_cases_render_and_emulator_badge_works(tmp_path: Path) -> None:
     app = _app()
-    from umbral.ui.cases import CASE_PROFILES
+    from umbral.ui.cases import CASE_PROFILES, is_pc_case
     from umbral.ui.shelf import emulator_badge_pixmap
 
     cover = tmp_path / "art.png"
@@ -211,6 +211,9 @@ def test_all_console_cases_render_and_emulator_badge_works(tmp_path: Path) -> No
     sw2 = case_profile(Game(id="sw2", title="MK World", system="Switch 2", system_key="switch2"))
     steam_prof = case_profile(Game(id="st1", title="Hades", system="Steam", system_key="steam", source="steam"))
     pc_prof = case_profile(pc_game)
+    port_game = Game(id="pt1", title="Ship of Harkinian", system="Ports", system_key="ports", emulator="Ship of Harkinian")
+    assert not is_pc_case(port_game)
+    assert case_profile(port_game).key == "ports"
     assert sw2.h_scale <= 1.02
     assert (steam_prof.w_scale, steam_prof.h_scale, steam_prof.shell_color) == (
         pc_prof.w_scale,
@@ -219,3 +222,28 @@ def test_all_console_cases_render_and_emulator_badge_works(tmp_path: Path) -> No
     )
     canvas.close()
     app.processEvents()
+
+
+def test_png_case_overlay_template_loading(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    import umbral.paths as paths_mod
+    from umbral.ui.cases import load_case_overlay
+
+    _app()
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    cases_dir = tmp_path / "cases"
+    cases_dir.mkdir(parents=True, exist_ok=True)
+    img = QImage(64, 64, QImage.Format_ARGB32)
+    img.fill(QColor(230, 0, 18, 255))
+    for y in range(16, 56):
+        for x in range(8, 56):
+            img.setPixelColor(x, y, QColor(0, 0, 0, 0))
+    img.save(str(cases_dir / "switch.png"))
+
+    loaded = load_case_overlay("switch")
+    assert loaded is not None
+    pix, win = loaded
+    assert not pix.isNull()
+    assert 0.05 <= win.x() <= 0.2
+    assert 0.2 <= win.y() <= 0.35

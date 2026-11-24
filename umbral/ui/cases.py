@@ -509,14 +509,14 @@ CASE_PROFILES: dict[str, CaseProfile] = {
         w_scale=0.90,
         h_scale=1.00,
         radius=4.5,
-        spine_color="#181b20",
-        header_bg="#14171c",
+        spine_color="#2a2214",
+        header_bg="#19150d",
         header_accent="#d4af37",
-        header_text="#e5e9f0",
+        header_text="#efe0b4",
         band_label="PORT",
         depth_scale=0.95,
         shell_kind="pc_keepcase",
-        shell_color="#14171c",
+        shell_color="#19150d",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
@@ -605,7 +605,7 @@ def _emulator_key(game: Game) -> str:
 def is_pc_case(game: Game) -> bool:
     source = (game.source or "").strip().lower()
     sys_key = (game.system_key or "").strip().lower()
-    if sys_key in {"pc", "ports", "steam", "epic", "gog"} or source in {"steam", "epic", "gog"}:
+    if sys_key in {"pc", "steam", "epic", "gog"} or source in {"steam", "epic", "gog"}:
         return True
     return sys_key == "" and (game.emulator or "").strip().lower() in {"standalone", ""}
 
@@ -1700,6 +1700,62 @@ _OVERLAY_PAINTERS: dict[str, Callable[[QPainter, QRectF, QRectF, CaseProfile], N
 }
 
 
+_OVERLAY_CACHE: dict[str, Optional[tuple[QPixmap, QRectF]]] = {}
+
+
+def _detect_transparent_window(pixmap: QPixmap) -> QRectF:
+    """Find the normalized [0..1] bounding box of the transparent artwork cutout in a PNG overlay."""
+    probe = pixmap.toImage().scaled(128, 128, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+    min_x, min_y = 128, 128
+    max_x, max_y = -1, -1
+    for y in range(128):
+        for x in range(128):
+            if probe.pixelColor(x, y).alpha() < 32:
+                if x < min_x:
+                    min_x = x
+                if y < min_y:
+                    min_y = y
+                if x > max_x:
+                    max_x = x
+                if y > max_y:
+                    max_y = y
+    if max_x < min_x or max_y < min_y:
+        return QRectF(0.0, 0.0, 1.0, 1.0)
+    return QRectF(
+        min_x / 128.0,
+        min_y / 128.0,
+        (max_x - min_x + 1) / 128.0,
+        (max_y - min_y + 1) / 128.0,
+    )
+
+
+def load_case_overlay(system_key: str) -> Optional[tuple[QPixmap, QRectF]]:
+    """Load an authentic PNG case overlay template from user data or bundled assets if available."""
+    key = (system_key or "").strip().lower()
+    if not key:
+        return None
+    from ..paths import data_dir
+
+    candidates = (
+        data_dir() / "cases" / f"{key}.png",
+        Path(__file__).resolve().parent.parent / "assets" / "cases" / f"{key}.png",
+    )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        cache_key = f"{key}:{path}:{path.stat().st_mtime_ns}"
+        if cache_key in _OVERLAY_CACHE:
+            return _OVERLAY_CACHE[cache_key]
+        pix = QPixmap(str(path))
+        if pix.isNull():
+            _OVERLAY_CACHE[cache_key] = None
+            continue
+        result = (pix, _detect_transparent_window(pix))
+        _OVERLAY_CACHE[cache_key] = result
+        return result
+    return None
+
+
 def paint_console_case(
     painter: QPainter,
     frame: QRectF,
@@ -1708,6 +1764,24 @@ def paint_console_case(
     placeholder_fn: Callable[[QPainter, QRectF], None],
 ) -> QRectF:
     """Render an authentic physical retail console case and return its artwork rect."""
+    template = load_case_overlay(profile.key)
+    if template is not None:
+        overlay_pix, norm_win = template
+        art = QRectF(
+            frame.left() + frame.width() * norm_win.x(),
+            frame.top() + frame.height() * norm_win.y(),
+            max(8.0, frame.width() * norm_win.width()),
+            max(8.0, frame.height() * norm_win.height()),
+        )
+        painter.save()
+        if pixmap is not None and not pixmap.isNull():
+            _draw_cover_art(painter, art, pixmap)
+        else:
+            placeholder_fn(painter, art)
+        painter.drawPixmap(frame.toRect(), overlay_pix)
+        painter.restore()
+        return art
+
     w, h = frame.width(), frame.height()
     bl, bt, br, bb = profile.bezel
     inner = QRectF(
