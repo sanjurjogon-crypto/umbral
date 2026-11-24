@@ -537,7 +537,7 @@ class GameCard(QFrame):
         self.title_label = QLabel(game.title)
         self.title_label.setObjectName("cardTitle")
         self.title_label.setWordWrap(True)
-        self.title_label.setMaximumHeight(38)
+        self.title_label.setMaximumHeight(48)
         body.addWidget(self.title_label)
 
         self.subtitle_label = QLabel(game.subtitle or game.system)

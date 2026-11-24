@@ -376,3 +376,25 @@ def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, 
     empty.deleteLater()
     page.deleteLater()
     app.processEvents()
+
+
+def test_library_shelf_title_expands_for_long_multiline_titles(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import LibraryPage
+
+    app = _app()
+    long_title = "IRON NEST: HEAVY TURRET SIMULATOR DELUXE EDITION"
+    store = _store(
+        monkeypatch,
+        tmp_path,
+        [Game(id="g1", title=long_title, system="Steam", system_key="steam", source="steam")],
+    )
+    lib = LibraryPage(store)
+    lib.resize(700, 720)
+    lib.show()
+    lib.refresh()
+    app.processEvents()
+
+    assert lib.info_title.height() >= lib.info_title.fontMetrics().lineSpacing() * 2
+    lib.close()
+    lib.deleteLater()
+    app.processEvents()
