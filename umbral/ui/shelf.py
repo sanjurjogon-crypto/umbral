@@ -520,21 +520,18 @@ def _perspective_quad(
     width: float,
     height: float,
     tilt: float,
-    side: float,
+    turn: float,
     hover_x: float = 0.0,
     hover_y: float = 0.0,
 ) -> list[QPointF]:
-    """Compute a clean 3D-rotated rectangular box quad without trapezoid top-pinching."""
+    """Compute a clean 3D-rotated rectangular box quad with smooth continuous turn interpolation."""
     half_w = width / 2.0
     half_h = height / 2.0
     foreshorten = half_w * 0.135 * tilt
     taper = half_h * 0.048 * tilt
-    if side < 0:
-        left_dy, right_dy = taper, -taper
-    elif side > 0:
-        left_dy, right_dy = -taper, taper
-    else:
-        left_dy = right_dy = 0.0
+    clamped_turn = max(-1.0, min(1.0, float(turn)))
+    left_dy = -clamped_turn * taper
+    right_dy = clamped_turn * taper
     yaw = hover_x * half_h * 0.030
     pitch = hover_y * half_w * 0.026
     return [
@@ -578,10 +575,10 @@ def _quad_transform(source: list[QPointF], quad: list[QPointF]) -> QTransform:
     return QTransform(h11, h21, h31, h12, h22, h32, h13, h23, 1.0)
 
 
-def _pillow_blur_cover(
+def _pillow_sharp_cover(
     cover_path: str, pixmap: Optional[QPixmap], target_w: int, target_h: int
 ) -> Optional[np.ndarray]:
-    """Generate a high-resolution Gaussian-blurred RGB array from cover artwork without square pixelation."""
+    """Scale cover artwork cleanly to full backdrop resolution keeping crisp sharp details."""
     img: Optional[Image.Image] = None
     try:
         if cover_path:
@@ -598,21 +595,19 @@ def _pillow_blur_cover(
     if img is None:
         return None
 
-    work_w = max(320, min(640, target_w // 2 if target_w >= 640 else target_w))
-    work_h = max(180, int(round(work_w * (target_h / max(1, target_w)))))
     src_w, src_h = img.size
     if src_w <= 0 or src_h <= 0:
         return None
-    scale = max(work_w / src_w, work_h / src_h)
-    scaled_w = max(work_w, int(round(src_w * scale)))
-    scaled_h = max(work_h, int(round(src_h * scale)))
+    scale = max(target_w / src_w, target_h / src_h)
+    scaled_w = max(target_w, int(round(src_w * scale)))
+    scaled_h = max(target_h, int(round(src_h * scale)))
     resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-    left = max(0, (scaled_w - work_w) // 2)
-    top = max(0, (scaled_h - work_h) // 3)
-    cropped = resized.crop((left, top, left + work_w, top + work_h))
-    blurred = cropped.filter(ImageFilter.GaussianBlur(radius=24))
-    full = blurred.resize((target_w, target_h), Image.Resampling.BILINEAR)
-    return np.asarray(full, dtype=np.float32)
+    if scale > 1.05:
+        resized = resized.filter(ImageFilter.UnsharpMask(radius=1.0, percent=55, threshold=3))
+    left = max(0, (scaled_w - target_w) // 2)
+    top = max(0, (scaled_h - target_h) // 3)
+    cropped = resized.crop((left, top, left + target_w, top + target_h))
+    return np.asarray(cropped, dtype=np.float32)
 
 
 def render_debanded_backdrop(
@@ -627,7 +622,7 @@ def render_debanded_backdrop(
     dominant: QColor,
     halo_enabled: bool,
 ) -> QPixmap:
-    """Render a smooth high-res backdrop with triangular-PDF debanding and film grain."""
+    """Render a crisp full-res backdrop with triangular-PDF debanding and subtle film grain."""
     w = max(16, int(width))
     h = max(16, int(height))
 
@@ -646,10 +641,10 @@ def render_debanded_backdrop(
     ):
         base[:, :, ch] = t_v + (b_v - t_v) * y_norm[:, 0][:, None]
 
-    cover_arr = _pillow_blur_cover(cover_path, pixmap, w, h)
+    cover_arr = _pillow_sharp_cover(cover_path, pixmap, w, h)
     if cover_arr is not None:
-        # Vertical atmospheric blend keeping cover vibrant in center and deeper under top/bottom chrome
-        veil = 0.24 + 0.34 * np.exp(-((y_norm - 0.44) / 0.32) ** 2)
+        # Smooth atmospheric blend keeping sharp background artwork clearly visible behind cases
+        veil = 0.22 + 0.30 * np.exp(-((y_norm - 0.44) / 0.34) ** 2)
         base = base * (1.0 - veil[:, :, None]) + cover_arr * veil[:, :, None]
 
     if halo_enabled:
@@ -1050,6 +1045,7 @@ class ShelfCanvas(QWidget):
             "lift": lift,
             "focus": focus,
             "distance": distance,
+            "turn": max(-1.0, min(1.0, offset)),
         }
 
     def _case_rect(
@@ -1384,17 +1380,12 @@ class ShelfCanvas(QWidget):
         if strength <= 0.08:
             return
         target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
-        side = 0.0
-        offset = geometry["x"]
-        if offset > 0.5:
-            side = 1.0
-        elif offset < -0.5:
-            side = -1.0
+        turn = float(geometry.get("turn", 0.0))
         tilt_amount = (1.0 - focus) * 0.85 + 0.12
         hover_x = self._tilt_x * focus if selected else 0.0
         hover_y = self._tilt_y * focus if selected else 0.0
         quad = _perspective_quad(
-            target.width(), target.height(), tilt_amount, side, hover_x=hover_x, hover_y=hover_y
+            target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
         )
 
         # Anchor flipped 3D reflection directly under the bottom perspective edge of the case
@@ -1425,27 +1416,33 @@ class ShelfCanvas(QWidget):
         painter.save()
         painter.setTransform(trans, False)
         painter.setOpacity(0.56 * strength if selected else 0.44 * strength)
-        # Mirror subtle 3D spine into floor too
-        depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
+        # Mirror both left & right 3D spines continuously into floor
+        max_depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
+        left_depth = max_depth * (0.28 + 0.72 * max(0.0, turn))
+        right_depth = max_depth * (0.28 + 0.72 * max(0.0, -turn))
         spine_grad = QLinearGradient(0, refl_rect.top(), 0, refl_rect.bottom())
         spine_base = QColor(item.profile.spine_color)
         spine_grad.setColorAt(0.0, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 170))
         spine_grad.setColorAt(0.7, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 35))
         spine_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
-        spine_path = QPainterPath()
-        if side > 0.0:
-            spine_path.moveTo(refl_rect.left(), refl_rect.top())
-            spine_path.lineTo(refl_rect.left() - depth, refl_rect.top() - depth * 0.32)
-            spine_path.lineTo(refl_rect.left() - depth, refl_rect.bottom())
-            spine_path.lineTo(refl_rect.left(), refl_rect.bottom())
-        else:
-            spine_path.moveTo(refl_rect.right(), refl_rect.top())
-            spine_path.lineTo(refl_rect.right() + depth, refl_rect.top() - depth * 0.32)
-            spine_path.lineTo(refl_rect.right() + depth, refl_rect.bottom())
-            spine_path.lineTo(refl_rect.right(), refl_rect.bottom())
-        spine_path.closeSubpath()
         painter.setPen(Qt.NoPen)
-        painter.fillPath(spine_path, QBrush(spine_grad))
+
+        left_spine = QPainterPath()
+        left_spine.moveTo(refl_rect.left(), refl_rect.top())
+        left_spine.lineTo(refl_rect.left() - left_depth, refl_rect.top() - left_depth * 0.32)
+        left_spine.lineTo(refl_rect.left() - left_depth, refl_rect.bottom())
+        left_spine.lineTo(refl_rect.left(), refl_rect.bottom())
+        left_spine.closeSubpath()
+        painter.fillPath(left_spine, QBrush(spine_grad))
+
+        right_spine = QPainterPath()
+        right_spine.moveTo(refl_rect.right(), refl_rect.top())
+        right_spine.lineTo(refl_rect.right() + right_depth, refl_rect.top() - right_depth * 0.32)
+        right_spine.lineTo(refl_rect.right() + right_depth, refl_rect.bottom())
+        right_spine.lineTo(refl_rect.right(), refl_rect.bottom())
+        right_spine.closeSubpath()
+        painter.fillPath(right_spine, QBrush(spine_grad))
+
         painter.drawPixmap(refl_rect, refl_pix, QRectF(refl_pix.rect()))
         painter.restore()
 
@@ -1461,19 +1458,13 @@ class ShelfCanvas(QWidget):
         selected: bool,
     ) -> None:
         target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
-
-        side = 0.0
-        offset = geometry["x"]
-        if offset > 0.5:
-            side = 1.0
-        elif offset < -0.5:
-            side = -1.0
+        turn = float(geometry.get("turn", 0.0))
         tilt_amount = (1.0 - geometry["focus"]) * 0.85 + 0.12
         hover_x = self._tilt_x * geometry["focus"] if selected else 0.0
         hover_y = self._tilt_y * geometry["focus"] if selected else 0.0
 
         quad = _perspective_quad(
-            target.width(), target.height(), tilt_amount, side, hover_x=hover_x, hover_y=hover_y
+            target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
         )
         absolute = [
             QPointF(target.center().x() + point.x(), target.center().y() + point.y())
@@ -1489,7 +1480,7 @@ class ShelfCanvas(QWidget):
 
         painter.save()
         painter.setTransform(trans, False)
-        self._paint_spine(painter, target, item, side)
+        self._paint_spine(painter, target, item, turn)
         self._paint_front(painter, target, item, selected, geometry["focus"], cover_w, cover_h)
         painter.restore()
 
@@ -1511,30 +1502,41 @@ class ShelfCanvas(QWidget):
         painter.drawRect(target)
 
     def _paint_spine(
-        self, painter: QPainter, target: QRectF, item: ShelfItem, side: float = -1.0
+        self, painter: QPainter, target: QRectF, item: ShelfItem, turn: float = 0.0
     ) -> None:
+        """Paint 3D side spines on both edges continuously so crossing center never pops."""
         width = target.width()
-        depth = CASE_DEPTH * (width / CASE_W) * 0.55 * item.profile.depth_scale
+        max_depth = CASE_DEPTH * (width / CASE_W) * 0.55 * item.profile.depth_scale
         base = QColor(item.profile.spine_color)
-        path = QPainterPath()
-        if side > 0.0:
-            path.moveTo(target.left(), target.top())
-            path.lineTo(target.left() - depth, target.top() + depth * 0.32)
-            path.lineTo(target.left() - depth, target.bottom() - depth * 0.32)
-            path.lineTo(target.left(), target.bottom())
-            spine = QLinearGradient(target.left(), 0, target.left() - depth, 0)
-        else:
-            path.moveTo(target.right(), target.top())
-            path.lineTo(target.right() + depth, target.top() + depth * 0.32)
-            path.lineTo(target.right() + depth, target.bottom() - depth * 0.32)
-            path.lineTo(target.right(), target.bottom())
-            spine = QLinearGradient(target.right(), 0, target.right() + depth, 0)
-        path.closeSubpath()
-        spine.setColorAt(0.0, base)
-        spine.setColorAt(1.0, base.darker(190))
+        clamped = max(-1.0, min(1.0, float(turn)))
+
+        left_depth = max_depth * (0.28 + 0.72 * max(0.0, clamped))
+        right_depth = max_depth * (0.28 + 0.72 * max(0.0, -clamped))
+
+        left_path = QPainterPath()
+        left_path.moveTo(target.left(), target.top())
+        left_path.lineTo(target.left() - left_depth, target.top() + left_depth * 0.32)
+        left_path.lineTo(target.left() - left_depth, target.bottom() - left_depth * 0.32)
+        left_path.lineTo(target.left(), target.bottom())
+        left_path.closeSubpath()
+        left_spine = QLinearGradient(target.left(), 0, target.left() - left_depth, 0)
+        left_spine.setColorAt(0.0, base)
+        left_spine.setColorAt(1.0, base.darker(190))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(spine))
-        painter.drawPath(path)
+        painter.setBrush(QBrush(left_spine))
+        painter.drawPath(left_path)
+
+        right_path = QPainterPath()
+        right_path.moveTo(target.right(), target.top())
+        right_path.lineTo(target.right() + right_depth, target.top() + right_depth * 0.32)
+        right_path.lineTo(target.right() + right_depth, target.bottom() - right_depth * 0.32)
+        right_path.lineTo(target.right(), target.bottom())
+        right_path.closeSubpath()
+        right_spine = QLinearGradient(target.right(), 0, target.right() + right_depth, 0)
+        right_spine.setColorAt(0.0, base)
+        right_spine.setColorAt(1.0, base.darker(190))
+        painter.setBrush(QBrush(right_spine))
+        painter.drawPath(right_path)
 
     def _paint_front(
         self,
