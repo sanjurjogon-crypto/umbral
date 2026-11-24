@@ -40,6 +40,14 @@ def test_library_search_matches_system_emulator_and_notes(monkeypatch, tmp_path:
     page.set_query("roguelike")
     assert [g.id for g in page._visible_games()] == ["g2"]
 
+    page.set_query("")
+    page.resize(1200, 760)
+    page.refresh(reset=True)
+    # Alphabetical order selects "Hades" (PC/Standalone) at index 0, then "Zelda" (Dolphin) at index 1
+    assert page.info_emu_icon.isHidden()
+    page.canvas.step(1)
+    assert not page.info_emu_icon.isHidden()
+
 
 def test_library_sort_puts_missing_years_last(monkeypatch, tmp_path: Path) -> None:
     _app()

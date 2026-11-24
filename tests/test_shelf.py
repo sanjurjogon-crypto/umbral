@@ -156,3 +156,55 @@ def test_shelf_canvas_renders_mixed_cases_tilt_and_badges(tmp_path: Path) -> Non
     assert canvas._backdrop_mix == 0.0 or canvas._bg_anim.state()
     canvas.close()
     app.processEvents()
+
+
+def test_all_console_cases_render_and_emulator_badge_works(tmp_path: Path) -> None:
+    app = _app()
+    from umbral.ui.cases import CASE_PROFILES
+    from umbral.ui.shelf import emulator_badge_pixmap
+
+    cover = tmp_path / "art.png"
+    img = QImage(200, 260, QImage.Format_ARGB32)
+    img.fill(QColor(60, 110, 185))
+    img.save(str(cover))
+
+    games = [
+        Game(
+            id=f"case-{key}",
+            title=f"Juego {key.upper()}",
+            system=profile.band_label,
+            system_key=key,
+            source=key if key in {"steam", "epic", "gog"} else "auto",
+            emulator="Dolphin" if key in {"wii", "gamecube"} else ("Standalone" if key == "pc" else "RetroArch"),
+            cover=str(cover),
+        )
+        for key, profile in CASE_PROFILES.items()
+    ]
+    canvas = ShelfCanvas()
+    canvas.resize(1200, 680)
+    canvas.set_games(games)
+    for item in canvas.items:
+        base_w = int(round(200 * item.profile.w_scale))
+        base_h = int(round(270 * item.profile.h_scale))
+        front = canvas._front_pixmap_for(item, base_w, base_h)
+        refl = canvas._refl_pixmap_for(item, base_w, base_h)
+        assert not front.isNull()
+        assert not refl.isNull()
+
+    # Legacy saved Wii GameCube ROM path resolves to authentic GameCube box
+    legacy_gc = Game(
+        id="legacy-gc",
+        title="Wind Waker",
+        system="Wii / GameCube",
+        system_key="wii",
+        emulator="Dolphin",
+        rom_path=str(tmp_path / "WindWaker.gcm"),
+    )
+    assert case_profile(legacy_gc).key == "gamecube"
+
+    # Emulator logo helper renders badge for console emulators and omits it for PC
+    assert emulator_badge_pixmap(legacy_gc, 24) is not None
+    pc_game = Game(id="pc1", title="Celeste", system="PC", system_key="pc", emulator="Standalone")
+    assert emulator_badge_pixmap(pc_game, 24) is None
+    canvas.close()
+    app.processEvents()

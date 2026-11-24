@@ -33,7 +33,7 @@ from ..profiles import EmulatorProfile, PROFILE_BY_KEY, all_profiles
 from ..store import Store, format_seconds
 from ..stores import store_statuses
 from ..updater import UpdateInfo, relative_time
-from .shelf import ShelfCanvas
+from .shelf import ShelfCanvas, emulator_badge_pixmap
 from .style import active as active_style
 from .widgets import (
     CardRow,
@@ -353,10 +353,22 @@ class LibraryPage(QWidget):
         info_body = QVBoxLayout(self.info)
         info_body.setContentsMargins(38, 4, 38, 18)
         info_body.setSpacing(6)
+        self.info_title_row = QHBoxLayout()
+        self.info_title_row.setContentsMargins(0, 0, 0, 0)
+        self.info_title_row.setSpacing(10)
+        self.info_emu_icon = QLabel("")
+        self.info_emu_icon.setObjectName("shelfEmuIcon")
+        self.info_emu_icon.setFixedSize(26, 26)
+        self.info_emu_icon.setAlignment(Qt.AlignCenter)
+        self.info_emu_icon.hide()
         self.info_title = QLabel("")
         self.info_title.setObjectName("shelfTitle")
         self.info_title.setAlignment(Qt.AlignCenter)
         self.info_title.setWordWrap(True)
+        self.info_title_row.addStretch(1)
+        self.info_title_row.addWidget(self.info_emu_icon, 0, Qt.AlignVCenter)
+        self.info_title_row.addWidget(self.info_title, 0, Qt.AlignVCenter)
+        self.info_title_row.addStretch(1)
         self.info_meta = QLabel("")
         self.info_meta.setObjectName("shelfMeta")
         self.info_meta.setAlignment(Qt.AlignCenter)
@@ -374,7 +386,7 @@ class LibraryPage(QWidget):
         self.details_button.clicked.connect(self._details_current)
         self.info_actions.addWidget(self.play_button)
         self.info_actions.addWidget(self.details_button)
-        info_body.addWidget(self.info_title)
+        info_body.addLayout(self.info_title_row)
         info_body.addWidget(self.info_meta)
         info_body.addSpacing(4)
         info_body.addLayout(self.info_actions)
@@ -572,6 +584,16 @@ class LibraryPage(QWidget):
         return games
 
     def _on_selection(self, game: Game) -> None:
+        badge = emulator_badge_pixmap(game, 26)
+        if badge is not None and not badge.isNull():
+            scaled = badge.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.info_emu_icon.setPixmap(scaled)
+            self.info_emu_icon.setToolTip(game.emulator or game.system)
+            self.info_emu_icon.show()
+        else:
+            self.info_emu_icon.clear()
+            self.info_emu_icon.setToolTip("")
+            self.info_emu_icon.hide()
         self.info_title.setText(game.title)
         bits = [game.system] if game.system else []
         if game.year:

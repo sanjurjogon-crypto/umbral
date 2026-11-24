@@ -46,6 +46,7 @@ PLATFORM_IDS: dict[str, tuple[int, ...]] = {
     "3ds": (37, 137),
     "ports": (508, 130, 6, 21, 5, 41),
     "wii": (5, 21),
+    "gamecube": (21, 5),
     "wiiu": (41,),
     "nds": (20, 159),
     "gba": (24,),

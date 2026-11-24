@@ -170,8 +170,9 @@ PROFILES: tuple[EmulatorProfile, ...] = (
     EmulatorProfile(
         key="dolphin",
         name="Dolphin",
-        system="Wii / GameCube",
+        system="Wii",
         system_key="wii",
+        systems=("gamecube",),
         exe_names=("dolphin.exe", "dolphin-emu.exe", "dolphin-emu", "dolphin-emu-qt2"),
         arguments=("-e", "{rom}"),
         rom_extensions=(".iso", ".rvz", ".wbfs", ".gcm", ".gcz"),

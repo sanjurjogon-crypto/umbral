@@ -62,3 +62,25 @@ def test_custom_emulator_extensions_without_dot_are_normalized() -> None:
     )
     assert profile is not None
     assert profile.rom_extensions == (".gba", ".zip")
+
+
+def test_dolphin_detects_gamecube_and_wii_separately(monkeypatch, tmp_path: Path) -> None:
+    import umbral.detect as detect_mod
+
+    emu = tmp_path / "Dolphin.exe"
+    emu.write_bytes(b"MZ")
+    gc_rom = tmp_path / "Super Smash Bros Melee.gcm"
+    gc_rom.write_bytes(b"\x00" * 128)
+    wii_rom = tmp_path / "Super Mario Galaxy.iso"
+    wii_data = bytearray(0x40)
+    wii_data[0x18:0x1C] = b"\x5d\x1c\x9e\xa3"
+    wii_rom.write_bytes(wii_data)
+
+    monkeypatch.setattr(detect_mod, "_default_roots", lambda: [tmp_path])
+    monkeypatch.setattr(detect_mod, "store_games", lambda _folders=None: [])
+    result = detect(emulator_paths={"dolphin": str(emu)}, scan_folders=[str(tmp_path)])
+    by_rom = {game.rom_path: game for game in result.games}
+    assert by_rom[str(gc_rom)].system_key == "gamecube"
+    assert by_rom[str(gc_rom)].system == "GameCube"
+    assert by_rom[str(wii_rom)].system_key == "wii"
+    assert by_rom[str(wii_rom)].system == "Wii"

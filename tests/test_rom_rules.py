@@ -63,3 +63,28 @@ def test_zip_with_only_documents_is_rejected(tmp_path: Path) -> None:
         handle.write(inner, arcname="readme.txt")
     assert zip_has_rom(archive) is False
     assert validate_rom(archive, "") is False
+
+
+def test_gamecube_and_wii_discs_are_distinguished(tmp_path: Path) -> None:
+    gc_iso = tmp_path / "disc_a.iso"
+    gc_data = bytearray(0x40)
+    gc_data[0x1C:0x20] = b"\xc2\x33\x9f\x3d"
+    gc_iso.write_bytes(gc_data)
+    assert rom_system(gc_iso) == "gamecube"
+
+    wii_iso = tmp_path / "disc_b.iso"
+    wii_data = bytearray(0x40)
+    wii_data[0x18:0x1C] = b"\x5d\x1c\x9e\xa3"
+    wii_iso.write_bytes(wii_data)
+    assert rom_system(wii_iso) == "wii"
+
+    gcm = tmp_path / "Melee.gcm"
+    gcm.write_bytes(b"\x00" * 64)
+    assert rom_system(gcm) == "gamecube"
+
+    rvz_gc = tmp_path / "WindWaker.rvz"
+    rvz_data = bytearray(0x80)
+    rvz_data[0:4] = b"RVZ\x01"
+    rvz_data[0x74:0x78] = b"\xc2\x33\x9f\x3d"
+    rvz_gc.write_bytes(rvz_data)
+    assert rom_system(rvz_gc) == "gamecube"
