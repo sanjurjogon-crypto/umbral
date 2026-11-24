@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -877,6 +878,21 @@ class EmptyState(QWidget):
                 self.button.setText(button_text)
 
 
+def apply_download_progress(bar: QProgressBar, done: int, total: int) -> str:
+    """Update a progress bar (busy while total is 0, determinate 0-100 afterwards)."""
+    from ..updater import format_download_progress
+
+    if total > 0:
+        percent = min(100, int(done * 100 / total))
+        bar.setRange(0, 100)
+        bar.setValue(percent)
+        return format_download_progress(done, total)
+    bar.setRange(0, 0)
+    if done > 0:
+        return format_download_progress(done, total)
+    return "Solicitud recibida · conectando con GitHub…"
+
+
 class UpdateBanner(QFrame):
     install_clicked = Signal()
     postpone_clicked = Signal()
@@ -900,10 +916,6 @@ class UpdateBanner(QFrame):
         self._panel.setObjectName("updateBanner")
         outer.addWidget(self._panel)
 
-        self._effect = QGraphicsOpacityEffect(self._panel)
-        self._effect.setOpacity(0.0)
-        self._panel.setGraphicsEffect(self._effect)
-        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
         self._slide = QPropertyAnimation(self, b"pos", self)
 
         body = QVBoxLayout(self._panel)
@@ -930,6 +942,13 @@ class UpdateBanner(QFrame):
         self.detail.setWordWrap(True)
         self.detail.hide()
         body.addWidget(self.detail)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(10)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.hide()
+        body.addWidget(self.progress_bar)
 
         body.addSpacing(6)
         actions = QHBoxLayout()
@@ -963,6 +982,7 @@ class UpdateBanner(QFrame):
         else:
             self.detail.setText("Preparando la actualización")
         self.detail.show()
+        self.progress_bar.hide()
         self.action.setText("Actualizar ahora")
         self.action.setEnabled(True)
         self.later.setEnabled(True)
@@ -975,19 +995,42 @@ class UpdateBanner(QFrame):
         self._animate_in()
 
     def show_progress(self, done: int, total: int) -> None:
-        from ..updater import format_download_progress
-
-        self.title.setText(f"Descargando Umbral {self._version}…")
         self.line1.hide()
         self.line2.hide()
-        self.detail.setText(format_download_progress(done, total))
+        if total > 0:
+            percent = min(100, int(done * 100 / total))
+            self.title.setText(f"Descargando Umbral {self._version}…")
+            self.action.setText(f"Descargando… {percent} %")
+        elif done > 0:
+            self.title.setText(f"Descargando Umbral {self._version}…")
+            self.action.setText("Descargando…")
+        else:
+            self.title.setText(f"Iniciando actualización a {self._version}…")
+            self.action.setText("Conectando…")
+        self.detail.setText(apply_download_progress(self.progress_bar, done, total))
         self.detail.show()
-        self.action.setText("Descargando…")
+        self.progress_bar.show()
         self.action.setEnabled(False)
         self.later.setEnabled(False)
         if not self.isVisible():
             self.show()
-            self._effect.setOpacity(1.0)
+        self.raise_()
+        self._refit()
+
+    def show_installing(self) -> None:
+        self.line1.hide()
+        self.line2.hide()
+        self.title.setText(f"Instalando Umbral {self._version}…")
+        self.detail.setText("Descarga completada · cerrando Umbral para actualizar y reiniciar…")
+        self.detail.show()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.progress_bar.show()
+        self.action.setText("Instalando…")
+        self.action.setEnabled(False)
+        self.later.setEnabled(False)
+        if not self.isVisible():
+            self.show()
         self.raise_()
         self._refit()
 
@@ -995,6 +1038,7 @@ class UpdateBanner(QFrame):
         self.title.setText("No se pudo actualizar")
         self.line1.hide()
         self.line2.hide()
+        self.progress_bar.hide()
         self.detail.setText(message)
         self.detail.show()
         self.action.setText("Reintentar")
@@ -1002,7 +1046,6 @@ class UpdateBanner(QFrame):
         self.later.setEnabled(True)
         if not self.isVisible():
             self.show()
-            self._effect.setOpacity(1.0)
         self.raise_()
         self._refit()
 
@@ -1017,11 +1060,8 @@ class UpdateBanner(QFrame):
         self.move(self._target)
 
     def hideEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        if self._fade is not None:
-            self._fade.stop()
         if self._slide is not None:
             self._slide.stop()
-        self._effect.setOpacity(0.0)
         super().hideEvent(event)
 
     def reposition(self) -> None:
@@ -1039,17 +1079,10 @@ class UpdateBanner(QFrame):
         return QPoint(x, y)
 
     def _animate_in(self) -> None:
-        if self._fade is None or self._slide is None:
+        if self._slide is None:
             return
-        self._fade.stop()
         self._slide.stop()
-        self._effect.setOpacity(0.0)
-        self._fade.setDuration(240)
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
-        self._fade.setEasingCurve(QEasingCurve.OutCubic)
-        self._fade.start()
-        self._slide.setDuration(260)
+        self._slide.setDuration(240)
         self._slide.setStartValue(QPoint(self._target.x(), self._target.y() + 18))
         self._slide.setEndValue(self._target)
         self._slide.setEasingCurve(QEasingCurve.OutCubic)

@@ -1344,7 +1344,10 @@ class MainWindow(QMainWindow):
             self.update_banner.show_update(info.version, getattr(info, "notes", ""))
         self.update_banner.show_progress(0, 0)
         self.settings_page.set_update_downloading(0, 0)
-        self.toast.show_message(f"Descargando Umbral {info.version}…", 4000)
+        self.toast.show_message(f"Actualización solicitada · descargando Umbral {info.version}…", 4000)
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
         download = DownloadWorker(info, self)
         download.progress.connect(self.update_banner.show_progress)
         download.progress.connect(self.settings_page.set_update_downloading)
@@ -1372,6 +1375,18 @@ class MainWindow(QMainWindow):
         self.toast.show_message(message, 6000)
 
     def _on_update_downloaded(self, path: str) -> None:
+        if self._updating:
+            return
+        self._updating = True
+        self.update_banner.show_installing()
+        self.settings_page.set_update_installing()
+        self.toast.show_message("Descarga completa · instalando y reiniciando…", 4000)
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        QTimer.singleShot(120, lambda target_path=path: self._finalize_update_install(target_path))
+
+    def _finalize_update_install(self, path: str) -> None:
         try:
             backup_data(__version__)
         except OSError:
@@ -1379,12 +1394,12 @@ class MainWindow(QMainWindow):
         try:
             apply_update(Path(path))
         except UpdateError as exc:
+            self._updating = False
             message = str(exc)
             self.update_banner.show_error(message)
             self.settings_page.set_update_error(message)
             self.toast.show_message(message, 6000)
             return
-        self._updating = True
         self.store.save_library()
         self.store.save_settings()
         self.close()

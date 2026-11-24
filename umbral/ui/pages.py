@@ -43,6 +43,7 @@ from .widgets import (
     HeroBanner,
     SectionHeader,
     StatTile,
+    apply_download_progress,
 )
 
 SORT_OPTIONS = [
@@ -891,12 +892,16 @@ class SettingsPage(QWidget):
         self.available_update: Optional[UpdateInfo] = None
         self.update_checking = False
         self.update_downloading = False
+        self.update_installing = False
+        self.update_done_bytes = 0
+        self.update_total_bytes = 0
         self.update_download_text = ""
         self.update_error = ""
         self.update_message = ""
         self._update_install_btn: Optional[QPushButton] = None
         self._update_later_btn: Optional[QPushButton] = None
         self._update_status_note: Optional[QLabel] = None
+        self._update_progress_bar: Optional[QProgressBar] = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll, _content, self.body = _scroll_page()
@@ -948,6 +953,7 @@ class SettingsPage(QWidget):
         self._update_install_btn = None
         self._update_later_btn = None
         self._update_status_note = None
+        self._update_progress_bar = None
         if self.available_update is not None:
             info = self.available_update
             card = QFrame()
@@ -984,22 +990,45 @@ class SettingsPage(QWidget):
             status_note.setVisible(bool(self.update_error or self.update_download_text))
             self._update_status_note = status_note
             card_body.addWidget(status_note)
+            progress_bar = QProgressBar()
+            progress_bar.setFixedHeight(10)
+            progress_bar.setTextVisible(False)
+            if self.update_installing:
+                progress_bar.setRange(0, 100)
+                progress_bar.setValue(100)
+                progress_bar.setVisible(True)
+            elif self.update_downloading:
+                apply_download_progress(progress_bar, self.update_done_bytes, self.update_total_bytes)
+                progress_bar.setVisible(True)
+            else:
+                progress_bar.setRange(0, 100)
+                progress_bar.setVisible(False)
+            self._update_progress_bar = progress_bar
+            card_body.addWidget(progress_bar)
             actions = QHBoxLayout()
             actions.setSpacing(10)
             later = QPushButton("Más tarde")
             later.setObjectName("ghost")
             later.setCursor(Qt.PointingHandCursor)
-            later.setEnabled(not self.update_downloading)
+            later.setEnabled(not (self.update_downloading or self.update_installing))
             later.clicked.connect(self.later_update)
-            install_label = (
-                "Descargando…"
-                if self.update_downloading
-                else ("Reintentar" if self.update_error else "Actualizar ahora")
-            )
+            if self.update_installing:
+                install_label = "Instalando…"
+            elif self.update_downloading and self.update_total_bytes > 0:
+                percent = min(100, int(self.update_done_bytes * 100 / self.update_total_bytes))
+                install_label = f"Descargando {percent} %…"
+            elif self.update_downloading and self.update_done_bytes > 0:
+                install_label = "Descargando…"
+            elif self.update_downloading:
+                install_label = "Conectando…"
+            elif self.update_error:
+                install_label = "Reintentar"
+            else:
+                install_label = "Actualizar ahora"
             install = QPushButton(install_label)
             install.setObjectName("primary")
             install.setCursor(Qt.PointingHandCursor)
-            install.setEnabled(not self.update_downloading)
+            install.setEnabled(not (self.update_downloading or self.update_installing))
             install.clicked.connect(self.install_update)
             self._update_later_btn = later
             self._update_install_btn = install
@@ -1247,19 +1276,65 @@ class SettingsPage(QWidget):
         self.available_update = info
         self.update_checking = False
         self.update_downloading = False
+        self.update_installing = False
+        self.update_done_bytes = 0
+        self.update_total_bytes = 0
         self.update_download_text = ""
         self.update_error = ""
         self.update_message = ""
         self.refresh()
 
     def set_update_downloading(self, done: int, total: int) -> None:
-        from ..updater import format_download_progress
-
         self.update_downloading = True
+        self.update_installing = False
+        self.update_done_bytes = done
+        self.update_total_bytes = total
         self.update_error = ""
-        self.update_download_text = f"Descargando actualización: {format_download_progress(done, total)}"
+        if self._update_progress_bar is not None:
+            progress_text = apply_download_progress(self._update_progress_bar, done, total)
+            self._update_progress_bar.setVisible(True)
+        elif total > 0:
+            from ..updater import format_download_progress
+
+            progress_text = format_download_progress(done, total)
+        elif done > 0:
+            from ..updater import format_download_progress
+
+            progress_text = format_download_progress(done, total)
+        else:
+            progress_text = "Solicitud recibida · conectando con GitHub…"
+        if total > 0:
+            percent = min(100, int(done * 100 / total))
+            self.update_download_text = f"Descargando actualización: {progress_text}"
+            btn_label = f"Descargando {percent} %…"
+        elif done > 0:
+            self.update_download_text = f"Descargando actualización: {progress_text}"
+            btn_label = "Descargando…"
+        else:
+            self.update_download_text = progress_text
+            btn_label = "Conectando…"
         if self._update_install_btn is not None:
-            self._update_install_btn.setText("Descargando…")
+            self._update_install_btn.setText(btn_label)
+            self._update_install_btn.setEnabled(False)
+        if self._update_later_btn is not None:
+            self._update_later_btn.setEnabled(False)
+        if self._update_status_note is not None:
+            self._update_status_note.setText(self.update_download_text)
+            self._update_status_note.setVisible(True)
+
+    def set_update_installing(self) -> None:
+        self.update_downloading = False
+        self.update_installing = True
+        self.update_error = ""
+        self.update_download_text = (
+            "Descarga completada · cerrando Umbral para instalar y reiniciar…"
+        )
+        if self._update_progress_bar is not None:
+            self._update_progress_bar.setRange(0, 100)
+            self._update_progress_bar.setValue(100)
+            self._update_progress_bar.setVisible(True)
+        if self._update_install_btn is not None:
+            self._update_install_btn.setText("Instalando…")
             self._update_install_btn.setEnabled(False)
         if self._update_later_btn is not None:
             self._update_later_btn.setEnabled(False)
@@ -1269,8 +1344,13 @@ class SettingsPage(QWidget):
 
     def set_update_error(self, message: str) -> None:
         self.update_downloading = False
+        self.update_installing = False
+        self.update_done_bytes = 0
+        self.update_total_bytes = 0
         self.update_download_text = ""
         self.update_error = message
+        if self._update_progress_bar is not None:
+            self._update_progress_bar.setVisible(False)
         if self._update_install_btn is not None:
             self._update_install_btn.setText("Reintentar")
             self._update_install_btn.setEnabled(True)
@@ -1289,6 +1369,9 @@ class SettingsPage(QWidget):
         version = self.available_update.version if self.available_update is not None else ""
         self.available_update = None
         self.update_downloading = False
+        self.update_installing = False
+        self.update_done_bytes = 0
+        self.update_total_bytes = 0
         self.update_download_text = ""
         self.update_error = ""
         if version:

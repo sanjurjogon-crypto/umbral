@@ -28,9 +28,21 @@ def test_banner_shows_custom_message_and_progress() -> None:
     assert "Gonzalo es el puto amo" in banner.line1.text()
     assert "8.21.1" in banner.detail.text()
 
+    banner.show_progress(0, 0)
+    assert "Iniciando" in banner.title.text()
+    assert "Solicitud recibida" in banner.detail.text()
+    assert banner.progress_bar.isVisibleTo(banner)
+    assert banner.progress_bar.maximum() == 0
+
     banner.show_progress(5 * 1024 * 1024, 10 * 1024 * 1024)
     assert "50 %" in banner.detail.text()
     assert "5,0 de 10,0 MB" in banner.detail.text()
+    assert banner.progress_bar.maximum() == 100
+    assert banner.progress_bar.value() == 50
+
+    banner.show_installing()
+    assert "Instalando" in banner.title.text()
+    assert banner.progress_bar.value() == 100
     banner.close()
     app.processEvents()
 
@@ -103,20 +115,36 @@ def test_settings_page_shows_download_progress_and_error(monkeypatch, tmp_path) 
     assert page._update_install_btn is not None
     assert page._update_install_btn.text() == "Actualizar ahora"
 
+    page.set_update_downloading(0, 0)
+    assert page._update_install_btn.text() == "Conectando…"
+    assert not page._update_install_btn.isEnabled()
+    assert "Solicitud recibida" in page._update_status_note.text()
+    assert page._update_progress_bar is not None
+    assert page._update_progress_bar.maximum() == 0
+
     page.set_update_downloading(5 * 1024 * 1024, 10 * 1024 * 1024)
-    assert page._update_install_btn.text() == "Descargando…"
+    assert page._update_install_btn.text() == "Descargando 50 %…"
     assert not page._update_install_btn.isEnabled()
     assert "50 %" in page._update_status_note.text()
+    assert page._update_progress_bar.maximum() == 100
+    assert page._update_progress_bar.value() == 50
 
     page.refresh()
     assert page._update_install_btn is not None
     assert not page._update_install_btn.isEnabled()
     assert "50 %" in page._update_status_note.text()
+    assert page._update_progress_bar is not None
+    assert page._update_progress_bar.value() == 50
+
+    page.set_update_installing()
+    assert page._update_install_btn.text() == "Instalando…"
+    assert page._update_progress_bar.value() == 100
 
     page.set_update_error("Fallo de red")
     assert page._update_install_btn.text() == "Reintentar"
     assert page._update_install_btn.isEnabled()
     assert page._update_status_note.text() == "Fallo de red"
+    assert not page._update_progress_bar.isVisibleTo(page)
 
     page.deleteLater()
     app.processEvents()
