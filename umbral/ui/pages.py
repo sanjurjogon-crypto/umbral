@@ -28,6 +28,7 @@ from .. import __version__
 from ..consoles import SYSTEM_LABELS
 from ..launcher import validate
 from ..models import Emulator, Game
+from ..paths import executable_file_filter
 from ..profiles import EmulatorProfile, PROFILE_BY_KEY, all_profiles
 from ..store import Store, format_seconds
 from ..stores import store_statuses
@@ -1167,7 +1168,7 @@ class SettingsPage(QWidget):
 
         self.body.addWidget(SectionHeader("Juegos de PC"))
         pc_text = QLabel(
-            "Umbral busca ejecutables .exe en tus carpetas y comprueba el nombre en Steam, "
+            "Umbral busca ejecutables de PC en tus carpetas y comprueba el nombre en Steam, "
             "itch.io y PCGamingWiki antes de proponerlos. También detecta descargas recientes "
             "de ROMs y te avisa si falta el emulador."
         )
@@ -1415,7 +1416,7 @@ class SettingsPage(QWidget):
 
     def _browse_executable(self, key: str) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Selecciona el ejecutable", "", "Ejecutables (*.exe);;Todos los archivos (*)"
+            self, "Selecciona el ejecutable", "", executable_file_filter()
         )
         if path:
             self.store.settings.setdefault("emulator_paths", {})[key] = path

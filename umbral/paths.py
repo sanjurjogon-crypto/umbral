@@ -19,9 +19,26 @@ def safe_path(value: str) -> PureWindowsPath | Path:
     return Path(value)
 
 
+def cache_root() -> Path:
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if local:
+        return Path(local)
+    if os.name == "nt":
+        return Path.home() / "AppData" / "Local"
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", "").strip()
+    return Path(xdg_cache) if xdg_cache else (Path.home() / ".cache")
+
+
 def data_dir() -> Path:
-    base = os.environ.get("APPDATA") or str(Path.home() / ".umbral")
-    path = Path(base) / APP_NAME
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        base = Path(appdata)
+    elif os.name == "nt":
+        base = Path.home() / "AppData" / "Roaming"
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
+        base = Path(xdg_data) if xdg_data else (Path.home() / ".local" / "share")
+    path = base / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -44,6 +61,12 @@ def library_file() -> Path:
 
 def settings_file() -> Path:
     return data_dir() / "settings.json"
+
+
+def executable_file_filter() -> str:
+    if os.name == "nt":
+        return "Ejecutables (*.exe);;Todos los archivos (*)"
+    return "Todos los archivos (*);;AppImage y scripts (*.AppImage *.sh *.x86_64 *.exe)"
 
 
 def assets_dir() -> Path:

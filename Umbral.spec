@@ -1,6 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+import sys
+
+win_icon = ['umbral/assets/umbral.ico'] if sys.platform.startswith('win') else None
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -35,5 +39,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['umbral/assets/umbral.ico'],
+    icon=win_icon,
 )

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -18,13 +19,22 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from . import __version__
-from .paths import data_dir
+from .paths import cache_root, data_dir
 
 REPO = "sanjurjogon-crypto/umbral"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
-ASSET_NAME = "Umbral.exe"
+WINDOWS_ASSET_NAME = "Umbral.exe"
+LINUX_ASSET_NAME = "Umbral-linux-x86_64"
+ASSET_NAME = WINDOWS_ASSET_NAME
 USER_AGENT = f"Umbral/{__version__}"
+
+
+def expected_asset_name(platform_name: Optional[str] = None) -> str:
+    target = (sys.platform if platform_name is None else platform_name).lower()
+    if target.startswith("win"):
+        return WINDOWS_ASSET_NAME
+    return LINUX_ASSET_NAME
 
 
 class UpdateError(Exception):
@@ -89,18 +99,25 @@ def _clean_notes(text: str) -> str:
     return clean
 
 
-def _pick_asset(assets: list[dict]) -> Optional[dict]:
+def _pick_asset(assets: list[dict], asset_name: Optional[str] = None) -> Optional[dict]:
+    wanted = (asset_name or expected_asset_name()).lower()
     candidates = [item for item in assets if isinstance(item, dict)]
     for item in candidates:
-        if str(item.get("name", "")).lower() == ASSET_NAME.lower():
+        if str(item.get("name", "")).lower() == wanted:
             return item
-    for item in candidates:
-        if str(item.get("name", "")).lower().endswith(".exe"):
-            return item
+    if wanted.endswith(".exe"):
+        for item in candidates:
+            if str(item.get("name", "")).lower().endswith(".exe"):
+                return item
+    else:
+        for item in candidates:
+            name = str(item.get("name", "")).lower()
+            if name.endswith(".appimage") or ("linux" in name and not name.endswith(".sha256")):
+                return item
     return None
 
 
-def _info_from_payload(payload: dict) -> Optional[UpdateInfo]:
+def _info_from_payload(payload: dict, asset_name: Optional[str] = None) -> Optional[UpdateInfo]:
     tag = str(payload.get("tag_name") or payload.get("name") or "").strip()
     version = tag[1:] if tag.lower().startswith("v") else tag
     if not version:
@@ -108,14 +125,17 @@ def _info_from_payload(payload: dict) -> Optional[UpdateInfo]:
     assets = payload.get("assets") or []
     if not isinstance(assets, list):
         assets = []
-    asset = _pick_asset(assets)
+    wanted_name = asset_name or expected_asset_name()
+    asset = _pick_asset(assets, wanted_name)
     if asset is None:
-        raise UpdateError("El release no incluye Umbral.exe.")
+        raise UpdateError(f"El release no incluye {wanted_name}.")
+    selected_name = str(asset.get("name") or wanted_name)
     size = int(asset.get("size") or 0)
     digest = str(asset.get("digest") or "")
     sha_url = ""
+    expected_sha_name = (selected_name + ".sha256").lower()
     for item in assets:
-        if str(item.get("name", "")).lower() == (ASSET_NAME + ".sha256").lower():
+        if str(item.get("name", "")).lower() == expected_sha_name:
             sha_url = str(item.get("browser_download_url", ""))
             break
     return UpdateInfo(
@@ -123,7 +143,7 @@ def _info_from_payload(payload: dict) -> Optional[UpdateInfo]:
         tag=tag,
         notes=_clean_notes(str(payload.get("body") or "")),
         asset_url=str(asset.get("browser_download_url") or ""),
-        asset_name=str(asset.get("name") or ASSET_NAME),
+        asset_name=selected_name,
         size=size,
         digest=digest,
         sha_url=sha_url,
@@ -170,8 +190,7 @@ def check_for_update(current: str = __version__, timeout: float = 8.0) -> Option
 
 
 def update_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-    path = Path(base) / "Umbral" / "update"
+    path = cache_root() / "Umbral" / "update"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -203,6 +222,7 @@ def _download_once(
     expected_size: int,
     progress: Optional[Callable[[int, int], None]],
     cancel_event: Optional[threading.Event],
+    is_pe: bool = True,
 ) -> str:
     request = Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
@@ -230,9 +250,16 @@ def _download_once(
     if total and done != total:
         raise UpdateError("La descarga quedó incompleta.")
     with temporary.open("rb") as handle:
-        if handle.read(2) != b"MZ":
+        header = handle.read(4)
+        valid = header[:2] == b"MZ" if is_pe else header == b"\x7fELF"
+        if not valid:
             raise UpdateError("El archivo descargado no es un ejecutable válido.")
     os.replace(temporary, target)
+    if not is_pe:
+        try:
+            os.chmod(target, 0o755)
+        except OSError:
+            pass
     return digest.hexdigest()
 
 
@@ -242,12 +269,13 @@ def _download_bytes(
     expected_size: int,
     progress: Optional[Callable[[int, int], None]],
     cancel_event: Optional[threading.Event],
+    is_pe: bool = True,
 ) -> str:
     temporary = target.with_name(target.name + ".part")
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
-            return _download_once(url, temporary, target, expected_size, progress, cancel_event)
+            return _download_once(url, temporary, target, expected_size, progress, cancel_event, is_pe=is_pe)
         except UpdateCancelled:
             temporary.unlink(missing_ok=True)
             raise
@@ -276,11 +304,15 @@ def download_update(
         raise UpdateError("La dirección de descarga no es válida.")
     if info.sha_url and not _is_trusted_github_url(info.sha_url):
         raise UpdateError("La dirección de la firma no es válida.")
-    target = update_dir() / f"Umbral-{slug_version(info.version)}.exe"
-    for old in update_dir().glob("Umbral-*.exe"):
+    is_pe = info.asset_name.lower().endswith(".exe")
+    suffix = ".exe" if is_pe else "-linux"
+    target = update_dir() / f"Umbral-{slug_version(info.version)}{suffix}"
+    for old in update_dir().glob(f"Umbral-*{suffix}"):
         if old != target:
             old.unlink(missing_ok=True)
-    digest = _download_bytes(info.asset_url, target, info.size, progress, cancel_event)
+    digest = _download_bytes(
+        info.asset_url, target, info.size, progress, cancel_event, is_pe=is_pe
+    )
     expected = ""
     if info.digest.lower().startswith("sha256:"):
         expected = info.digest.split(":", 1)[1].strip().lower()
@@ -484,11 +516,48 @@ def _clean_subprocess_env(base: Optional[dict[str, str]] = None) -> dict[str, st
     return cleaned
 
 
+def _posix_replacement_script(target: Path, new_bin: Path, pid: int) -> str:
+    backup = target.with_name(target.name + ".old")
+    staged = target.with_name(target.name + ".new")
+    log = target.with_name("umbral-update.log")
+    return f"""#!/bin/sh
+set -eu
+TARGET={shlex.quote(str(target))}
+NEW={shlex.quote(str(new_bin))}
+STAGED={shlex.quote(str(staged))}
+BACKUP={shlex.quote(str(backup))}
+LOG={shlex.quote(str(log))}
+PID={int(pid)}
+log_msg() {{
+  printf '%s %s\\n' "$(date -Iseconds 2>/dev/null || date)" "$1" >> "$LOG" 2>/dev/null || true
+}}
+log_msg "Esperando al proceso $PID"
+waited=0
+while [ "$waited" -lt 300 ]; do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+  waited=$((waited + 1))
+done
+cp -f "$NEW" "$STAGED"
+chmod 755 "$STAGED"
+cp -f "$TARGET" "$BACKUP" 2>/dev/null || true
+mv -f "$STAGED" "$TARGET"
+chmod 755 "$TARGET"
+log_msg "Nuevo ejecutable instalado"
+"$TARGET" --relaunch >/dev/null 2>&1 &
+sleep 1
+rm -f "$NEW" "$BACKUP" 2>/dev/null || true
+log_msg "Actualización completada"
+"""
+
+
 def apply_update(new_exe: Path) -> None:
     if not getattr(sys, "frozen", False):
         raise UpdateError("La actualización automática solo funciona desde el ejecutable de Umbral.")
     target = Path(sys.executable).resolve()
-    if target.suffix.lower() != ".exe":
+    if os.name == "nt" and target.suffix.lower() != ".exe":
         raise UpdateError("No se pudo localizar el ejecutable de Umbral.")
     if not new_exe.is_file():
         raise UpdateError("La actualización descargada ya no está disponible.")
@@ -497,12 +566,31 @@ def apply_update(new_exe: Path) -> None:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as exc:
+        folder_hint = "Descargas" if os.name == "nt" else "~/.local/bin o Descargas"
         raise UpdateError(
-            "No puedo escribir en la carpeta de Umbral. Mueve Umbral.exe a una carpeta "
-            "con permisos, como Descargas, y vuelve a intentarlo."
+            f"No puedo escribir en la carpeta de Umbral. Mueve {target.name} a una carpeta "
+            f"con permisos, como {folder_hint}, y vuelve a intentarlo."
         ) from exc
+
+    if os.name != "nt":
+        shell = shutil.which("sh") or "/bin/sh"
+        script = _posix_replacement_script(target, new_exe, os.getpid())
+        try:
+            subprocess.Popen(
+                [shell, "-c", script],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=_clean_subprocess_env(),
+                start_new_session=True,
+                close_fds=True,
+            )
+        except OSError as exc:
+            raise UpdateError("No se pudo iniciar el proceso de actualización.") from exc
+        return
+
     powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
-    if not powershell and os.name == "nt":
+    if not powershell:
         sys_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
         candidate = sys_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
         if candidate.is_file():
@@ -510,11 +598,9 @@ def apply_update(new_exe: Path) -> None:
     if not powershell:
         raise UpdateError("Windows no tiene PowerShell disponible para aplicar la actualización.")
     script = _replacement_script(target, new_exe, os.getpid())
-    flags = 0
-    if os.name == "nt":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+    )
     try:
         subprocess.Popen(
             [

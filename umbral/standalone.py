@@ -132,6 +132,39 @@ EXCLUDED_EXE_NAMES = {
     "vlc.exe",
     "vlc-cache-gen.exe",
     "virtualbox.exe",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "git",
+    "node",
+    "npm",
+    "chrome",
+    "firefox",
+    "steam",
+    "rpcs3",
+    "azahar",
+    "ryujinx",
+    "yuzu",
+    "suyu",
+    "eden",
+    "sudachi",
+    "cemu",
+    "dolphin-emu",
+    "pcsx2",
+    "pcsx2-qt",
+    "duckstation",
+    "duckstation-qt",
+    "ppsspp",
+    "melonds",
+    "mgba",
+    "mgba-qt",
+    "retroarch",
+    "lime3ds",
+    "citra",
+    "hookshot",
+    "umbral",
+    "umbral-linux-x86_64",
 }
 
 EXCLUDED_NAME_PATTERNS = (
@@ -416,11 +449,39 @@ def _under_prefix(path: Path, prefixes: list[str]) -> bool:
 
 
 def _system_prefixes() -> list[str]:
+    if os.name != "nt":
+        roots = [Path("/usr"), Path("/bin"), Path("/sbin"), Path("/lib"), Path("/lib64"), Path("/snap"), Path("/var/lib/flatpak")]
+        prefixes: list[str] = []
+        for root in roots:
+            try:
+                prefixes.append(os.path.normcase(str(root.resolve())))
+            except OSError:
+                prefixes.append(os.path.normcase(str(root)))
+        return prefixes
     system_root = os.environ.get("SystemRoot") or r"C:\Windows"
     try:
         return [os.path.normcase(str(Path(system_root).resolve()))]
     except OSError:
         return [os.path.normcase(system_root)]
+
+
+def _is_elf_binary(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def _is_candidate_executable(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    if os.name == "nt":
+        return suffix == ".exe"
+    if suffix in {".appimage", ".x86_64", ".sh", ".exe"}:
+        return True
+    if suffix in {".so", ".dll", ".pak", ".txt", ".json", ".xml", ".png", ".jpg", ".svg", ".md", ".py"}:
+        return False
+    return os.access(path, os.X_OK) or _is_elf_binary(path)
 
 
 def _walk_executables(
@@ -438,7 +499,7 @@ def _walk_executables(
         if entry.depth > max_depth:
             continue
         path = entry.path
-        if path.suffix.lower() != ".exe":
+        if not _is_candidate_executable(path):
             continue
         if _under_prefix(path, excluded) or _under_prefix(path, system):
             continue

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class EmulatorProfile:
     systems: tuple[str, ...] = ()
     folder_markers: tuple[str, ...] = ()
     search_paths: tuple[str, ...] = ()
+    flatpak_ids: tuple[str, ...] = ()
     working_dir: str = "exe_parent"
     priority: int = 50
     auto_scan: bool = True
@@ -29,16 +31,44 @@ class EmulatorProfile:
 
     @property
     def wanted_names(self) -> set[str]:
-        return {name.lower() for name in self.exe_names}
+        return {name.lower() for name in (*self.exe_names, *self.flatpak_ids)}
 
     def expanded_search_paths(self) -> list[Path]:
-        return [Path(os.path.expandvars(value)) for value in self.search_paths]
+        paths: list[Path] = []
+        for value in self.search_paths:
+            expanded = os.path.expanduser(os.path.expandvars(value))
+            if os.name != "nt" and expanded.startswith("%"):
+                continue
+            paths.append(Path(expanded))
+        if os.name != "nt":
+            home = Path.home()
+            for name in self.exe_names:
+                if name.lower().endswith(".exe"):
+                    continue
+                which = shutil.which(name)
+                if which:
+                    paths.append(Path(which))
+                for folder in (
+                    Path("/usr/bin"),
+                    Path("/usr/local/bin"),
+                    Path("/usr/games"),
+                    home / ".local" / "bin",
+                    home / "Applications",
+                ):
+                    paths.append(folder / name)
+            for app_id in self.flatpak_ids:
+                paths.append(Path("/var/lib/flatpak/exports/bin") / app_id)
+                paths.append(home / ".local" / "share" / "flatpak" / "exports" / "bin" / app_id)
+        return paths
 
     def expanded_firmware_paths(self, executable: str) -> list[Path]:
         base = Path(executable).parent if executable else Path.home()
         paths: list[Path] = []
         for value in self.firmware_paths:
-            path = Path(os.path.expandvars(value))
+            expanded = os.path.expanduser(os.path.expandvars(value))
+            if os.name != "nt" and expanded.startswith("%"):
+                continue
+            path = Path(expanded)
             if not path.is_absolute():
                 path = base / path
             paths.append(path)
@@ -51,7 +81,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Longshot",
         system="Ports",
         system_key="ports",
-        exe_names=("longshot.exe",),
+        exe_names=("longshot.exe", "longshot", "longshot.appimage"),
         arguments=(),
         working_dir="exe_parent",
         priority=4,
@@ -65,7 +95,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Hookshot",
         system="Ports",
         system_key="ports",
-        exe_names=("hookshot.exe",),
+        exe_names=("hookshot.exe", "hookshot", "hookshot.appimage"),
         arguments=(),
         working_dir="hookshot_root",
         priority=5,
@@ -78,7 +108,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Dusklight",
         system="Ports",
         system_key="ports",
-        exe_names=("dusklight.exe",),
+        exe_names=("dusklight.exe", "dusklight", "dusklight.appimage"),
         arguments=(),
         working_dir="exe_parent",
         priority=6,
@@ -91,7 +121,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Fritchii",
         system="Switch 2",
         system_key="switch2",
-        exe_names=("lichii.exe", "fritchii.exe"),
+        exe_names=("lichii.exe", "fritchii.exe", "lichii", "fritchii"),
         arguments=("-g", "{rom}"),
         rom_extensions=(".nup", ".nsp", ".xci"),
         priority=10,
@@ -103,7 +133,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="RPCS3",
         system="PS3",
         system_key="ps3",
-        exe_names=("rpcs3.exe",),
+        exe_names=("rpcs3.exe", "rpcs3", "rpcs3.appimage"),
         arguments=("--no-gui", "{rom}"),
         rom_extensions=(".iso",),
         folder_markers=("PS3_GAME",),
@@ -113,17 +143,18 @@ PROFILES: tuple[EmulatorProfile, ...] = (
             r"%PROGRAMFILES%\RPCS3\rpcs3.exe",
             r"%PROGRAMFILES(X86)%\RPCS3\rpcs3.exe",
         ),
+        flatpak_ids=("net.rpcs3.RPCS3",),
         priority=15,
         accent="#5B8DEF",
         description="Juego de PlayStation 3 lanzado con RPCS3.",
-        firmware_paths=("dev_flash", r"%APPDATA%\rpcs3\dev_flash"),
+        firmware_paths=("dev_flash", r"%APPDATA%\rpcs3\dev_flash", "~/.config/rpcs3/dev_flash"),
     ),
     EmulatorProfile(
         key="azahar",
         name="Azahar",
         system="3DS",
         system_key="3ds",
-        exe_names=("azahar.exe",),
+        exe_names=("azahar.exe", "azahar", "azahar.appimage"),
         rom_extensions=(".3ds", ".cci", ".cia", ".cxi"),
         search_paths=(
             r"%PROGRAMFILES%\Azahar\azahar.exe",
@@ -131,6 +162,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
             r"%LOCALAPPDATA%\Azahar\azahar.exe",
             r"%LOCALAPPDATA%\Programs\Azahar\azahar.exe",
         ),
+        flatpak_ids=("org.azahar_emu.Azahar",),
         priority=20,
         accent="#E05A7A",
         description="Juego de Nintendo 3DS lanzado con Azahar.",
@@ -140,7 +172,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Dolphin",
         system="Wii / GameCube",
         system_key="wii",
-        exe_names=("dolphin.exe", "dolphin-emu.exe"),
+        exe_names=("dolphin.exe", "dolphin-emu.exe", "dolphin-emu", "dolphin-emu-qt2"),
         arguments=("-e", "{rom}"),
         rom_extensions=(".iso", ".rvz", ".wbfs", ".gcm", ".gcz"),
         search_paths=(
@@ -148,6 +180,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
             r"%LOCALAPPDATA%\Programs\Dolphin\Dolphin.exe",
             r"%LOCALAPPDATA%\Dolphin\Dolphin.exe",
         ),
+        flatpak_ids=("org.DolphinEmu.dolphin-emu",),
         priority=30,
         accent="#6EC6A8",
         description="Juego de Wii o GameCube lanzado con Dolphin.",
@@ -157,13 +190,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="PCSX2",
         system="PS2",
         system_key="ps2",
-        exe_names=("pcsx2-qt.exe", "pcsx2.exe"),
+        exe_names=("pcsx2-qt.exe", "pcsx2.exe", "pcsx2-qt", "pcsx2", "pcsx2.appimage"),
         rom_extensions=(".iso", ".chd"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\PCSX2\pcsx2-qt.exe",
             r"%PROGRAMFILES%\PCSX2\pcsx2-qt.exe",
             r"%PROGRAMFILES(X86)%\PCSX2\pcsx2-qt.exe",
         ),
+        flatpak_ids=("net.pcsx2.PCSX2",),
         priority=30,
         accent="#8B9DFF",
         description="Juego de PlayStation 2 lanzado con PCSX2.",
@@ -177,12 +211,16 @@ PROFILES: tuple[EmulatorProfile, ...] = (
             "duckstation-qt-x64-releaseltcg.exe",
             "duckstation-qt.exe",
             "duckstation.exe",
+            "duckstation-qt",
+            "duckstation",
+            "duckstation.appimage",
         ),
         rom_extensions=(".cue", ".pbp", ".chd"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe",
             r"%PROGRAMFILES%\DuckStation\duckstation-qt-x64-ReleaseLTCG.exe",
         ),
+        flatpak_ids=("org.duckstation.DuckStation",),
         priority=30,
         accent="#B8A6FF",
         description="Juego de PlayStation lanzado con DuckStation.",
@@ -192,12 +230,20 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="PPSSPP",
         system="PSP",
         system_key="psp",
-        exe_names=("ppssppwindows64.exe", "ppssppwindows.exe", "ppsspp.exe"),
+        exe_names=(
+            "ppssppwindows64.exe",
+            "ppssppwindows.exe",
+            "ppsspp.exe",
+            "ppsspp",
+            "ppssppqt",
+            "ppssppsdl",
+        ),
         rom_extensions=(".iso", ".cso", ".pbp", ".chd"),
         search_paths=(
             r"%PROGRAMFILES%\PPSSPP\PPSSPPWindows64.exe",
             r"%LOCALAPPDATA%\Programs\PPSSPP\PPSSPPWindows64.exe",
         ),
+        flatpak_ids=("org.ppsspp.PPSSPP",),
         priority=30,
         accent="#7ED0F0",
         description="Juego de PSP lanzado con PPSSPP.",
@@ -207,13 +253,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Cemu",
         system="Wii U",
         system_key="wiiu",
-        exe_names=("cemu.exe",),
+        exe_names=("cemu.exe", "cemu", "cemu.appimage"),
         arguments=("-g", "{rom}"),
         rom_extensions=(".wud", ".wux", ".wua", ".rpx"),
         search_paths=(
             r"%PROGRAMFILES%\Cemu\Cemu.exe",
             r"%LOCALAPPDATA%\Programs\Cemu\Cemu.exe",
         ),
+        flatpak_ids=("info.cemu.Cemu",),
         priority=30,
         accent="#63D2C2",
         description="Juego de Wii U lanzado con Cemu.",
@@ -223,12 +270,13 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Ryujinx",
         system="Switch",
         system_key="switch",
-        exe_names=("ryujinx.exe",),
+        exe_names=("ryujinx.exe", "ryujinx", "ryujinx.appimage"),
         rom_extensions=(".nsp", ".xci", ".nro"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\Ryujinx\Ryujinx.exe",
             r"%PROGRAMFILES%\Ryujinx\Ryujinx.exe",
         ),
+        flatpak_ids=("org.ryujinx.Ryujinx",),
         priority=40,
         accent="#74C0FC",
         description="Juego de Switch lanzado con Ryujinx.",
@@ -238,7 +286,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Eden",
         system="Switch",
         system_key="switch",
-        exe_names=("eden.exe",),
+        exe_names=("eden.exe", "eden", "eden.appimage"),
         arguments=("-f", "-g", "{rom}"),
         rom_extensions=(".nsp", ".xci", ".nro"),
         search_paths=(
@@ -254,7 +302,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Sudachi",
         system="Switch",
         system_key="switch",
-        exe_names=("sudachi.exe",),
+        exe_names=("sudachi.exe", "sudachi", "sudachi.appimage"),
         arguments=("-f", "-g", "{rom}"),
         rom_extensions=(".nsp", ".xci", ".nro"),
         search_paths=(
@@ -270,7 +318,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Yuzu",
         system="Switch",
         system_key="switch",
-        exe_names=("yuzu.exe", "suyu.exe"),
+        exe_names=("yuzu.exe", "suyu.exe", "yuzu", "suyu", "yuzu.appimage", "suyu.appimage"),
         arguments=("-f", "-g", "{rom}"),
         rom_extensions=(".nsp", ".xci", ".nro"),
         search_paths=(
@@ -286,12 +334,13 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="melonDS",
         system="DS",
         system_key="nds",
-        exe_names=("melonds.exe",),
+        exe_names=("melonds.exe", "melonds", "melonds.appimage"),
         rom_extensions=(".nds",),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\melonDS\melonDS.exe",
             r"%PROGRAMFILES%\melonDS\melonDS.exe",
         ),
+        flatpak_ids=("net.kuribo64.melonDS",),
         priority=40,
         accent="#9BCB6E",
         description="Juego de Nintendo DS lanzado con melonDS.",
@@ -301,12 +350,13 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="mGBA",
         system="GBA",
         system_key="gba",
-        exe_names=("mgba.exe",),
+        exe_names=("mgba.exe", "mgba-qt", "mgba"),
         rom_extensions=(".gba",),
         search_paths=(
             r"%PROGRAMFILES%\mGBA\mGBA.exe",
             r"%LOCALAPPDATA%\Programs\mGBA\mGBA.exe",
         ),
+        flatpak_ids=("io.mgba.mGBA",),
         priority=40,
         accent="#B7D36B",
         description="Juego de Game Boy Advance lanzado con mGBA.",
@@ -316,12 +366,13 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Lime3DS",
         system="3DS",
         system_key="3ds",
-        exe_names=("lime3ds.exe", "citra.exe"),
+        exe_names=("lime3ds.exe", "citra.exe", "lime3ds-gui", "lime3ds", "citra-qt", "citra"),
         rom_extensions=(".3ds", ".cci", ".cia", ".cxi"),
         search_paths=(
             r"%LOCALAPPDATA%\Programs\Lime3DS\lime3ds.exe",
             r"%PROGRAMFILES%\Lime3DS\lime3ds.exe",
         ),
+        flatpak_ids=("io.github.lime3ds.Lime3DS", "org.citra_emu.citra"),
         priority=45,
         accent="#E05A7A",
         description="Juego de Nintendo 3DS lanzado con Lime3DS.",
@@ -331,8 +382,9 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Ship of Harkinian",
         system="Ports",
         system_key="ports",
-        exe_names=("soh.exe",),
+        exe_names=("soh.exe", "soh", "soh.appimage"),
         arguments=(),
+        flatpak_ids=("org.shipofharkinian.ShipOfHarkinian",),
         priority=10,
         auto_scan=False,
         accent="#E9B949",
@@ -344,7 +396,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="MAME",
         system="Arcade",
         system_key="arcade",
-        exe_names=("mame.exe", "mame64.exe"),
+        exe_names=("mame.exe", "mame64.exe", "mame"),
         arguments=("{rom}",),
         rom_extensions=(".zip",),
         search_paths=(
@@ -362,7 +414,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="FinalBurn Neo",
         system="Arcade",
         system_key="arcade",
-        exe_names=("fbneo.exe", "fbn.exe"),
+        exe_names=("fbneo.exe", "fbn.exe", "fbneo", "fbn"),
         arguments=("{rom}",),
         rom_extensions=(".zip",),
         search_paths=(
@@ -378,13 +430,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Snes9x",
         system="SNES",
         system_key="snes",
-        exe_names=("snes9x-x64.exe", "snes9x.exe"),
+        exe_names=("snes9x-x64.exe", "snes9x.exe", "snes9x-gtk", "snes9x"),
         arguments=("{rom}",),
         rom_extensions=(".sfc", ".smc", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\Snes9x\snes9x-x64.exe",
             r"%LOCALAPPDATA%\Programs\Snes9x\snes9x-x64.exe",
         ),
+        flatpak_ids=("com.snes9x.Snes9x",),
         priority=40,
         accent="#B48EAD",
         description="Juego de Super Nintendo lanzado con Snes9x.",
@@ -394,7 +447,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="FCEUX",
         system="NES",
         system_key="nes",
-        exe_names=("fceux.exe",),
+        exe_names=("fceux.exe", "fceux"),
         arguments=("{rom}",),
         rom_extensions=(".nes", ".zip"),
         search_paths=(
@@ -410,13 +463,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="RMG",
         system="N64",
         system_key="n64",
-        exe_names=("rmg.exe",),
+        exe_names=("rmg.exe", "rmg", "rmg.appimage"),
         arguments=("{rom}",),
         rom_extensions=(".n64", ".z64", ".v64", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\RMG\RMG.exe",
             r"%LOCALAPPDATA%\Programs\RMG\RMG.exe",
         ),
+        flatpak_ids=("com.github.Rosalie241.RMG",),
         priority=40,
         accent="#8FBF6A",
         description="Juego de Nintendo 64 lanzado con RMG.",
@@ -426,7 +480,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="simple64",
         system="N64",
         system_key="n64",
-        exe_names=("simple64-gui.exe", "simple64.exe"),
+        exe_names=("simple64-gui.exe", "simple64.exe", "simple64-gui", "simple64"),
         arguments=("{rom}",),
         rom_extensions=(".n64", ".z64", ".v64", ".zip"),
         search_paths=(
@@ -442,13 +496,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Flycast",
         system="Dreamcast",
         system_key="dreamcast",
-        exe_names=("flycast.exe",),
+        exe_names=("flycast.exe", "flycast", "flycast.appimage"),
         arguments=("{rom}",),
         rom_extensions=(".gdi", ".cdi", ".chd", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\Flycast\flycast.exe",
             r"%LOCALAPPDATA%\Programs\Flycast\flycast.exe",
         ),
+        flatpak_ids=("org.flycast.Flycast",),
         priority=40,
         accent="#7EC8E3",
         description="Juego de Dreamcast lanzado con Flycast.",
@@ -458,7 +513,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Kega Fusion",
         system="Mega Drive / Genesis",
         system_key="genesis",
-        exe_names=("fusion.exe",),
+        exe_names=("fusion.exe", "fusion"),
         arguments=("{rom}",),
         rom_extensions=(".md", ".gen", ".bin", ".sms", ".gg", ".iso", ".zip"),
         systems=("mastersystem", "gamegear"),
@@ -471,13 +526,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="DeSmuME",
         system="DS",
         system_key="nds",
-        exe_names=("desmume.exe", "desmume_x64.exe"),
+        exe_names=("desmume.exe", "desmume_x64.exe", "desmume", "desmume-glade"),
         arguments=("{rom}",),
         rom_extensions=(".nds", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\DeSmuME\DeSmuME.exe",
             r"%PROGRAMFILES(X86)%\DeSmuME\DeSmuME.exe",
         ),
+        flatpak_ids=("org.desmume.DeSmuME",),
         priority=45,
         accent="#9BCB6E",
         description="Juego de Nintendo DS lanzado con DeSmuME.",
@@ -487,13 +543,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="VBA-M",
         system="GBA",
         system_key="gba",
-        exe_names=("visualboyadvance-m.exe", "vbam.exe"),
+        exe_names=("visualboyadvance-m.exe", "vbam.exe", "visualboyadvance-m", "vbam"),
         arguments=("{rom}",),
         rom_extensions=(".gba", ".gb", ".gbc", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\VisualBoyAdvance-M\visualboyadvance-m.exe",
             r"%LOCALAPPDATA%\Programs\VisualBoyAdvance-M\visualboyadvance-m.exe",
         ),
+        flatpak_ids=("com.visualboyadvance_m.visualboyadvance-m",),
         priority=45,
         accent="#B7D36B",
         description="Juego de Game Boy lanzado con VBA-M.",
@@ -503,7 +560,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Mednafen",
         system="Multi",
         system_key="multi",
-        exe_names=("mednafen.exe",),
+        exe_names=("mednafen.exe", "mednafen"),
         arguments=("{rom}",),
         rom_extensions=(".cue", ".chd", ".pce", ".zip"),
         systems=("nes", "snes", "gb", "gba", "nds", "genesis", "saturn", "ps1", "pce"),
@@ -517,7 +574,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Ares",
         system="Multi",
         system_key="multi",
-        exe_names=("ares.exe",),
+        exe_names=("ares.exe", "ares"),
         arguments=("{rom}",),
         rom_extensions=(
             ".sfc",
@@ -560,7 +617,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="VICE",
         system="Commodore 64",
         system_key="c64",
-        exe_names=("x64sc.exe", "x64.exe", "vice.exe"),
+        exe_names=("x64sc.exe", "x64.exe", "vice.exe", "x64sc", "x64"),
         arguments=("{rom}",),
         rom_extensions=(".d64", ".crt", ".tap", ".prg", ".zip"),
         search_paths=(
@@ -576,7 +633,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="FS-UAE",
         system="Amiga",
         system_key="amiga",
-        exe_names=("fs-uae.exe",),
+        exe_names=("fs-uae.exe", "fs-uae"),
         arguments=("--floppy_drive_0={rom}",),
         rom_extensions=(".adf", ".ipf", ".lha", ".zip"),
         search_paths=(
@@ -593,7 +650,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="openMSX",
         system="MSX",
         system_key="msx",
-        exe_names=("openmsx.exe",),
+        exe_names=("openmsx.exe", "openmsx"),
         arguments=("-cart", "{rom}"),
         rom_extensions=(".rom", ".dsk", ".cas", ".zip"),
         priority=40,
@@ -606,13 +663,14 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Stella",
         system="Atari 2600",
         system_key="atari2600",
-        exe_names=("stella.exe",),
+        exe_names=("stella.exe", "stella"),
         arguments=("{rom}",),
         rom_extensions=(".a26", ".bin", ".zip"),
         search_paths=(
             r"%PROGRAMFILES%\Stella\stella.exe",
             r"%PROGRAMFILES(X86)%\Stella\stella.exe",
         ),
+        flatpak_ids=("io.github.stella_emu.Stella",),
         priority=40,
         accent="#D9A05B",
         description="Juego de Atari 2600 lanzado con Stella.",
@@ -622,9 +680,10 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="xemu",
         system="Xbox",
         system_key="xbox",
-        exe_names=("xemu.exe",),
+        exe_names=("xemu.exe", "xemu", "xemu.appimage"),
         arguments=("-dvd_path", "{rom}"),
         rom_extensions=(".iso",),
+        flatpak_ids=("app.xemu.xemu",),
         priority=45,
         accent="#7FC08A",
         description="Juego de Xbox original lanzado con xemu.",
@@ -634,7 +693,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Xenia",
         system="Xbox 360",
         system_key="xbox360",
-        exe_names=("xenia.exe", "xenia_canary.exe"),
+        exe_names=("xenia.exe", "xenia_canary.exe", "xenia", "xenia_canary"),
         arguments=("{rom}",),
         rom_extensions=(".iso",),
         priority=45,
@@ -646,7 +705,7 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="Vita3K",
         system="PS Vita",
         system_key="psvita",
-        exe_names=("vita3k.exe",),
+        exe_names=("vita3k.exe", "vita3k", "vita3k.appimage"),
         arguments=("{rom}",),
         rom_extensions=(".vpk",),
         priority=50,
@@ -659,7 +718,8 @@ PROFILES: tuple[EmulatorProfile, ...] = (
         name="RetroArch",
         system="Multi",
         system_key="multi",
-        exe_names=("retroarch.exe",),
+        exe_names=("retroarch.exe", "retroarch", "retroarch.appimage"),
+        flatpak_ids=("org.libretro.RetroArch",),
         priority=90,
         auto_scan=False,
         accent="#C792EA",

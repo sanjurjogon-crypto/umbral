@@ -25,12 +25,15 @@ class Detection:
 
 def _default_roots() -> list[Path]:
     home = Path.home()
-    return [
+    roots = [
         home / "Games",
         home / "Downloads",
         home / "Desktop",
         home / "Documents",
     ]
+    if os.name != "nt":
+        roots.append(home / "Applications")
+    return roots
 
 
 def _unique_roots(roots: list[Path]) -> list[Path]:

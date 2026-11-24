@@ -163,9 +163,35 @@ def steam_app_id(game: Game) -> str:
     return match.group(1) if match else ""
 
 
+def _linux_steam_app_running(app_id: str) -> bool:
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return False
+    marker = f"AppId={app_id}"
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if not raw:
+            continue
+        text = raw.replace(b"\x00", b" ").decode("utf-8", "ignore")
+        if marker in text:
+            return True
+    return False
+
+
 def _steam_app_state(app_id: str) -> tuple[bool, bool]:
-    if os.name != "nt" or not app_id:
+    if not app_id:
         return False, False
+    if os.name != "nt":
+        return _linux_steam_app_running(app_id), False
     try:
         import winreg
 

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from ..detect import clean_title, profile_for_rom
 from ..downloads import Download, describe as describe_download, emulator_for
 from ..models import Emulator, Game, slugify
+from ..paths import executable_file_filter
 from ..rom_rules import is_ambiguous, validate_rom
 from ..consoles import CONSOLE_EXTENSIONS, CONSOLES
 from ..profiles import EmulatorProfile, all_profiles, profile_from_dict
@@ -463,7 +464,7 @@ class AddGameDialog(QDialog):
         browse.setObjectName("icon")
         browse.setCursor(Qt.PointingHandCursor)
         if mode == "exe":
-            browse.clicked.connect(lambda: self._browse_file(line_edit, "Ejecutables (*.exe);;Todos los archivos (*)"))
+            browse.clicked.connect(lambda: self._browse_file(line_edit, executable_file_filter()))
         elif mode == "image":
             browse.clicked.connect(
                 lambda: self._browse_file(
@@ -499,7 +500,9 @@ class AddGameDialog(QDialog):
             {extension.lstrip(".") for profile in self._profiles() for extension in profile.rom_extensions}
         )
         patterns = " ".join(f"*.{extension}" for extension in extensions)
-        return f"Juegos y ejecutables ({patterns} *.exe);;Todos los archivos (*)"
+        if os.name == "nt":
+            return f"Juegos y ejecutables ({patterns} *.exe);;Todos los archivos (*)"
+        return f"Todos los archivos (*);;Juegos y ROMs ({patterns} *.AppImage *.sh *.x86_64 *.exe)"
 
     def _browse_game_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -889,7 +892,7 @@ class CustomEmulatorDialog(QDialog):
             self,
             "Selecciona el ejecutable del emulador",
             "",
-            "Ejecutables (*.exe);;Todos los archivos (*)",
+            executable_file_filter(),
         )
         if path:
             self.exe_edit.setText(path)
@@ -1118,7 +1121,7 @@ class EmulatorSetupDialog(QDialog):
             self,
             f"Selecciona el ejecutable de {name}",
             "",
-            "Ejecutables (*.exe);;Todos los archivos (*)",
+            executable_file_filter(),
         )
         if path:
             self._paths[key] = path
