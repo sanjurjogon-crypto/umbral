@@ -57,7 +57,9 @@ def path_hint(path: Path) -> str | None:
         return "switch"
     if has_word("wiiu") or has_text("wii u"):
         return "wiiu"
-    if has_text("wii", "gamecube"):
+    if has_word("gamecube") or has_word("ngc") or has_word("gc") or has_text("game cube"):
+        return "gamecube"
+    if has_word("wii"):
         return "wii"
     if has_word("3ds"):
         return "3ds"
@@ -176,8 +178,8 @@ ZIP_EXTENSION_SYSTEMS = {
     ".iso": "ps2",
     ".rvz": "wii",
     ".wbfs": "wii",
-    ".gcm": "wii",
-    ".gcz": "wii",
+    ".gcm": "gamecube",
+    ".gcz": "gamecube",
     ".wud": "wii",
     ".wux": "wii",
     ".cso": "psp",
@@ -302,11 +304,27 @@ def iso_system(path: str | Path) -> str | None:
         return "ps2"
     if b"PLAYSTATION" in head or b"BOOT = cdrom0" in head or b"BOOT=cdrom0" in head:
         return "ps1"
-    if len(head) >= 0x1C:
-        magic = head[0x18:0x1C]
-        if magic in (b"\x5d\x1c\x9e\xa3", b"\xc2\x33\x9f\x3d"):
+    if len(head) >= 0x20:
+        if head[0x18:0x1C] == b"\x5d\x1c\x9e\xa3":
             return "wii"
+        if head[0x1C:0x20] == b"\xc2\x33\x9f\x3d" or head[0x18:0x1C] == b"\xc2\x33\x9f\x3d":
+            return "gamecube"
     return None
+
+
+def rvz_system(path: str | Path) -> str | None:
+    candidate = Path(path)
+    try:
+        with candidate.open("rb") as handle:
+            head = handle.read(0x80)
+    except OSError:
+        return path_hint(candidate)
+    if len(head) >= 0x78 and head[:4] == b"RVZ\x01":
+        if head[0x70:0x74] == b"\x5d\x1c\x9e\xa3":
+            return "wii"
+        if head[0x74:0x78] == b"\xc2\x33\x9f\x3d":
+            return "gamecube"
+    return path_hint(candidate) or "wii"
 
 
 def rom_system(path: str | Path) -> str | None:
@@ -324,6 +342,12 @@ def rom_system(path: str | Path) -> str | None:
         return None
     if suffix == ".iso":
         return iso_system(candidate) or path_hint(candidate)
+    if suffix == ".rvz":
+        return rvz_system(candidate)
+    if suffix in {".gcm", ".gcz"}:
+        return "gamecube"
+    if suffix == ".wbfs":
+        return "wii"
     if suffix == ".cue":
         if not cue_is_valid(candidate):
             return None
@@ -361,6 +385,8 @@ def validate_rom(path: str | Path, system_key: str = "") -> bool:
                 return False
         return False
     if not system_key or system_key == "multi" or system_key == detected:
+        return True
+    if system_key == "wii" and detected == "gamecube":
         return True
     if system_key == "genesis" and detected in {"mastersystem", "gamegear"}:
         return True

@@ -39,7 +39,22 @@ from PySide6.QtWidgets import QWidget
 from ..covers import game_cover
 from ..icons import exe_pixmap
 from ..models import Game
-from ..profiles import PROFILES
+from .cases import (
+    CASE_PROFILES,
+    EMULATOR_BY_NAME,
+    EMULATOR_COLORS,
+    EMULATOR_NAMES,
+    PC_BAND,
+    PC_BAND_LIGHT,
+    CaseProfile,
+    _band_color,
+    _band_text,
+    _emulator_key,
+    case_profile,
+    is_pc_case,
+    paint_console_case,
+    paint_console_spine,
+)
 from .style import active as active_style
 
 CASE_W = 222.0
@@ -55,15 +70,6 @@ SELECT_GLOW = QColor(201, 164, 95, 130)
 
 UI_FONT = "Cinzel"
 
-EMULATOR_COLORS: dict[str, str] = {profile.key: profile.accent for profile in PROFILES}
-EMULATOR_NAMES: dict[str, str] = {profile.key: profile.name for profile in PROFILES}
-EMULATOR_BY_NAME: dict[str, str] = {
-    profile.name.lower(): profile.key for profile in PROFILES
-}
-
-PC_BAND = "#17130d"
-PC_BAND_LIGHT = "#2a2317"
-
 CANVAS_BG = "#070604"
 WASH_TOP = "#0c0a07"
 WASH_MID = "#090705"
@@ -75,267 +81,8 @@ ACCENT_TEXT = "#e7d6ad"
 
 _RAW_COVER_CACHE: OrderedDict[str, tuple[float, QPixmap, QColor]] = OrderedDict()
 _ICON_CACHE: dict[str, Optional[QPixmap]] = {}
-
-
-@dataclass(frozen=True)
-class CaseProfile:
-    key: str
-    w_scale: float
-    h_scale: float
-    radius: float
-    spine_color: str
-    header_bg: str
-    header_accent: str
-    header_text: str
-    band_label: str
-    depth_scale: float = 1.0
-
-
-CASE_PROFILES: dict[str, CaseProfile] = {
-    "switch2": CaseProfile(
-        key="switch2",
-        w_scale=0.80,
-        h_scale=1.08,
-        radius=6.0,
-        spine_color="#c62828",
-        header_bg="#b71c1c",
-        header_accent="#ff5252",
-        header_text="#ffffff",
-        band_label="SWITCH 2",
-        depth_scale=0.72,
-    ),
-    "switch": CaseProfile(
-        key="switch",
-        w_scale=0.80,
-        h_scale=1.06,
-        radius=6.0,
-        spine_color="#e60012",
-        header_bg="#d50010",
-        header_accent="#ff6b6b",
-        header_text="#ffffff",
-        band_label="SWITCH",
-        depth_scale=0.72,
-    ),
-    "3ds": CaseProfile(
-        key="3ds",
-        w_scale=0.96,
-        h_scale=0.82,
-        radius=6.0,
-        spine_color="#e5e8ed",
-        header_bg="#f2f4f7",
-        header_accent="#d32f2f",
-        header_text="#17191c",
-        band_label="NINTENDO 3DS",
-        depth_scale=0.88,
-    ),
-    "nds": CaseProfile(
-        key="nds",
-        w_scale=0.95,
-        h_scale=0.80,
-        radius=5.0,
-        spine_color="#2c3038",
-        header_bg="#23272e",
-        header_accent="#9ca3af",
-        header_text="#f3f4f6",
-        band_label="NINTENDO DS",
-        depth_scale=0.90,
-    ),
-    "ps3": CaseProfile(
-        key="ps3",
-        w_scale=0.90,
-        h_scale=0.96,
-        radius=6.0,
-        spine_color="#1a1f28",
-        header_bg="#0e1117",
-        header_accent="#b8c4d8",
-        header_text="#eef2f8",
-        band_label="PLAYSTATION 3",
-        depth_scale=0.84,
-    ),
-    "ps2": CaseProfile(
-        key="ps2",
-        w_scale=0.92,
-        h_scale=1.00,
-        radius=4.0,
-        spine_color="#112b5c",
-        header_bg="#0b1d40",
-        header_accent="#4b83e8",
-        header_text="#edf2ff",
-        band_label="PLAYSTATION 2",
-        depth_scale=0.92,
-    ),
-    "ps1": CaseProfile(
-        key="ps1",
-        w_scale=0.98,
-        h_scale=0.84,
-        radius=3.0,
-        spine_color="#25272c",
-        header_bg="#181a1f",
-        header_accent="#9aa0aa",
-        header_text="#f1f5f9",
-        band_label="PLAYSTATION",
-        depth_scale=0.76,
-    ),
-    "psp": CaseProfile(
-        key="psp",
-        w_scale=0.78,
-        h_scale=1.02,
-        radius=7.0,
-        spine_color="#2a2d35",
-        header_bg="#13161d",
-        header_accent="#7dd3fc",
-        header_text="#f8fafc",
-        band_label="PSP",
-        depth_scale=0.78,
-    ),
-    "psvita": CaseProfile(
-        key="psvita",
-        w_scale=0.82,
-        h_scale=0.94,
-        radius=6.0,
-        spine_color="#0052cc",
-        header_bg="#003d99",
-        header_accent="#38bdf8",
-        header_text="#ffffff",
-        band_label="PS VITA",
-        depth_scale=0.72,
-    ),
-    "wii": CaseProfile(
-        key="wii",
-        w_scale=0.92,
-        h_scale=1.00,
-        radius=5.0,
-        spine_color="#e9edf2",
-        header_bg="#f4f6f9",
-        header_accent="#38bdf8",
-        header_text="#1e293b",
-        band_label="WII / GC",
-        depth_scale=0.92,
-    ),
-    "wiiu": CaseProfile(
-        key="wiiu",
-        w_scale=0.92,
-        h_scale=1.00,
-        radius=5.0,
-        spine_color="#009ac7",
-        header_bg="#007ca3",
-        header_accent="#67e8f9",
-        header_text="#ffffff",
-        band_label="WII U",
-        depth_scale=0.92,
-    ),
-    "xbox360": CaseProfile(
-        key="xbox360",
-        w_scale=0.92,
-        h_scale=1.00,
-        radius=5.0,
-        spine_color="#1d6f1d",
-        header_bg="#145214",
-        header_accent="#7ed321",
-        header_text="#ffffff",
-        band_label="XBOX 360",
-        depth_scale=0.92,
-    ),
-    "xbox": CaseProfile(
-        key="xbox",
-        w_scale=0.92,
-        h_scale=1.00,
-        radius=5.0,
-        spine_color="#105c10",
-        header_bg="#0c420c",
-        header_accent="#4ade80",
-        header_text="#ffffff",
-        band_label="XBOX",
-        depth_scale=0.92,
-    ),
-    "ports": CaseProfile(
-        key="ports",
-        w_scale=0.98,
-        h_scale=0.98,
-        radius=4.0,
-        spine_color="#2a2214",
-        header_bg="#19150d",
-        header_accent="#d4af37",
-        header_text="#efe0b4",
-        band_label="PORT",
-        depth_scale=0.95,
-    ),
-    "steam": CaseProfile(
-        key="steam",
-        w_scale=1.00,
-        h_scale=1.00,
-        radius=3.5,
-        spine_color="#1b2b3f",
-        header_bg="#14202e",
-        header_accent="#66c0f4",
-        header_text="#d8ecff",
-        band_label="STEAM",
-        depth_scale=1.0,
-    ),
-    "epic": CaseProfile(
-        key="epic",
-        w_scale=1.00,
-        h_scale=1.00,
-        radius=3.5,
-        spine_color="#22252b",
-        header_bg="#16181d",
-        header_accent="#d4d8df",
-        header_text="#f4f6f8",
-        band_label="EPIC GAMES",
-        depth_scale=1.0,
-    ),
-    "gog": CaseProfile(
-        key="gog",
-        w_scale=1.00,
-        h_scale=1.00,
-        radius=3.5,
-        spine_color="#3b2059",
-        header_bg="#26143b",
-        header_accent="#b77bff",
-        header_text="#f2e7ff",
-        band_label="GOG",
-        depth_scale=1.0,
-    ),
-    "pc": CaseProfile(
-        key="pc",
-        w_scale=1.00,
-        h_scale=1.00,
-        radius=3.0,
-        spine_color="#221c13",
-        header_bg="#16120c",
-        header_accent="#d4af37",
-        header_text="#efe0b4",
-        band_label="PC",
-        depth_scale=1.0,
-    ),
-}
-
-
-def case_profile(game: Game) -> CaseProfile:
-    """Return physical box dimensions and system styling for a game."""
-    source = (game.source or "").strip().lower()
-    sys_key = (game.system_key or "").strip().lower()
-    if sys_key in CASE_PROFILES and sys_key not in {"pc", "ports"}:
-        return CASE_PROFILES[sys_key]
-    if source in CASE_PROFILES:
-        return CASE_PROFILES[source]
-    if sys_key in CASE_PROFILES:
-        return CASE_PROFILES[sys_key]
-    if not _is_pc_case(game):
-        band_col = _band_color(game)
-        return CaseProfile(
-            key=sys_key or "retro",
-            w_scale=0.94,
-            h_scale=0.94,
-            radius=4.0,
-            spine_color=band_col.darker(155).name(),
-            header_bg=band_col.darker(175).name(),
-            header_accent=band_col.name(),
-            header_text="#f5f7fb",
-            band_label=_band_text(game).upper(),
-            depth_scale=0.9,
-        )
-    return CASE_PROFILES["pc"]
+_SYNTH_ICON_CACHE: dict[tuple[str, str, int], QPixmap] = {}
+_is_pc_case = is_pc_case
 
 
 def _dominant_color(pixmap: Optional[QPixmap], fallback: QColor) -> QColor:
@@ -463,37 +210,54 @@ def _launcher_badge(executable: str) -> Optional[QPixmap]:
     return None
 
 
-def _emulator_key(game: Game) -> str:
-    name = (game.emulator or "").strip().lower()
-    if not name:
-        return ""
-    return EMULATOR_BY_NAME.get(name, "")
+def emulator_badge_pixmap(game: Game, size: int = 24) -> Optional[QPixmap]:
+    """Return the emulator icon pixmap for display beside the game title below the shelf."""
+    sys_key = (game.system_key or "").strip().lower()
+    if is_pc_case(game) and sys_key != "ports":
+        return None
+    pixmap = _exe_badge(game.executable)
+    if pixmap is not None and not pixmap.isNull():
+        return pixmap
+    emu_name = (game.emulator or "").strip()
+    if not emu_name:
+        return None
+    emu_key = _emulator_key(game)
+    accent = EMULATOR_COLORS.get(emu_key, game.accent or "#d4af37")
+    cache_key = (emu_name.lower(), accent, max(16, size))
+    cached = _SYNTH_ICON_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
+    dim = max(16, size)
+    badge = QPixmap(dim, dim)
+    badge.fill(Qt.transparent)
+    painter = QPainter(badge)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.TextAntialiasing)
 
-def _is_pc_case(game: Game) -> bool:
-    return game.system_key == "pc" or (game.emulator or "").strip().lower() in {
-        "standalone",
-        "",
-    }
-
-
-def _band_text(game: Game) -> str:
-    if _is_pc_case(game):
-        return "PC"
-    key = _emulator_key(game)
-    if key and key in EMULATOR_NAMES:
-        return EMULATOR_NAMES[key]
-    return game.emulator or game.system or "PC"
-
-
-def _band_color(game: Game) -> QColor:
-    if _is_pc_case(game):
-        return QColor(PC_BAND)
-    key = _emulator_key(game)
-    color = QColor(EMULATOR_COLORS.get(key, game.accent or "#E9B949"))
+    color = QColor(accent)
     if not color.isValid():
-        color = QColor("#E9B949")
-    return color
+        color = QColor("#d4af37")
+    rect = QRectF(1.0, 1.0, dim - 2.0, dim - 2.0)
+    fill = QLinearGradient(rect.topLeft(), rect.bottomRight())
+    fill.setColorAt(0.0, color.lighter(115))
+    fill.setColorAt(1.0, color.darker(145))
+    painter.setPen(QPen(color.lighter(150), 1.0))
+    painter.setBrush(QBrush(fill))
+    painter.drawRoundedRect(rect, dim * 0.28, dim * 0.28)
+
+    words = [w for w in emu_name.replace("-", " ").split() if w]
+    monogram = "".join(w[0] for w in words[:2]).upper() if len(words) >= 2 else emu_name[:2].upper()
+    font = QFont("Segoe UI")
+    font.setPixelSize(max(8, int(dim * 0.44)))
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(_readable_on(color))
+    painter.drawText(rect, Qt.AlignCenter, monogram or "E")
+    painter.end()
+
+    _SYNTH_ICON_CACHE[cache_key] = badge
+    return badge
 
 
 def _readable_on(color: QColor) -> QColor:
@@ -1284,6 +1048,7 @@ class ShelfCanvas(QWidget):
             item.game.favorite,
             item.game.state,
             item.cover_path,
+            item.profile.key,
             style.key,
         )
         if item.front_cache is not None and item.front_cache_key == key:
@@ -1301,63 +1066,66 @@ class ShelfCanvas(QWidget):
         frame = QRectF(0.0, 0.0, width, height)
         profile = item.profile
         radius = profile.radius
-        pc_case = _is_pc_case(item.game)
-        band_h = height * (0.145 if pc_case else 0.125)
-        title_h = width * TITLE_BAND_RATIO
-
-        title = QRectF(0.0, 0.0, width, title_h)
-        art = QRectF(0.0, title_h, width, height - band_h - title_h)
-        band = QRectF(0.0, height - band_h, width, band_h)
 
         outer = QPainterPath()
         outer.addRoundedRect(frame, radius, radius)
         buf.setClipPath(outer)
 
-        if item.pixmap is not None and not item.pixmap.isNull():
-            src_size = art.size().toSize()
-            ratio = item.pixmap.width() / max(1, item.pixmap.height())
-            target_ratio = art.width() / max(1.0, art.height())
-            if ratio > target_ratio * 1.25:
-                buf.fillRect(art, QColor("#080705"))
-                small = QSize(max(1, int(src_size.width() * 0.14)), max(1, int(src_size.height() * 0.14)))
-                backdrop = item.pixmap.scaled(
-                    small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
-                ).scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-                buf.setOpacity(0.42)
-                buf.drawPixmap(
-                    QPointF(art.center().x() - backdrop.width() / 2.0, art.center().y() - backdrop.height() / 2.0),
-                    backdrop,
-                )
-                buf.setOpacity(1.0)
-                scaled = item.pixmap.scaled(src_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                buf.drawPixmap(
-                    QPointF(art.center().x() - scaled.width() / 2.0, art.center().y() - scaled.height() / 2.0),
-                    scaled,
-                )
+        if profile.shell_kind == "pc_keepcase":
+            band_h = height * 0.145
+            title_h = width * TITLE_BAND_RATIO
+            title = QRectF(0.0, 0.0, width, title_h)
+            art = QRectF(0.0, title_h, width, height - band_h - title_h)
+            band = QRectF(0.0, height - band_h, width, band_h)
+
+            if item.pixmap is not None and not item.pixmap.isNull():
+                src_size = art.size().toSize()
+                ratio = item.pixmap.width() / max(1, item.pixmap.height())
+                target_ratio = art.width() / max(1.0, art.height())
+                if ratio > target_ratio * 1.25:
+                    buf.fillRect(art, QColor("#080705"))
+                    small = QSize(max(1, int(src_size.width() * 0.14)), max(1, int(src_size.height() * 0.14)))
+                    backdrop = item.pixmap.scaled(
+                        small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                    ).scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                    buf.setOpacity(0.42)
+                    buf.drawPixmap(
+                        QPointF(art.center().x() - backdrop.width() / 2.0, art.center().y() - backdrop.height() / 2.0),
+                        backdrop,
+                    )
+                    buf.setOpacity(1.0)
+                    scaled = item.pixmap.scaled(src_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    buf.drawPixmap(
+                        QPointF(art.center().x() - scaled.width() / 2.0, art.center().y() - scaled.height() / 2.0),
+                        scaled,
+                    )
+                else:
+                    src = item.pixmap.scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                    sx = max(0, (src.width() - src_size.width()) // 2)
+                    sy = max(0, (src.height() - src_size.height()) // 2)
+                    buf.drawPixmap(art.topLeft(), src.copy(sx, sy, src_size.width(), src_size.height()))
             else:
-                src = item.pixmap.scaled(src_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-                sx = max(0, (src.width() - src_size.width()) // 2)
-                sy = max(0, (src.height() - src_size.height()) // 2)
-                buf.drawPixmap(art.topLeft(), src.copy(sx, sy, src_size.width(), src_size.height()))
-        else:
-            self._paint_placeholder(buf, art, item)
+                self._paint_placeholder(buf, art, item)
 
-        self._paint_title_band(buf, title, item)
-        if pc_case:
+            self._paint_title_band(buf, title, item)
             self._paint_pc_band(buf, band, item)
-        else:
-            self._paint_color_band(buf, band, item, width)
-        self._paint_status_badges(buf, art, item)
+            self._paint_status_badges(buf, art, item)
 
-        frame_line = (
-            QColor(profile.header_accent)
-            if profile.key in {"switch", "switch2", "3ds", "ps3"}
-            else QColor(style.text)
-        )
-        frame_line.setAlpha(75)
-        buf.setPen(QPen(frame_line, 1.3))
-        buf.setBrush(Qt.NoBrush)
-        buf.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
+            frame_line = QColor(style.text)
+            frame_line.setAlpha(75)
+            buf.setPen(QPen(frame_line, 1.3))
+            buf.setBrush(Qt.NoBrush)
+            buf.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
+        else:
+            art = paint_console_case(
+                buf,
+                frame,
+                profile,
+                item.pixmap,
+                lambda painter, rect: self._paint_placeholder(painter, rect, item),
+            )
+            self._paint_status_badges(buf, art, item)
+
         buf.end()
 
         item.front_cache = pix
@@ -1536,39 +1304,8 @@ class ShelfCanvas(QWidget):
     def _paint_spine(
         self, painter: QPainter, target: QRectF, item: ShelfItem, turn: float = 0.0
     ) -> None:
-        """Paint 3D side spines on both edges continuously so crossing center never pops."""
-        width = target.width()
-        max_depth = CASE_DEPTH * (width / CASE_W) * 0.55 * item.profile.depth_scale
-        base = QColor(item.profile.spine_color)
-        clamped = max(-1.0, min(1.0, float(turn)))
-
-        left_depth = max_depth * (0.28 + 0.72 * max(0.0, clamped))
-        right_depth = max_depth * (0.28 + 0.72 * max(0.0, -clamped))
-
-        left_path = QPainterPath()
-        left_path.moveTo(target.left(), target.top())
-        left_path.lineTo(target.left() - left_depth, target.top() + left_depth * 0.32)
-        left_path.lineTo(target.left() - left_depth, target.bottom() - left_depth * 0.32)
-        left_path.lineTo(target.left(), target.bottom())
-        left_path.closeSubpath()
-        left_spine = QLinearGradient(target.left(), 0, target.left() - left_depth, 0)
-        left_spine.setColorAt(0.0, base)
-        left_spine.setColorAt(1.0, base.darker(190))
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(left_spine))
-        painter.drawPath(left_path)
-
-        right_path = QPainterPath()
-        right_path.moveTo(target.right(), target.top())
-        right_path.lineTo(target.right() + right_depth, target.top() + right_depth * 0.32)
-        right_path.lineTo(target.right() + right_depth, target.bottom() - right_depth * 0.32)
-        right_path.lineTo(target.right(), target.bottom())
-        right_path.closeSubpath()
-        right_spine = QLinearGradient(target.right(), 0, target.right() + right_depth, 0)
-        right_spine.setColorAt(0.0, base)
-        right_spine.setColorAt(1.0, base.darker(190))
-        painter.setBrush(QBrush(right_spine))
-        painter.drawPath(right_path)
+        """Paint 3D side spines on both edges continuously matching real shell physics."""
+        paint_console_spine(painter, target, item.profile, turn)
 
     def _paint_front(
         self,
@@ -1595,13 +1332,18 @@ class ShelfCanvas(QWidget):
         painter.setClipPath(outer)
         painter.drawPixmap(frame, front, QRectF(front.rect()))
 
-        # Subtle interactive plastic specular highlight shifting with cursor tilt
+        # Subtle interactive specular highlight shifting with cursor tilt (softer on matte cardboard)
         sheen_shift = (self._tilt_x * 0.32 if selected else 0.0) * focus
         sheen = QLinearGradient(
             QPointF(frame.left() + width * (0.15 + sheen_shift), frame.top()),
             QPointF(frame.left() + width * (0.75 + sheen_shift), frame.bottom()),
         )
-        peak_alpha = int((38 if selected else 18) + abs(self._tilt_x) * 24 * focus)
+        base_sheen = (38 if selected else 18) + abs(self._tilt_x) * 24 * focus
+        if profile.shell_kind == "cardboard":
+            base_sheen *= 0.30
+        elif profile.shell_kind in {"translucent_clear", "jewel_clear"}:
+            base_sheen *= 1.15
+        peak_alpha = int(min(90.0, base_sheen))
         sheen.setColorAt(0.0, QColor(255, 248, 232, 0))
         sheen.setColorAt(0.32, QColor(255, 248, 232, peak_alpha))
         sheen.setColorAt(0.50, QColor(255, 255, 255, int(peak_alpha * 0.42)))

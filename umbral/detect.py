@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .consoles import SYSTEM_LABELS
 from .index import FileIndex, composite
 from .models import Emulator, Game, slugify
 from .profiles import PROFILE_BY_KEY, PROFILES, EmulatorProfile
@@ -442,18 +443,34 @@ def _working_dir(profile: EmulatorProfile, executable: str) -> Path:
     return path.parent
 
 
+def _resolved_rom_system(rom: Path, profile: EmulatorProfile) -> tuple[str, str]:
+    if profile.systems:
+        detected = rom_system(rom)
+        if detected and (detected == profile.system_key or detected in profile.systems):
+            return detected, SYSTEM_LABELS.get(detected, profile.system)
+    return profile.system_key, profile.system
+
+
 def _game_from_rom(rom: Path, emulator: Emulator, profile: EmulatorProfile) -> Game:
     title = clean_title(rom.name)
+    sys_key, sys_name = _resolved_rom_system(rom, profile)
     metadata = _metadata(title, profile, emulator)
+    subtitle = str(metadata["subtitle"])
+    description = str(metadata["description"])
+    if sys_key != profile.system_key:
+        if metadata["subtitle"] == f"{profile.system} · {profile.name}":
+            subtitle = f"{sys_name} · {profile.name}"
+        if sys_key == "gamecube" or not profile.description:
+            description = f"Juego de {sys_name} lanzado con {profile.name}."
     return Game(
-        id=slugify(f"{profile.system_key}-{metadata['title']}-{emulator.name}"),
+        id=slugify(f"{sys_key}-{metadata['title']}-{emulator.name}"),
         title=str(metadata["title"]),
-        system=profile.system,
-        system_key=profile.system_key,
-        subtitle=str(metadata["subtitle"]),
+        system=sys_name,
+        system_key=sys_key,
+        subtitle=subtitle,
         year=metadata["year"] if isinstance(metadata["year"], int) else None,
         genre=str(metadata["genre"]),
-        description=str(metadata["description"]),
+        description=description,
         executable=emulator.executable,
         arguments=list(profile.arguments),
         working_dir=str(_working_dir(profile, emulator.executable)),
