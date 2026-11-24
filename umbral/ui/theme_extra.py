@@ -143,8 +143,8 @@ def extra_qss(style: GameStyle) -> str:
         border-right: 1px solid {hair};
     }}
     QLabel#toast {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.surface_3}, stop:1 {style.surface});
-        border: 1px solid {hair};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(20, 18, 14, 0.78), stop:1 rgba(10, 9, 7, 0.72));
+        border: 1px solid rgba(255, 255, 255, 0.14);
         border-left: 3px solid {accent};
         border-radius: {radius}px;
         padding: 10px 22px;
@@ -154,9 +154,10 @@ def extra_qss(style: GameStyle) -> str:
         letter-spacing: 1px;
     }}
     QFrame#updateBanner {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.surface_3}, stop:1 {style.surface});
-        border: 1px solid {hair};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(20, 18, 14, 0.86), stop:0.55 rgba(12, 11, 9, 0.82), stop:1 rgba(8, 8, 7, 0.85));
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
         border-top: 2px solid {accent};
+        border-bottom: 1px solid {hair};
         border-radius: {radius}px;
     }}
     QLabel#bannerEyebrow {{
@@ -183,7 +184,7 @@ def extra_qss(style: GameStyle) -> str:
         letter-spacing: 0.5px;
     }}
     QPushButton#bannerPrimary {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.surface_3}, stop:0.45 {softer}, stop:1 {style.bg});
+        background: rgba(212, 175, 55, 0.18);
         border: {thin}px solid {accent};
         border-bottom: 2px solid {hair};
         color: {accent_2};
@@ -195,12 +196,13 @@ def extra_qss(style: GameStyle) -> str:
         border-radius: {radius}px;
     }}
     QPushButton#bannerPrimary:hover {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {soft}, stop:1 {style.surface});
+        background: rgba(212, 175, 55, 0.28);
         border-color: {accent_2};
     }}
     QPushButton#bannerGhost {{
-        background: transparent;
-        border: {thin}px solid {style.border};
+        background: rgba(14, 12, 10, 0.44);
+        border: {thin}px solid rgba(255, 255, 255, 0.14);
+        border-bottom: 2px solid {style.border_soft};
         color: {style.muted};
         font-family: "{heading}";
         font-size: 11px;
@@ -209,6 +211,7 @@ def extra_qss(style: GameStyle) -> str:
         border-radius: {radius}px;
     }}
     QPushButton#bannerGhost:hover {{
+        background: {softer};
         border-color: {accent};
         color: {accent_2};
     }}

@@ -1466,7 +1466,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.processEvents()
-        QTimer.singleShot(120, lambda target_path=path: self._finalize_update_install(target_path))
+        QTimer.singleShot(60, lambda target_path=path: self._finalize_update_install(target_path))
 
     def _finalize_update_install(self, path: str) -> None:
         try:
@@ -1513,6 +1513,18 @@ class MainWindow(QMainWindow):
         if hasattr(self, "update_banner"):
             self.update_banner.reposition()
 
+    def has_active_workers(self) -> bool:
+        return any(
+            worker is not None and worker.isRunning()
+            for worker in (
+                self.detect_worker,
+                self.scan_worker,
+                self.cover_worker,
+                self.update_worker,
+                self.download_worker,
+            )
+        )
+
     def closeEvent(self, event) -> None:
         self._closing = True
         if hasattr(self, "backdrop"):
@@ -1535,14 +1547,21 @@ class MainWindow(QMainWindow):
                 watcher.setParent(None)
         self.store.save_library()
         self.store.save_settings()
+        worker_wait = 150 if self._updating else 800
+        update_wait = 150 if self._updating else 800
+        download_wait = 200 if self._updating else 800
+        cover_wait = 150 if self._updating else 800
         for worker in (self.detect_worker, self.scan_worker):
             if worker is not None and worker.isRunning():
-                worker.wait(2500)
+                worker.requestInterruption()
+                worker.wait(worker_wait)
         if self.update_worker is not None and self.update_worker.isRunning():
-            self.update_worker.wait(9000)
+            self.update_worker.requestInterruption()
+            self.update_worker.wait(update_wait)
         if self.download_worker is not None and self.download_worker.isRunning():
             self.download_worker.cancel()
-            self.download_worker.wait(4000)
+            self.download_worker.wait(download_wait)
         if self.cover_worker is not None and self.cover_worker.isRunning():
-            self.cover_worker.wait(3000)
+            self.cover_worker.cancel()
+            self.cover_worker.wait(cover_wait)
         super().closeEvent(event)

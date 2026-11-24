@@ -975,9 +975,14 @@ class SettingsPage(QWidget):
             info = self.available_update
             card = QFrame()
             card.setObjectName("updateCard")
+            style = active_style()
             card.setStyleSheet(
-                f"QFrame#updateCard {{ border: 1px solid {active_style().accent}; "
-                "border-radius: 10px; background: transparent; }}"
+                "QFrame#updateCard {"
+                " background: rgba(14, 12, 10, 0.62);"
+                " border: 1px solid rgba(255, 255, 255, 0.14);"
+                f" border-top: 2px solid {style.accent};"
+                f" border-radius: {style.radius}px;"
+                " }"
             )
             card_body = QVBoxLayout(card)
             card_body.setContentsMargins(16, 14, 16, 14)

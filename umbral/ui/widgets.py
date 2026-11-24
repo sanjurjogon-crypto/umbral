@@ -921,10 +921,11 @@ class UpdateBanner(QFrame):
         self.setFixedWidth(568)
         self._version = ""
         self._target = QPoint(0, 0)
+        self._locked_height = 0
         self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(48)
-        self._shadow.setOffset(0, 14)
-        self._shadow.setColor(QColor(0, 0, 0, 210))
+        self._shadow.setBlurRadius(44)
+        self._shadow.setOffset(0, 12)
+        self._shadow.setColor(QColor(0, 0, 0, 195))
         self.setGraphicsEffect(self._shadow)
 
         outer = QVBoxLayout(self)
@@ -932,8 +933,6 @@ class UpdateBanner(QFrame):
         self._panel = QFrame()
         self._panel.setObjectName("updateBanner")
         outer.addWidget(self._panel)
-
-        self._slide = QPropertyAnimation(self, b"pos", self)
 
         body = QVBoxLayout(self._panel)
         body.setContentsMargins(22, 20, 22, 20)
@@ -967,6 +966,7 @@ class UpdateBanner(QFrame):
         self.progress_bar.hide()
         body.addWidget(self.progress_bar)
 
+        body.addStretch(1)
         body.addSpacing(6)
         actions = QHBoxLayout()
         actions.setSpacing(10)
@@ -987,6 +987,16 @@ class UpdateBanner(QFrame):
     def current_version(self) -> str:
         return self._version
 
+    def _lock_geometry_if_needed(self, reset: bool = False) -> None:
+        if reset or self._locked_height <= 0:
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+            self.adjustSize()
+            self._locked_height = self.height()
+            self.setFixedHeight(self._locked_height)
+            self._target = self._target_position()
+            self.move(self._target)
+
     def show_update(self, version: str, notes: str = "") -> None:
         self._version = version
         self.title.setText("¡Estás de suerte! Ya que:")
@@ -1004,14 +1014,12 @@ class UpdateBanner(QFrame):
         self.action.setEnabled(True)
         self.later.setEnabled(True)
         self.later.show()
-        self.adjustSize()
-        self._target = self._target_position()
-        self.move(self._target.x(), self._target.y() + 18)
+        self._lock_geometry_if_needed(reset=True)
         self.show()
         self.raise_()
-        self._animate_in()
 
     def show_progress(self, done: int, total: int) -> None:
+        self._lock_geometry_if_needed()
         self.line1.hide()
         self.line2.hide()
         if total > 0:
@@ -1030,11 +1038,12 @@ class UpdateBanner(QFrame):
         self.action.setEnabled(False)
         self.later.setEnabled(False)
         if not self.isVisible():
+            self.move(self._target)
             self.show()
         self.raise_()
-        self._refit()
 
     def show_installing(self) -> None:
+        self._lock_geometry_if_needed()
         self.line1.hide()
         self.line2.hide()
         self.title.setText(f"Instalando Umbral {self._version}…")
@@ -1047,11 +1056,12 @@ class UpdateBanner(QFrame):
         self.action.setEnabled(False)
         self.later.setEnabled(False)
         if not self.isVisible():
+            self.move(self._target)
             self.show()
         self.raise_()
-        self._refit()
 
     def show_error(self, message: str) -> None:
+        self._lock_geometry_if_needed()
         self.title.setText("No se pudo actualizar")
         self.line1.hide()
         self.line2.hide()
@@ -1062,24 +1072,9 @@ class UpdateBanner(QFrame):
         self.action.setEnabled(True)
         self.later.setEnabled(True)
         if not self.isVisible():
+            self.move(self._target)
             self.show()
         self.raise_()
-        self._refit()
-
-    def _refit(self) -> None:
-        self.adjustSize()
-        if not self.isVisible():
-            return
-        self._target = self._target_position()
-        if self._slide is not None and self._slide.state() == QPropertyAnimation.Running:
-            self._slide.setEndValue(self._target)
-            return
-        self.move(self._target)
-
-    def hideEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        if self._slide is not None:
-            self._slide.stop()
-        super().hideEvent(event)
 
     def reposition(self) -> None:
         if not self.isVisible():
@@ -1094,16 +1089,6 @@ class UpdateBanner(QFrame):
         x = max(18, (parent.width() - self.width()) // 2)
         y = max(18, (parent.height() - self.height()) // 2 - 20)
         return QPoint(x, y)
-
-    def _animate_in(self) -> None:
-        if self._slide is None:
-            return
-        self._slide.stop()
-        self._slide.setDuration(240)
-        self._slide.setStartValue(QPoint(self._target.x(), self._target.y() + 18))
-        self._slide.setEndValue(self._target)
-        self._slide.setEasingCurve(QEasingCurve.OutCubic)
-        self._slide.start()
 
 
 class Toast(QLabel):
