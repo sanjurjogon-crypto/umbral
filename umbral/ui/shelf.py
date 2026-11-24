@@ -576,9 +576,9 @@ def _quad_transform(source: list[QPointF], quad: list[QPointF]) -> QTransform:
 
 
 def _pillow_sharp_cover(
-    cover_path: str, pixmap: Optional[QPixmap], target_w: int, target_h: int
+    cover_path: str, pixmap: Optional[QPixmap], target_w: int, target_h: int, center_x: float
 ) -> Optional[np.ndarray]:
-    """Scale cover artwork cleanly to full backdrop resolution keeping crisp sharp details."""
+    """Scale the full cover artwork comfortably without over-zooming, feathered over a subtle wide wash."""
     img: Optional[Image.Image] = None
     try:
         if cover_path:
@@ -598,16 +598,48 @@ def _pillow_sharp_cover(
     src_w, src_h = img.size
     if src_w <= 0 or src_h <= 0:
         return None
-    scale = max(target_w / src_w, target_h / src_h)
-    scaled_w = max(target_w, int(round(src_w * scale)))
-    scaled_h = max(target_h, int(round(src_h * scale)))
-    resized = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-    if scale > 1.05:
-        resized = resized.filter(ImageFilter.UnsharpMask(radius=1.0, percent=55, threshold=3))
-    left = max(0, (scaled_w - target_w) // 2)
-    top = max(0, (scaled_h - target_h) // 3)
-    cropped = resized.crop((left, top, left + target_w, top + target_h))
-    return np.asarray(cropped, dtype=np.float32)
+
+    # Soft wide ambient fill underneath so widescreen margins harmonize smoothly
+    amb_scale = max(target_w / src_w, target_h / src_h)
+    amb_w = max(target_w, int(round(src_w * amb_scale)))
+    amb_h = max(target_h, int(round(src_h * amb_scale)))
+    amb = img.resize((max(200, amb_w // 4), max(120, amb_h // 4)), Image.Resampling.LANCZOS)
+    amb = amb.filter(ImageFilter.GaussianBlur(radius=18)).resize((amb_w, amb_h), Image.Resampling.BILINEAR)
+    ax0 = max(0, (amb_w - target_w) // 2)
+    ay0 = max(0, (amb_h - target_h) // 3)
+    ambient_arr = np.asarray(amb.crop((ax0, ay0, ax0 + target_w, ay0 + target_h)), dtype=np.float32) * 0.45
+
+    # Fit the entire cover artwork comfortably inside the stage so the whole illustration stays visible
+    avail_w = max(320.0, float(target_w) * 0.72)
+    avail_h = max(240.0, float(target_h) * 0.90)
+    fit_scale = min(avail_w / src_w, avail_h / src_h)
+    fit_w = max(16, min(target_w, int(round(src_w * fit_scale))))
+    fit_h = max(16, min(target_h, int(round(src_h * fit_scale))))
+    sharp = img.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+    if fit_scale > 1.04:
+        sharp = sharp.filter(ImageFilter.UnsharpMask(radius=1.0, percent=45, threshold=3))
+    sharp_arr = np.asarray(sharp, dtype=np.float32)
+
+    cx = int(round(max(fit_w / 2.0, min(target_w - fit_w / 2.0, center_x))))
+    cy = int(round(target_h * 0.45))
+    x0 = max(0, cx - fit_w // 2)
+    y0 = max(0, min(target_h - fit_h, cy - fit_h // 2))
+    x1 = min(target_w, x0 + fit_w)
+    y1 = min(target_h, y0 + fit_h)
+    pw, ph = x1 - x0, y1 - y0
+    if pw > 0 and ph > 0:
+        ux = np.linspace(0.0, 1.0, pw, dtype=np.float32)[None, :]
+        uy = np.linspace(0.0, 1.0, ph, dtype=np.float32)[:, None]
+        fx = np.clip(np.minimum(ux, 1.0 - ux) / 0.22, 0.0, 1.0)
+        fy = np.clip(np.minimum(uy, 1.0 - uy) / 0.16, 0.0, 1.0)
+        # Hermite smoothstep feathering on all 4 sides
+        fx = fx * fx * (3.0 - 2.0 * fx)
+        fy = fy * fy * (3.0 - 2.0 * fy)
+        alpha = (fx * fy)[:, :, None]
+        ambient_arr[y0:y1, x0:x1] = (
+            ambient_arr[y0:y1, x0:x1] * (1.0 - alpha) + sharp_arr[:ph, :pw] * alpha
+        )
+    return ambient_arr
 
 
 def render_debanded_backdrop(
@@ -641,10 +673,10 @@ def render_debanded_backdrop(
     ):
         base[:, :, ch] = t_v + (b_v - t_v) * y_norm[:, 0][:, None]
 
-    cover_arr = _pillow_sharp_cover(cover_path, pixmap, w, h)
+    cover_arr = _pillow_sharp_cover(cover_path, pixmap, w, h, center_x)
     if cover_arr is not None:
         # Smooth atmospheric blend keeping sharp background artwork clearly visible behind cases
-        veil = 0.22 + 0.30 * np.exp(-((y_norm - 0.44) / 0.34) ** 2)
+        veil = 0.24 + 0.34 * np.exp(-((y_norm - 0.44) / 0.36) ** 2)
         base = base * (1.0 - veil[:, :, None]) + cover_arr * veil[:, :, None]
 
     if halo_enabled:
