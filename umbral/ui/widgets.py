@@ -804,7 +804,7 @@ class HealthRow(QFrame):
         body = QHBoxLayout(self)
         body.setContentsMargins(16, 13, 16, 13)
         body.setSpacing(12)
-        dot = QLabel("?")
+        dot = QLabel("●")
         dot.setStyleSheet(f"color: {color}; font-size: 12px;")
         body.addWidget(dot)
         text = QVBoxLayout()

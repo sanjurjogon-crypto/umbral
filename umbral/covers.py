@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import struct
+import threading
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .models import Game, slugify
-from .paths import covers_dir, data_dir
+from .paths import covers_dir, data_dir, safe_path
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -34,45 +35,47 @@ STEAM_PORTRAIT_URLS = (
 
 CACHE_FILE = "cover_cache.json"
 CACHE_TTL = timedelta(days=30)
+_CACHE_LOCK = threading.Lock()
 
 PLATFORM_IDS: dict[str, tuple[int, ...]] = {
     "switch2": (508, 130),
     "switch": (130, 508),
     "3ds": (37, 137),
     "ports": (508, 130, 6, 21, 5, 41),
-    "wii": (5,),
+    "wii": (5, 21),
     "wiiu": (41,),
     "nds": (20, 159),
     "gba": (24,),
+    "gbc": (22,),
+    "gb": (33,),
+    "snes": (19, 58),
+    "nes": (18, 99),
+    "n64": (4,),
+    "dreamcast": (23,),
+    "saturn": (32,),
+    "genesis": (29,),
+    "mastersystem": (64,),
+    "gamegear": (35,),
+    "neogeo": (80, 136, 79),
+    "arcade": (52,),
+    "pce": (86,),
     "ps1": (7,),
     "ps2": (8,),
     "ps3": (9,),
     "psp": (38,),
+    "psvita": (46,),
+    "xbox": (11,),
+    "xbox360": (12,),
+    "c64": (15,),
+    "amiga": (16,),
+    "msx": (27,),
+    "atari2600": (59,),
     "multi": (6,),
     "otros": (6,),
     "pc": (6,),
+    "epic": (6,),
+    "gog": (6,),
 }
-
-GENERIC_SUFFIXES = (
-    " usa",
-    " europe",
-    " japan",
-    " world",
-    " rev 1",
-    " rev 2",
-)
-
-PARTIAL_SUFFIXES = (
-    ".part",
-    ".crdownload",
-    ".download",
-    ".opdownload",
-    ".!ut",
-    ".aria2",
-    ".tmp",
-    ".partial",
-    ".incomplete",
-)
 
 
 @dataclass
@@ -102,13 +105,18 @@ def _bucket_key(title: str) -> str:
 def _candidate_titles(game: Game) -> list[str]:
     names: list[str] = []
     values: list[str] = []
-    if game.source in {"steam", "epic"}:
+    if game.source in {"steam", "epic", "gog"}:
         values.append(game.title)
     else:
-        emulated = game.system_key not in {"pc", "ports", "steam", "epic"}
+        emulated = game.system_key not in {"pc", "ports", "steam", "epic", "gog"}
         if game.rom_path:
-            rom = Path(game.rom_path)
-            rom_name = rom.name if rom.is_dir() else rom.stem
+            rom = safe_path(game.rom_path)
+            is_dir = False
+            try:
+                is_dir = Path(game.rom_path).is_dir()
+            except OSError:
+                is_dir = False
+            rom_name = rom.name if is_dir else rom.stem
             if emulated:
                 values.append(rom_name)
                 values.append(game.title)
@@ -116,11 +124,11 @@ def _candidate_titles(game: Game) -> list[str]:
                 values.append(game.title)
                 values.append(rom_name)
                 if game.executable:
-                    values.append(Path(game.executable).stem)
+                    values.append(safe_path(game.executable).stem)
         else:
             values.append(game.title)
-            if game.system_key not in {"ports", "steam", "epic"} and game.executable:
-                values.append(Path(game.executable).stem)
+            if game.system_key not in {"ports", "steam", "epic", "gog"} and game.executable:
+                values.append(safe_path(game.executable).stem)
     for value in values:
         if not value:
             continue
@@ -216,6 +224,19 @@ def image_size(path: Path) -> tuple[int, int]:
                     return (0, 0)
                 return (int(width), int(height))
             index += 2 + length
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        chunk = data[12:16]
+        if chunk == b"VP8X" and len(data) >= 30:
+            width = 1 + int.from_bytes(data[24:27], "little")
+            height = 1 + int.from_bytes(data[27:30], "little")
+            return (width, height)
+        if chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+            width = struct.unpack("<H", data[26:28])[0] & 0x3FFF
+            height = struct.unpack("<H", data[28:30])[0] & 0x3FFF
+            return (int(width), int(height))
+        if chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+            bits = int.from_bytes(data[21:25], "little")
+            return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
     return (0, 0)
 
 
@@ -360,6 +381,11 @@ def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
             details = _gamedb_cover(candidate[3], wanted)
             if details:
                 return details
+        if wanted:
+            for candidate in sorted(candidates, reverse=True)[:4]:
+                details = _gamedb_cover(candidate[3], [])
+                if details:
+                    return details
     return None
 
 
@@ -467,11 +493,13 @@ def _itch_cover(title: str) -> dict | None:
 
 def _resolve_online(game: Game) -> dict | None:
     if game.source == "steam":
-        return _steam_cover(_steam_app_id(game))
+        cover = _steam_cover(_steam_app_id(game))
+        if cover:
+            return cover
     titles = _candidate_titles(game)
     if not titles:
         return None
-    if game.system_key == "pc":
+    if game.system_key in {"pc", "epic", "gog"}:
         steam = _steam_cover(_steam_app_id(game))
         if steam:
             return steam
@@ -487,12 +515,7 @@ def _resolve_online(game: Game) -> dict | None:
         found = _gamedb_search([title, *titles[:index], *titles[index + 1 :]], game.system_key)
         if found:
             return found
-    if game.source == "steam":
-        for title in titles:
-            found = _steam_search_cover(title)
-            if found:
-                return found
-    if game.system_key not in {"pc", "steam"}:
+    if game.system_key not in {"pc", "steam", "epic", "gog"}:
         for title in titles:
             found = _itch_cover(title)
             if found:
@@ -573,7 +596,8 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
 
     store = cache if cache is not None else _load_cache()
     key = slugify(game.id)
-    entry = store.get(key) if use_cache else None
+    with _CACHE_LOCK:
+        entry = store.get(key) if use_cache else None
 
     if target.is_file():
         if (
@@ -582,23 +606,25 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
             and not (isinstance(entry, dict) and entry.get("portrait_failed") and _cache_valid(entry))
         ):
             if _upgrade_portrait(game, target):
+                with _CACHE_LOCK:
+                    store[key] = {
+                        "status": "ok",
+                        "url": _steam_portrait_urls(_steam_app_id(game))[0],
+                        "title": str((entry or {}).get("title", "")),
+                        "source": "Steam",
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    if cache is None:
+                        _save_cache(store)
+                return target
+            with _CACHE_LOCK:
                 store[key] = {
-                    "status": "ok",
-                    "url": _steam_portrait_urls(_steam_app_id(game))[0],
-                    "title": str((entry or {}).get("title", "")),
-                    "source": "Steam",
+                    **(entry or {}),
+                    "portrait_failed": True,
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                 }
                 if cache is None:
                     _save_cache(store)
-                return target
-            store[key] = {
-                **(entry or {}),
-                "portrait_failed": True,
-                "checked_at": datetime.now(timezone.utc).isoformat(),
-            }
-            if cache is None:
-                _save_cache(store)
         return target
 
     if isinstance(entry, dict) and _cache_valid(entry):
@@ -618,13 +644,14 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
 
     found = _resolve_online(game)
     if not found:
-        store[key] = {
-            "status": "not_found",
-            "demo_checked": bool(_demo_base_title(game.title)),
-            "checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if cache is None:
-            _save_cache(store)
+        with _CACHE_LOCK:
+            store[key] = {
+                "status": "not_found",
+                "demo_checked": bool(_demo_base_title(game.title)),
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if cache is None:
+                _save_cache(store)
         return None
 
     urls = [str(url) for url in (found.get("urls") or [found.get("url")]) if url]
@@ -640,17 +667,18 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
                 if _download_any(extra_urls, target):
                     urls = extra_urls
                     ok = True
-    store[key] = {
-        "status": "ok" if ok else "download_failed",
-        "url": urls[0] if urls else "",
-        "urls": urls,
-        "title": str(found.get("title", "")),
-        "source": str(found.get("source", "")),
-        "demo_checked": bool(_demo_base_title(game.title)),
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if cache is None:
-        _save_cache(store)
+    with _CACHE_LOCK:
+        store[key] = {
+            "status": "ok" if ok else "download_failed",
+            "url": urls[0] if urls else "",
+            "urls": urls,
+            "title": str(found.get("title", "")),
+            "source": str(found.get("source", "")),
+            "demo_checked": bool(_demo_base_title(game.title)),
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if cache is None:
+            _save_cache(store)
     return target if ok else None
 
 
@@ -677,7 +705,8 @@ def fetch_covers(
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         lock_results = list(pool.map(work, targets))
 
-    _save_cache(cache)
+    with _CACHE_LOCK:
+        _save_cache(cache)
     for game_id, path, error in lock_results:
         if path is not None:
             results[game_id] = path

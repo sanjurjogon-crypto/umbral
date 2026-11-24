@@ -29,7 +29,9 @@ def _vdf_library_paths(text: str) -> list[Path]:
     raw_paths += [
         match.group(1)
         for match in re.finditer(r'"\d+"\s*"([^"]+)"', text)
-        if ":" in match.group(1) or match.group(1).startswith("\\\\")
+        if ":" in match.group(1)
+        or match.group(1).startswith("\\\\")
+        or match.group(1).startswith("/")
     ]
     paths: list[Path] = []
     for raw in raw_paths:
