@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from dataclasses import asdict
 from pathlib import Path
@@ -726,7 +727,7 @@ class MainWindow(QMainWindow):
         if self.update_banner.isVisible() and self.update_banner.current_version() == info.version:
             self.update_banner.raise_()
             return
-        self.update_banner.show_update(info.version)
+        self.update_banner.show_update(info.version, getattr(info, "notes", ""))
         self.update_banner.raise_()
 
     def _restore_known_update(self) -> None:
@@ -743,11 +744,14 @@ class MainWindow(QMainWindow):
             return
         if not is_newer(info.version, __version__):
             self.store.settings.pop("update_known", None)
+            self.store.settings.pop("update_dismissed_version", None)
             self.store.save_settings()
             return
         self.update_info = info
         self.settings_page.set_update_available(info)
-        self._announce_update(info)
+        dismissed = str(self.store.settings.get("update_dismissed_version", ""))
+        if dismissed != info.version:
+            self._announce_update(info)
 
     def _on_process_finished(self, game: Game, code: int, seconds: int, log_path: Path) -> None:
         if seconds >= 5:
@@ -1115,15 +1119,20 @@ class MainWindow(QMainWindow):
 
     def _on_update_checked(self, info, manual: bool) -> None:
         self.store.settings["update_last_check"] = _now_iso()
+        if manual:
+            self.store.settings.pop("update_dismissed_version", None)
         if info is not None:
             self.update_info = info
             self.store.settings["update_known"] = asdict(info)
             self.store.save_settings()
             self.settings_page.set_update_available(info)
-            self._announce_update(info)
+            dismissed = str(self.store.settings.get("update_dismissed_version", ""))
+            if manual or dismissed != info.version:
+                self._announce_update(info)
             return
         self.update_info = None
         self.store.settings.pop("update_known", None)
+        self.store.settings.pop("update_dismissed_version", None)
         self.store.save_settings()
         self.settings_page.available_update = None
         if manual:
@@ -1141,6 +1150,9 @@ class MainWindow(QMainWindow):
             self.settings_page.set_update_result("")
 
     def _postpone_update(self) -> None:
+        if self.update_info is not None:
+            self.store.settings["update_dismissed_version"] = self.update_info.version
+            self.store.save_settings()
         self.update_banner.hide()
         self.settings_page.dismiss_update()
 
@@ -1154,6 +1166,15 @@ class MainWindow(QMainWindow):
             self.toast.show_message("No hay una actualización lista. Compruebo de nuevo…", 5000)
             self._check_updates(manual=True)
             return
+        if not getattr(sys, "frozen", False):
+            message = (
+                "La actualización automática solo funciona desde Umbral.exe "
+                "(ahora mismo estás ejecutando main.py con Python)."
+            )
+            if self.update_banner.isVisible():
+                self.update_banner.show_error(message)
+            self.toast.show_message(message, 6000)
+            return
         try:
             self._download_update_inline(info)
         except Exception as exc:  # noqa: BLE001 - un fallo aquí no debe dejar el botón muerto
@@ -1162,12 +1183,12 @@ class MainWindow(QMainWindow):
     def _download_update_inline(self, info) -> None:
         if self.download_worker is not None and self.download_worker.isRunning():
             if not self.update_banner.isVisible():
-                self.update_banner.show_update(info.version)
+                self.update_banner.show_update(info.version, getattr(info, "notes", ""))
             self.update_banner.show_progress(0, 0)
             self.toast.show_message("La descarga ya está en marcha.")
             return
         if not self.update_banner.isVisible():
-            self.update_banner.show_update(info.version)
+            self.update_banner.show_update(info.version, getattr(info, "notes", ""))
         self.update_banner.show_progress(0, 0)
         self.toast.show_message(f"Descargando Umbral {info.version}…", 4000)
         download = DownloadWorker(info, self)
@@ -1186,7 +1207,9 @@ class MainWindow(QMainWindow):
     def _on_update_download_failed(self, message: str) -> None:
         if not self.update_banner.isVisible():
             if self.update_info is not None:
-                self.update_banner.show_update(self.update_info.version)
+                self.update_banner.show_update(
+                    self.update_info.version, getattr(self.update_info, "notes", "")
+                )
             else:
                 self.update_banner.show_update("")
         self.update_banner.show_error(message)

@@ -239,6 +239,12 @@ def download_update(
         expected = info.digest.lower()
     if not expected and info.sha_url:
         expected = _read_sha_file(info.sha_url)
+        if not expected:
+            target.unlink(missing_ok=True)
+            raise UpdateError(
+                "No se pudo comprobar la firma SHA-256 de la actualización. "
+                "Vuelve a intentarlo en unos segundos."
+            )
     if expected and digest != expected:
         target.unlink(missing_ok=True)
         raise UpdateError("La firma del archivo no coincide. La actualización se ha descartado.")
@@ -273,16 +279,25 @@ def _ps_quote(value: str) -> str:
 
 def _replacement_script(target: Path, new_exe: Path, pid: int) -> str:
     backup = target.with_name(target.stem + ".old.exe")
+    staged = target.with_name(target.name + ".new")
     log = target.with_name("umbral-update.log")
     return f"""$ErrorActionPreference = 'Stop'
 $target = {_ps_quote(str(target))}
 $new = {_ps_quote(str(new_exe))}
+$staged = {_ps_quote(str(staged))}
 $backup = {_ps_quote(str(backup))}
 $log = {_ps_quote(str(log))}
 $pidToWait = {int(pid)}
+$utf8Bom = New-Object System.Text.UTF8Encoding($true)
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 function Write-Log($message) {{
     try {{
-        "$(Get-Date -Format o) $message" | Add-Content -LiteralPath $log -Encoding UTF8
+        $line = "$(Get-Date -Format o) $message`r`n"
+        if (-not (Test-Path -LiteralPath $log)) {{
+            [System.IO.File]::WriteAllText($log, $line, $utf8Bom)
+        }} else {{
+            [System.IO.File]::AppendAllText($log, $line, $utf8NoBom)
+        }}
     }} catch {{}}
 }}
 try {{
@@ -298,17 +313,23 @@ try {{
         throw "Umbral sigue abierto; no se reemplaza el ejecutable."
     }}
     Start-Sleep -Milliseconds 700
+    if (Test-Path -LiteralPath $staged) {{ Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }}
+    Move-Item -LiteralPath $new -Destination $staged -Force
     if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }}
     Move-Item -LiteralPath $target -Destination $backup -Force
     Write-Log "Ejecutable anterior movido a $backup"
-    Move-Item -LiteralPath $new -Destination $target -Force
+    Move-Item -LiteralPath $staged -Destination $target -Force
     Write-Log "Nuevo ejecutable instalado"
-    Start-Process -FilePath $target
+    $started = Start-Process -FilePath $target -PassThru
     Start-Sleep -Seconds 4
+    if ($null -ne $started -and $started.HasExited -and $started.ExitCode -ne 0) {{
+        throw "El nuevo ejecutable se cerró al iniciar (código $($started.ExitCode))."
+    }}
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     Write-Log "Actualización completada"
 }} catch {{
     Write-Log "ERROR: $($_.Exception.Message)"
+    if (Test-Path -LiteralPath $staged) {{ Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }}
     if ((Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $target)) {{
         Move-Item -LiteralPath $backup -Destination $target -Force -ErrorAction SilentlyContinue
         Write-Log "Restaurado el ejecutable anterior"

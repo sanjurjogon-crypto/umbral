@@ -994,8 +994,16 @@ class SettingsPage(QWidget):
         self.refresh()
 
     def dismiss_update(self) -> None:
+        version = self.available_update.version if self.available_update is not None else ""
         self.available_update = None
-        self.update_message = "Actualización aplazada. Puedes comprobarla de nuevo cuando quieras."
+        if version:
+            self.update_message = (
+                f"Versión {version} aplazada. Puedes comprobarla de nuevo cuando quieras."
+            )
+        else:
+            self.update_message = (
+                "Actualización aplazada. Puedes comprobarla de nuevo cuando quieras."
+            )
         self.refresh()
 
     def _browse_executable(self, key: str) -> None:

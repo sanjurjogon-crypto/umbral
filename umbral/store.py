@@ -24,6 +24,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hidden_paths": [],
     "detection_version": 0,
     "sound": False,
+    "update_dismissed_version": "",
 }
 
 

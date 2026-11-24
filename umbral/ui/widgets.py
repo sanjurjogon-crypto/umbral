@@ -939,7 +939,7 @@ class UpdateBanner(QFrame):
     def current_version(self) -> str:
         return self._version
 
-    def show_update(self, version: str) -> None:
+    def show_update(self, version: str, notes: str = "") -> None:
         self._version = version
         self.title.setText("¡Estás de suerte! Ya que:")
         self.line1.setText("- Gonzalo es el puto amo")
@@ -963,11 +963,17 @@ class UpdateBanner(QFrame):
         self._animate_in()
 
     def show_progress(self, done: int, total: int) -> None:
-        percent = int(done * 100 / total) if total > 0 else 0
         self.title.setText(f"Descargando Umbral {self._version}…")
         self.line1.hide()
         self.line2.hide()
-        self.detail.setText(f"{percent} %")
+        if total > 0:
+            percent = min(100, int(done * 100 / total))
+            done_mb = f"{done / (1024 * 1024):.1f}".replace(".", ",")
+            total_mb = f"{total / (1024 * 1024):.1f}".replace(".", ",")
+            self.detail.setText(f"{percent} % · {done_mb} de {total_mb} MB")
+        else:
+            done_mb = f"{done / (1024 * 1024):.1f}".replace(".", ",")
+            self.detail.setText(f"{done_mb} MB")
         self.action.setText("Descargando…")
         self.action.setEnabled(False)
         self.later.setEnabled(False)
