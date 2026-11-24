@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self.update_info = None
         self._current_page_key = "library"
         self._updating = False
+        self._closing = False
         self._detect_announce = False
         style_key = str(self.store.settings.get("style", "souls"))
         set_active(style_key)
@@ -317,6 +318,8 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(sheet)
 
     def _bootstrap(self) -> None:
+        if self._closing:
+            return
         stored = self.store.settings.get("emulators", [])
         self.emulators = [
             Emulator.from_dict(item) for item in stored if isinstance(item, dict)
@@ -337,6 +340,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2600, self._restore_known_update)
 
     def _fetch_missing_covers(self) -> None:
+        if self._closing:
+            return
         if self.cover_worker is not None and self.cover_worker.isRunning():
             return
         pending = [game for game in self.store.games if cover_needs_refresh(game)]
@@ -742,7 +747,7 @@ class MainWindow(QMainWindow):
         self.update_banner.raise_()
 
     def _restore_known_update(self) -> None:
-        if self.update_info is not None:
+        if self._closing or self.update_info is not None:
             return
         stored = self.store.settings.get("update_known")
         if not isinstance(stored, dict):
@@ -1203,7 +1208,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(400, self._fetch_missing_covers)
 
     def _auto_check_updates(self) -> None:
-        if self._updating:
+        if self._closing or self._updating:
             return
         last = str(self.store.settings.get("update_last_check", ""))
         try:
@@ -1379,6 +1384,9 @@ class MainWindow(QMainWindow):
             self.update_banner.reposition()
 
     def closeEvent(self, event) -> None:
+        self._closing = True
+        if hasattr(self, "backdrop"):
+            self.backdrop.stop()
         for watcher in list(self.watchers):
             if watcher.isRunning():
                 elapsed = watcher.elapsed_seconds()

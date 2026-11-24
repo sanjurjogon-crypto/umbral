@@ -65,8 +65,8 @@ class GameDetailDialog(QDialog):
         self.game = game
         self.setWindowTitle(game.title)
         self.setModal(True)
-        self.setMinimumSize(1240, 480)
-        self.resize(1240, 520)
+        self.setMinimumSize(1020, 520)
+        self.resize(1240, 560)
 
         body = QHBoxLayout(self)
         body.setContentsMargins(26, 26, 26, 26)
@@ -137,17 +137,20 @@ class GameDetailDialog(QDialog):
 
         right.addStretch(1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(12)
+        actions_box = QVBoxLayout()
+        actions_box.setSpacing(10)
+
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(10)
         play = QPushButton("Jugar ahora")
         play.setObjectName("primary")
         play.setCursor(Qt.PointingHandCursor)
-        play.setMinimumWidth(play.sizeHint().width() + 10)
+        self._fit_button(play, primary=True)
         play.clicked.connect(self._play)
         edit = QPushButton("Editar ficha")
         edit.setObjectName("ghost")
         edit.setCursor(Qt.PointingHandCursor)
-        edit.setMinimumWidth(edit.sizeHint().width() + 10)
+        self._fit_button(edit)
         edit.clicked.connect(self._edit)
         self.favorite_button = QPushButton()
         self.favorite_button.setObjectName("ghost")
@@ -159,33 +162,59 @@ class GameDetailDialog(QDialog):
         self.progress_button.setCursor(Qt.PointingHandCursor)
         self.progress_button.clicked.connect(self._toggle_progress)
         self._update_progress_button()
+
+        primary_row.addWidget(play)
+        primary_row.addWidget(edit)
+        primary_row.addWidget(self.favorite_button)
+        primary_row.addWidget(self.progress_button)
+        primary_row.addStretch(1)
+
+        secondary_row = QHBoxLayout()
+        secondary_row.setSpacing(10)
         folder = QPushButton("Abrir carpeta")
         folder.setObjectName("ghost")
         folder.setCursor(Qt.PointingHandCursor)
-        folder.setMinimumWidth(folder.sizeHint().width() + 10)
+        self._fit_button(folder)
         folder.clicked.connect(self._open_folder)
-        close = QPushButton("Cerrar")
-        close.setObjectName("ghost")
-        close.setCursor(Qt.PointingHandCursor)
-        close.setMinimumWidth(close.sizeHint().width() + 10)
-        close.clicked.connect(self.reject)
         remove = QPushButton("Quitar de Umbral")
         remove.setObjectName("ghost")
         remove.setCursor(Qt.PointingHandCursor)
-        remove.setMinimumWidth(remove.sizeHint().width() + 10)
+        self._fit_button(remove)
         remove.clicked.connect(self._remove)
+        close = QPushButton("Cerrar")
+        close.setObjectName("ghost")
+        close.setCursor(Qt.PointingHandCursor)
+        self._fit_button(close)
+        close.clicked.connect(self.reject)
 
-        buttons.addWidget(play)
-        buttons.addWidget(edit)
-        buttons.addWidget(self.favorite_button)
-        buttons.addWidget(self.progress_button)
-        buttons.addStretch(1)
-        buttons.addWidget(folder)
-        buttons.addWidget(remove)
-        buttons.addWidget(close)
-        right.addLayout(buttons)
+        secondary_row.addWidget(folder)
+        secondary_row.addWidget(remove)
+        secondary_row.addStretch(1)
+        secondary_row.addWidget(close)
+
+        actions_box.addLayout(primary_row)
+        actions_box.addLayout(secondary_row)
+        right.addLayout(actions_box)
 
         body.addLayout(right, 1)
+
+    @staticmethod
+    def _fit_button(button: QPushButton, primary: bool = False) -> None:
+        from PySide6.QtGui import QFontMetrics
+
+        button.ensurePolished()
+        style = active_style()
+        font = QFont(style.heading_font or "Cinzel")
+        font.setPixelSize(12)
+        if primary:
+            font.setWeight(QFont.DemiBold)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 2.0 if primary else 1.5)
+        text = button.text().upper()
+        text_w = QFontMetrics(font).horizontalAdvance(text)
+        padding = 54 if primary else 42
+        width = max(button.sizeHint().width(), text_w + padding)
+        button.setMinimumWidth(width)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
     def _stat_block(self, label: str, value: str) -> QVBoxLayout:
         block = QVBoxLayout()
@@ -217,11 +246,11 @@ class GameDetailDialog(QDialog):
         screen = self.screen()
         limit = screen.availableGeometry().height() - 80 if screen else 900
         target = self.height() + (124 if visible else -124)
-        self.resize(self.width(), max(480, min(target, limit)))
+        self.resize(self.width(), max(520, min(target, limit)))
 
     def _update_favorite_button(self) -> None:
         self.favorite_button.setText("★  En favoritos" if self.game.favorite else "☆  Favorito")
-        self.favorite_button.setMinimumWidth(self.favorite_button.sizeHint().width() + 10)
+        self._fit_button(self.favorite_button)
 
     def _toggle_favorite(self) -> None:
         self.game.favorite = not self.game.favorite
@@ -231,7 +260,7 @@ class GameDetailDialog(QDialog):
     def _update_progress_button(self) -> None:
         text = "✓  Terminado" if self.game.progress == "finished" else "Marcar terminado"
         self.progress_button.setText(text)
-        self.progress_button.setMinimumWidth(self.progress_button.sizeHint().width() + 10)
+        self._fit_button(self.progress_button)
 
     def _toggle_progress(self) -> None:
         self.game.progress = "" if self.game.progress == "finished" else "finished"

@@ -139,4 +139,51 @@ def test_main_window_respects_locked_emulator_and_closes_cleanly(monkeypatch, tm
     game.emulator_locked = True
     assert win._emulator_candidates(game) == []
     win.close()
+    win.deleteLater()
     _app().processEvents()
+
+
+def test_game_detail_dialog_buttons_do_not_overlap() -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from umbral.ui.dialogs import GameDetailDialog
+    from umbral.ui.style import active
+    from umbral.ui.theme import qss
+    from umbral.ui.theme_extra import extra_qss
+
+    app = _app()
+    style = active()
+    app.setStyleSheet(qss(style.accent, style.key) + extra_qss(style))
+    game = Game(
+        id="ports-oot-longshot",
+        title="The Legend of Zelda: Ocarina of Time",
+        system="Ports",
+        system_key="ports",
+        subtitle="Ports · Port nativo (Longshot)",
+        year=2026,
+        genre="Aventura",
+        emulator="Longshot",
+        description="El remake de Ocarina of Time reconstruido para PC.",
+    )
+    dialog = GameDetailDialog(game)
+    dialog.show()
+    app.processEvents()
+
+    buttons = dialog.findChildren(QPushButton)
+    assert len(buttons) == 8
+    for first_index, first in enumerate(buttons):
+        rect_a = first.geometry()
+        assert rect_a.width() >= first.minimumWidth()
+        for second in buttons[first_index + 1 :]:
+            assert not rect_a.intersects(second.geometry())
+
+    dialog.favorite_button.click()
+    dialog.progress_button.click()
+    app.processEvents()
+    for first_index, first in enumerate(buttons):
+        rect_a = first.geometry()
+        for second in buttons[first_index + 1 :]:
+            assert not rect_a.intersects(second.geometry())
+
+    dialog.close()
+    app.processEvents()

@@ -43,6 +43,7 @@ def test_postpone_persists_dismissed_version_across_restore(monkeypatch, tmp_pat
 
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
+    window.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
     info = UpdateInfo(
         version="99.0.0",
         tag="v99.0.0",
@@ -71,4 +72,5 @@ def test_postpone_persists_dismissed_version_across_restore(monkeypatch, tmp_pat
     assert window.settings_page.available_update is not None
 
     window.close()
+    window.deleteLater()
     app.processEvents()

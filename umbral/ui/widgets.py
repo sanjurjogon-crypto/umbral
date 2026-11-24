@@ -101,6 +101,10 @@ class Backdrop(QWidget):
         self._pixmap = None
         self.update()
 
+    def stop(self) -> None:
+        if self._timer.isActive():
+            self._timer.stop()
+
     def _tick(self) -> None:
         self._time += 0.05
         motif = active_style().motif
