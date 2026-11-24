@@ -366,6 +366,7 @@ class LibraryPage(QWidget):
         self.info_title.setObjectName("shelfTitle")
         self.info_title.setAlignment(Qt.AlignCenter)
         self.info_title.setWordWrap(True)
+        self.info_title.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         self.info_title_row.addStretch(1)
         self.info_title_row.addWidget(self.info_emu_icon, 0, Qt.AlignVCenter)
         self.info_title_row.addWidget(self.info_title, 0, Qt.AlignVCenter)
@@ -374,6 +375,7 @@ class LibraryPage(QWidget):
         self.info_meta.setObjectName("shelfMeta")
         self.info_meta.setAlignment(Qt.AlignCenter)
         self.info_meta.setWordWrap(True)
+        self.info_meta.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         self.info_actions = QHBoxLayout()
         self.info_actions.setSpacing(10)
         self.info_actions.setAlignment(Qt.AlignHCenter)
@@ -429,6 +431,19 @@ class LibraryPage(QWidget):
         self.canvas.set_chrome_insets(self._inset_left, self._inset_top)
         self._layout_overlays()
 
+    def _sync_info_title_height(self, inner_w: int) -> None:
+        if not hasattr(self, "info_title"):
+            return
+        icon_w = 36 if self.info_emu_icon.isVisible() else 0
+        avail_w = max(240, inner_w - 96 - icon_w)
+        self.info_title.setMaximumWidth(avail_w)
+        single_w = self.info_title.sizeHint().width()
+        target_w = min(avail_w, max(120, single_w)) if single_w > 0 else avail_w
+        needed_h = self.info_title.heightForWidth(target_w)
+        if needed_h > 0:
+            self.info_title.setMinimumHeight(needed_h + 4)
+        self.info_title.updateGeometry()
+
     def _layout_overlays(self) -> None:
         if not hasattr(self, "canvas"):
             return
@@ -443,6 +458,7 @@ class LibraryPage(QWidget):
         self.header.setGeometry(left, top, inner_w, header_h)
         if hasattr(self, "grid_scroll"):
             self.grid_scroll.setGeometry(left, top + header_h, inner_w, max(0, inner_h - header_h))
+        self._sync_info_title_height(inner_w)
         bottom_h = self._bottom_height(inner_w)
         self.bottom.setGeometry(left, height - bottom_h, inner_w, bottom_h)
         if self._view_mode == "grid" and hasattr(self, "grid_scroll"):

@@ -1,2 +1,2 @@
-__version__ = "8.29.2"
+__version__ = "8.29.3"
 __app_name__ = "Umbral"

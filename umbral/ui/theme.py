@@ -499,6 +499,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         font-weight: __WEIGHT__;
         letter-spacing: 2px;
         color: __ACCENT_2__;
+        padding: 3px 0;
         __TRANSFORM__
     }
     QLabel#shelfMeta {
