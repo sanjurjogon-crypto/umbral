@@ -64,7 +64,7 @@ class Backdrop(QWidget):
         self._time = 0.0
         self._style_key = active_style().key
         self._timer = QTimer(self)
-        self._timer.setInterval(80)
+        self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -314,6 +314,8 @@ class CoverArt(QWidget):
         super().__init__(parent)
         self.game = game
         self._pixmap: Optional[QPixmap] = None
+        self._cached_render: Optional[QPixmap] = None
+        self._cached_style_key = ""
         self._loaded_path = ""
         self.setFixedSize(width, height)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -326,6 +328,7 @@ class CoverArt(QWidget):
         if path is None:
             self._pixmap = None
             self._loaded_path = ""
+            self._cached_render = None
             return
         key = str(path)
         if key == self._loaded_path and self._pixmap is not None:
@@ -333,37 +336,51 @@ class CoverArt(QWidget):
         pixmap = QPixmap(key)
         self._pixmap = None if pixmap.isNull() else pixmap
         self._loaded_path = key
+        self._cached_render = None
 
     def set_game(self, game: Game) -> None:
         self.game = game
         self._loaded_path = ""
+        self._cached_render = None
         self._load_cover()
         self.update()
 
     def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        rect = self.rect().adjusted(1, 1, -1, -1)
         style = active_style()
-        radius = style.radius
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(rect), radius, radius)
-        painter.setClipPath(path)
+        if (
+            self._cached_render is None
+            or self._cached_render.size() != self.size()
+            or self._cached_style_key != style.key
+        ):
+            rendered = QPixmap(self.size())
+            rendered.fill(Qt.transparent)
+            buf = QPainter(rendered)
+            buf.setRenderHint(QPainter.Antialiasing)
+            buf.setRenderHint(QPainter.SmoothPixmapTransform)
+            rect = self.rect().adjusted(1, 1, -1, -1)
+            radius = style.radius
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(rect), radius, radius)
+            buf.setClipPath(path)
 
-        accent = QColor(style.accent)
+            accent = QColor(style.accent)
+            if self._pixmap is not None and not self._pixmap.isNull():
+                self._paint_cover_image(buf, rect, accent)
+            else:
+                self._paint_generated(buf, rect, accent)
 
-        if self._pixmap is not None and not self._pixmap.isNull():
-            self._paint_cover_image(painter, rect, accent)
-        else:
-            self._paint_generated(painter, rect, accent)
+            buf.setClipping(False)
+            border = QColor(style.accent)
+            border.setAlpha(80)
+            buf.setPen(QPen(border, style.border_width))
+            buf.setBrush(Qt.NoBrush)
+            buf.drawRoundedRect(rect, radius, radius)
+            buf.end()
+            self._cached_render = rendered
+            self._cached_style_key = style.key
 
-        painter.setClipping(False)
-        border = QColor(style.accent)
-        border.setAlpha(80)
-        painter.setPen(QPen(border, style.border_width))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(rect, radius, radius)
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._cached_render)
 
     def _paint_cover_image(self, painter: QPainter, rect: QRect, accent: QColor) -> None:
         pixmap = self._pixmap

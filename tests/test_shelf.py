@@ -111,6 +111,13 @@ def test_shelf_canvas_renders_mixed_cases_tilt_and_badges(tmp_path: Path) -> Non
 
     rendered = canvas.grab()
     assert not rendered.isNull()
+    # Base artwork and reflection caches populated for visible cases (including neighbors)
+    assert canvas.items[0].art_cache is not None
+    assert canvas.items[1].art_cache is not None
+    assert canvas.items[2].art_cache is None
+    assert canvas.items[0].refl_cache is not None
+    assert canvas.items[1].refl_cache is not None
+
     canvas.step(1)
     assert canvas.index == 1
     assert canvas._backdrop_mix == 0.0 or canvas._bg_anim.state()

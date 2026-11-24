@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
-from umbral.covers import _candidate_titles, image_size, is_image_bytes
+from PIL import Image
+
+from umbral.covers import (
+    _candidate_titles,
+    _gamedb_cover,
+    image_size,
+    is_image_bytes,
+    upscale_cover_bytes,
+)
 from umbral.models import Game
 
 
@@ -65,3 +74,40 @@ def test_webp_image_size_is_parsed(tmp_path: Path) -> None:
     img.write_bytes(payload)
     assert is_image_bytes(payload) is True
     assert image_size(img) == (600, 900)
+
+
+def test_upscale_cover_bytes_upscales_low_res_and_keeps_hd(tmp_path: Path) -> None:
+    low_buf = io.BytesIO()
+    Image.new("RGB", (264, 374), (120, 40, 200)).save(low_buf, format="JPEG", quality=90)
+    low_raw = low_buf.getvalue()
+
+    upscaled = upscale_cover_bytes(low_raw)
+    assert upscaled != low_raw
+    out_file = tmp_path / "up.jpg"
+    out_file.write_bytes(upscaled)
+    new_w, new_h = image_size(out_file)
+    assert new_w >= 600
+    assert new_h >= 800
+
+    hd_buf = io.BytesIO()
+    Image.new("RGB", (600, 900), (30, 140, 90)).save(hd_buf, format="JPEG", quality=90)
+    hd_raw = hd_buf.getvalue()
+    assert upscale_cover_bytes(hd_raw) == hd_raw
+
+
+def test_gamedb_cover_prefers_2x_before_big(monkeypatch) -> None:
+    import umbral.covers as covers_mod
+
+    monkeypatch.setattr(
+        covers_mod,
+        "_request_json",
+        lambda url, limit=3_000_000: {
+            "name": "Zelda",
+            "platforms": [130],
+            "cover": {"url": "//images.igdb.com/igdb/image/upload/t_thumb/co1234.jpg"},
+        },
+    )
+    info = _gamedb_cover("1", [130])
+    assert info is not None
+    assert info["url"].endswith("/t_cover_big_2x/co1234.jpg")
+    assert info["urls"][1].endswith("/t_cover_big/co1234.jpg")
