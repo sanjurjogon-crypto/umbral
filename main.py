@@ -50,6 +50,17 @@ def _listen(holder: dict[str, MainWindow | None]) -> QLocalServer | None:
     return server
 
 
+def _flush_std_streams() -> None:
+    """Flush stdout/stderr when attached; PyInstaller --noconsole leaves them as None."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.flush()
+        except OSError:
+            pass
+
+
 def _load_fonts() -> None:
     folder = assets_dir() / "fonts"
     if not folder.is_dir():
@@ -106,8 +117,7 @@ def main() -> int:
         for thread in threading.enumerate()
     )
     if window.has_active_workers() or has_bg_threads or window._updating:
-        sys.stdout.flush()
-        sys.stderr.flush()
+        _flush_std_streams()
         os._exit(code)
     return code
 
