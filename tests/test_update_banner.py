@@ -148,3 +148,48 @@ def test_settings_page_shows_download_progress_and_error(monkeypatch, tmp_path) 
 
     page.deleteLater()
     app.processEvents()
+
+
+def test_banner_is_static_across_state_transitions_and_translucent() -> None:
+    from PySide6.QtWidgets import QWidget
+
+    from umbral.ui.style import UMBRAL_STYLE
+    from umbral.ui.theme_extra import extra_qss
+
+    app = QApplication.instance() or QApplication([])
+    host = QWidget()
+    host.resize(1280, 800)
+    banner = UpdateBanner(host)
+
+    banner.show_update("8.26.3")
+    pos_initial = banner.pos()
+    size_initial = banner.size()
+
+    banner.show_progress(0, 0)
+    app.processEvents()
+    assert banner.pos() == pos_initial
+    assert banner.size() == size_initial
+
+    banner.show_progress(5 * 1024 * 1024, 10 * 1024 * 1024)
+    app.processEvents()
+    assert banner.pos() == pos_initial
+    assert banner.size() == size_initial
+
+    banner.show_installing()
+    app.processEvents()
+    assert banner.pos() == pos_initial
+    assert banner.size() == size_initial
+
+    banner.show_error("Fallo de prueba")
+    app.processEvents()
+    assert banner.pos() == pos_initial
+    assert banner.size() == size_initial
+
+    sheet = extra_qss(UMBRAL_STYLE)
+    banner_block = sheet.split("QFrame#updateBanner {", 1)[1].split("}", 1)[0]
+    assert "rgba(" in banner_block
+    assert "rgba(255, 255, 255, 0.14)" in banner_block
+
+    host.close()
+    host.deleteLater()
+    app.processEvents()

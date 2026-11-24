@@ -117,10 +117,41 @@ def test_replacement_script_waits_stages_verifies_and_logs(tmp_path: Path) -> No
     assert "$staged =" in script
     assert "Target-Processes-Running" in script
     assert "Move-WithRetry" in script
+    assert "Copy-WithRetry" in script
+    assert "Copy-Item" in script
+    assert "Unblock-File" in script
+    assert "--relaunch" in script
+    assert "-WorkingDirectory $targetDir" in script
+    assert "Start-TargetAndVerify" in script
+    assert "Get-Process -Name $exeName" in script
     assert "umbral-update.log" in script
     assert "sigue abierto" in script
     assert "HasExited" in script
     assert "Restaurado el ejecutable anterior" in script
+
+
+def test_fetch_covers_respects_stop_event(monkeypatch, tmp_path: Path) -> None:
+    import threading
+    from umbral.covers import fetch_covers
+    from umbral.models import Game
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    called = 0
+
+    def fake_fetch(game, cache=None):
+        nonlocal called
+        called += 1
+        return None
+
+    monkeypatch.setattr("umbral.covers.fetch_cover", fake_fetch)
+    stop = threading.Event()
+    stop.set()
+    games = [Game(id="g1", title="Zelda", system="Nintendo 3DS", system_key="3ds", rom_path="a.3ds", emulator="azahar")]
+    results, errors = fetch_covers(games, missing_only=False, stop_event=stop)
+    assert results == {}
+    assert errors == {}
+    assert called == 0
 
 
 def test_clean_subprocess_env_strips_pyinstaller_vars() -> None:

@@ -8,7 +8,7 @@ import shutil
 import struct
 import threading
 import unicodedata
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -788,27 +788,43 @@ def fetch_cover(game: Game, cache: dict | None = None, use_cache: bool = True) -
 
 
 def fetch_covers(
-    games: list[Game], missing_only: bool = True, workers: int = 4
+    games: list[Game],
+    missing_only: bool = True,
+    workers: int = 4,
+    stop_event: threading.Event | None = None,
 ) -> tuple[dict[str, Path], dict[str, Exception]]:
     targets = [
         game for game in games if not missing_only or cover_needs_refresh(game)
     ]
     results: dict[str, Path] = {}
     errors: dict[str, Exception] = {}
-    if not targets:
+    if not targets or (stop_event is not None and stop_event.is_set()):
         return results, errors
 
     cache = _load_cache()
     lock_results: list[tuple[str, Path | None, Exception | None]] = []
 
     def work(game: Game) -> tuple[str, Path | None, Exception | None]:
+        if stop_event is not None and stop_event.is_set():
+            return game.id, None, None
         try:
             return game.id, fetch_cover(game, cache), None
         except Exception as error:  # noqa: BLE001 - una carátula nunca debe romper la app
             return game.id, None, error
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        lock_results = list(pool.map(work, targets))
+    pool = ThreadPoolExecutor(max_workers=max(1, workers))
+    aborted = False
+    try:
+        pending = {pool.submit(work, game) for game in targets}
+        while pending:
+            if stop_event is not None and stop_event.is_set():
+                aborted = True
+                break
+            done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                lock_results.append(future.result())
+    finally:
+        pool.shutdown(wait=not aborted, cancel_futures=aborted)
 
     with _CACHE_LOCK:
         _save_cache(cache)

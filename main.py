@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import sys
+import threading
+import time
 
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -9,7 +12,7 @@ from PySide6.QtWidgets import QApplication
 from umbral.paths import assets_dir
 from umbral.ui.main_window import MainWindow
 
-INSTANCE_KEY = "Umbral-single-instance"
+INSTANCE_KEY = os.environ.get("UMBRAL_INSTANCE_KEY") or "Umbral-single-instance"
 
 
 def _show_window(window: MainWindow) -> None:
@@ -68,19 +71,45 @@ def main() -> int:
         icon_path = assets_dir() / "umbral.svg"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
-    if _notify_existing():
-        return 0
     holder: dict[str, MainWindow | None] = {"window": None}
-    server = _listen(holder)
-    if server is None:
+    relaunching = "--relaunch" in sys.argv[1:]
+    if relaunching:
+        deadline = time.monotonic() + 2.0
+        server = _listen(holder)
+        while server is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+            QLocalServer.removeServer(INSTANCE_KEY)
+            server = _listen(holder)
+        if server is None:
+            QLocalServer.removeServer(INSTANCE_KEY)
+            server = _listen(holder)
+    else:
         if _notify_existing():
             return 0
-        QLocalServer.removeServer(INSTANCE_KEY)
         server = _listen(holder)
+        if server is None:
+            if _notify_existing():
+                return 0
+            QLocalServer.removeServer(INSTANCE_KEY)
+            server = _listen(holder)
+    if server is not None:
+        app.aboutToQuit.connect(server.close)
     window = MainWindow()
     holder["window"] = window
     window.showMaximized()
-    return app.exec()
+    code = app.exec()
+    if server is not None:
+        server.close()
+        app.processEvents()
+    has_bg_threads = any(
+        thread is not threading.main_thread() and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+    if window.has_active_workers() or has_bg_threads or window._updating:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+    return code
 
 
 if __name__ == "__main__":

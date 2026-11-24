@@ -332,11 +332,14 @@ def _replacement_script(target: Path, new_exe: Path, pid: int) -> str:
     log = target.with_name("umbral-update.log")
     return f"""$ErrorActionPreference = 'Stop'
 $target = {_ps_quote(str(target))}
+$targetDir = [System.IO.Path]::GetDirectoryName($target)
 $new = {_ps_quote(str(new_exe))}
 $staged = {_ps_quote(str(staged))}
 $backup = {_ps_quote(str(backup))}
 $log = {_ps_quote(str(log))}
 $pidToWait = {int(pid)}
+$exeName = [System.IO.Path]::GetFileNameWithoutExtension($target)
+$hasWildcardName = $exeName -match '[\\*\\?\\[\\]]'
 $utf8Bom = New-Object System.Text.UTF8Encoding($true)
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 function Write-Log($message) {{
@@ -350,12 +353,17 @@ function Write-Log($message) {{
     }} catch {{}}
 }}
 function Target-Processes-Running {{
-    if ($null -ne (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {{
+    if ($pidToWait -gt 0 -and $null -ne (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) {{
         return $true
     }}
     try {{
         $normTarget = [System.IO.Path]::GetFullPath($target)
-        $matches = Get-Process -ErrorAction SilentlyContinue | Where-Object {{
+        $candidates = if ($hasWildcardName) {{
+            Get-Process -ErrorAction SilentlyContinue
+        }} else {{
+            Get-Process -Name $exeName -ErrorAction SilentlyContinue
+        }}
+        $matches = $candidates | Where-Object {{
             try {{ $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq $normTarget) }} catch {{ $false }}
         }}
         if ($null -ne $matches) {{ return $true }}
@@ -364,41 +372,84 @@ function Target-Processes-Running {{
 }}
 function Move-WithRetry($src, $dst) {{
     $lastError = $null
-    for ($attempt = 1; $attempt -le 15; $attempt++) {{
+    for ($attempt = 1; $attempt -le 40; $attempt++) {{
         try {{
             Move-Item -LiteralPath $src -Destination $dst -Force
             return
         }} catch {{
             $lastError = $_
-            Start-Sleep -Milliseconds 300
+            if ($attempt -ge 4) {{
+                try {{
+                    Copy-Item -LiteralPath $src -Destination $dst -Force
+                    Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+                    return
+                }} catch {{
+                    $lastError = $_
+                }}
+            }}
+            Start-Sleep -Milliseconds 250
         }}
     }}
     throw $lastError
 }}
+function Copy-WithRetry($src, $dst) {{
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 40; $attempt++) {{
+        try {{
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+            return
+        }} catch {{
+            $lastError = $_
+            Start-Sleep -Milliseconds 250
+        }}
+    }}
+    throw $lastError
+}}
+function Start-TargetAndVerify {{
+    for ($launchTry = 1; $launchTry -le 2; $launchTry++) {{
+        $started = Start-Process -FilePath $target -WorkingDirectory $targetDir -ArgumentList '--relaunch' -PassThru
+        Start-Sleep -Milliseconds 1500
+        $pidToWait = 0
+        if ($null -ne $started -and -not $started.HasExited) {{
+            return $true
+        }}
+        if (Target-Processes-Running) {{
+            return $true
+        }}
+        $code = if ($null -ne $started) {{ $started.ExitCode }} else {{ -1 }}
+        Write-Log "Reintento de arranque $launchTry (código $code)"
+        if ($launchTry -eq 1) {{
+            Start-Sleep -Milliseconds 600
+        }} else {{
+            throw "El nuevo ejecutable no permaneció abierto tras actualizar (código $code)."
+        }}
+    }}
+    return $false
+}}
 try {{
     Write-Log "Esperando al proceso $pidToWait"
     $waited = 0
-    while ($waited -lt 240) {{
+    while ($waited -lt 600) {{
         if (-not (Target-Processes-Running)) {{ break }}
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 100
         $waited++
     }}
     if (Target-Processes-Running) {{
         throw "Umbral sigue abierto; no se reemplaza el ejecutable."
     }}
-    Start-Sleep -Milliseconds 700
+    Start-Sleep -Milliseconds 250
+    Unblock-File -LiteralPath $new -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $staged) {{ Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue }}
-    Move-WithRetry $new $staged
+    Copy-WithRetry $new $staged
+    Unblock-File -LiteralPath $staged -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }}
     Move-WithRetry $target $backup
     Write-Log "Ejecutable anterior movido a $backup"
     Move-WithRetry $staged $target
+    Unblock-File -LiteralPath $target -ErrorAction SilentlyContinue
     Write-Log "Nuevo ejecutable instalado"
-    $started = Start-Process -FilePath $target -PassThru
-    Start-Sleep -Seconds 4
-    if ($null -ne $started -and $started.HasExited -and $started.ExitCode -ne 0) {{
-        throw "El nuevo ejecutable se cerró al iniciar (código $($started.ExitCode))."
-    }}
+    $null = Start-TargetAndVerify
+    Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     Write-Log "Actualización completada"
 }} catch {{
@@ -408,7 +459,9 @@ try {{
         Move-Item -LiteralPath $backup -Destination $target -Force -ErrorAction SilentlyContinue
         Write-Log "Restaurado el ejecutable anterior"
     }}
-    Start-Process -FilePath $target -ErrorAction SilentlyContinue
+    if (-not (Target-Processes-Running)) {{
+        Start-Process -FilePath $target -WorkingDirectory $targetDir -ArgumentList '--relaunch' -ErrorAction SilentlyContinue
+    }}
 }}
 """
 
@@ -449,6 +502,11 @@ def apply_update(new_exe: Path) -> None:
             "con permisos, como Descargas, y vuelve a intentarlo."
         ) from exc
     powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+    if not powershell and os.name == "nt":
+        sys_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        candidate = sys_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if candidate.is_file():
+            powershell = str(candidate)
     if not powershell:
         raise UpdateError("Windows no tiene PowerShell disponible para aplicar la actualización.")
     script = _replacement_script(target, new_exe, os.getpid())
