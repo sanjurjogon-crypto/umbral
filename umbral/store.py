@@ -27,6 +27,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "update_dismissed_version": "",
     "library_view": "shelf",
     "hide_demos": False,
+    "shelf_halo": True,
 }
 
 

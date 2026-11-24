@@ -278,3 +278,11 @@ def test_settings_page_lists_hidden_games_and_emits_restore(monkeypatch, tmp_pat
     restore_buttons[1].click()
     assert restored_games == ["pc-boxshelf-1"]
     assert restored_paths == ["c:/games/boxshelf.exe"]
+
+    # Estantería 3D halo toggle persists & emits halo_changed
+    halo_events: list[bool] = []
+    page.halo_changed.connect(halo_events.append)
+    assert page.halo_check.isChecked() is True
+    page.halo_check.setChecked(False)
+    assert store.settings["shelf_halo"] is False
+    assert halo_events == [False]
