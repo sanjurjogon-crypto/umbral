@@ -36,6 +36,8 @@ STEAM_PORTRAIT_URLS = (
     "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{app_id}/library_600x900.jpg",
 )
 
+STEAM_BAD_LIBRARY_IDS = frozenset({"1952920"})
+
 CACHE_FILE = "cover_cache.json"
 CACHE_TTL = timedelta(days=30)
 _CACHE_LOCK = threading.Lock()
@@ -392,6 +394,10 @@ def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
                     continue
                 score = 70
             elif target in compact:
+                shorter = min(len(compact), len(target))
+                longer = max(len(compact), len(target))
+                if len(target) < 4 or longer == 0 or shorter / longer < 0.55:
+                    continue
                 score = 55
             else:
                 continue
@@ -519,17 +525,19 @@ def _itch_cover(title: str) -> dict | None:
 
 
 def _resolve_online(game: Game) -> dict | None:
-    if game.source == "steam":
-        cover = _steam_cover(_steam_app_id(game))
+    app_id = _steam_app_id(game)
+    if game.source == "steam" and app_id not in STEAM_BAD_LIBRARY_IDS:
+        cover = _steam_cover(app_id)
         if cover:
             return cover
     titles = _candidate_titles(game)
     if not titles:
         return None
     if game.system_key in {"pc", "epic", "gog"}:
-        steam = _steam_cover(_steam_app_id(game))
-        if steam:
-            return steam
+        if app_id and app_id not in STEAM_BAD_LIBRARY_IDS:
+            steam = _steam_cover(app_id)
+            if steam:
+                return steam
         for title in titles:
             found = _steam_search_cover(title)
             if found:

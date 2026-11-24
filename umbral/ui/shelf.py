@@ -820,7 +820,7 @@ class ShelfCanvas(QWidget):
         center_y = self._inset_top + usable_h * 0.445
         scale = min(usable_w / 1240.0, 1.18)
         cover_w = CASE_W * max(0.72, scale)
-        cover_h = CASE_H * max(0.72, scale) + cover_w * TITLE_BAND_RATIO
+        cover_h = CASE_H * max(0.72, scale)
         gap = cover_w * 0.86
         return center_x, center_y, cover_w, cover_h, gap
 
@@ -1072,10 +1072,8 @@ class ShelfCanvas(QWidget):
         buf.setClipPath(outer)
 
         if profile.shell_kind == "pc_keepcase":
-            band_h = height * 0.145
-            title_h = width * TITLE_BAND_RATIO
-            title = QRectF(0.0, 0.0, width, title_h)
-            art = QRectF(0.0, title_h, width, height - band_h - title_h)
+            band_h = height * 0.115
+            art = QRectF(0.0, 0.0, width, height - band_h)
             band = QRectF(0.0, height - band_h, width, band_h)
 
             if item.pixmap is not None and not item.pixmap.isNull():
@@ -1107,13 +1105,19 @@ class ShelfCanvas(QWidget):
             else:
                 self._paint_placeholder(buf, art, item)
 
-            self._paint_title_band(buf, title, item)
             self._paint_pc_band(buf, band, item)
             self._paint_status_badges(buf, art, item)
 
-            frame_line = QColor(style.text)
-            frame_line.setAlpha(75)
-            buf.setPen(QPen(frame_line, 1.3))
+            sheen = QLinearGradient(frame.topLeft(), QPointF(width * 0.6, height * 0.55))
+            sheen.setColorAt(0.0, QColor(255, 255, 255, 24))
+            sheen.setColorAt(0.45, QColor(255, 255, 255, 8))
+            sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+            buf.setPen(Qt.NoPen)
+            buf.setBrush(QBrush(sheen))
+            buf.drawRoundedRect(frame, radius, radius)
+
+            frame_line = QColor(255, 255, 255, 58)
+            buf.setPen(QPen(frame_line, 1.2))
             buf.setBrush(Qt.NoBrush)
             buf.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
         else:
@@ -1526,9 +1530,7 @@ class ShelfCanvas(QWidget):
         elif item.game.emulator and not _is_pc_case(item.game):
             name = item.game.emulator
         else:
-            name = Path(item.game.executable).stem if item.game.executable else "PC"
-            if len(name) > 16:
-                name = name[:15] + "…"
+            name = "PC"
 
         font = QFont(UI_FONT)
         font.setPixelSize(max(7, int(band.height() * 0.34)))
