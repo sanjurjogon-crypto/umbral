@@ -142,3 +142,43 @@ if ($existing) {
 }
 
 & $gh release view $tag --repo $repo --json tagName,name,isDraft,isPrerelease,assets,url | Out-String
+
+$pinnedDir = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+$syncedTargets = @()
+if (Test-Path -LiteralPath $pinnedDir) {
+    $shell = New-Object -ComObject WScript.Shell
+    Get-ChildItem -LiteralPath $pinnedDir -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $shortcut = $shell.CreateShortcut($_.FullName)
+            $targetPath = [string]$shortcut.TargetPath
+            if ($targetPath -and ([System.IO.Path]::GetFileName($targetPath) -ilike "Umbral*.exe")) {
+                $targetDir = Split-Path -Parent $targetPath
+                if (Test-Path -LiteralPath $targetDir) {
+                    $runningMatch = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+                        try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq [System.IO.Path]::GetFullPath($targetPath)) } catch { $false }
+                    }
+                    if ($null -eq $runningMatch) {
+                        Copy-Item -LiteralPath $exe -Destination $targetPath -Force
+                        $syncedTargets += $targetPath
+                        Write-Host "Actualizado ejecutable anclado en barra de tareas: $targetPath"
+                    } else {
+                        Write-Host "No se pudo actualizar $targetPath porque esta en ejecucion."
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+}
+if ($syncedTargets.Count -eq 0) {
+    $downloadsFallback = Join-Path $env:USERPROFILE "Downloads\Umbral.exe"
+    if (Test-Path -LiteralPath (Split-Path -Parent $downloadsFallback)) {
+        $runningFallback = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try { $_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -ieq [System.IO.Path]::GetFullPath($downloadsFallback)) } catch { $false }
+        }
+        if ($null -eq $runningFallback) {
+            Copy-Item -LiteralPath $exe -Destination $downloadsFallback -Force
+            Write-Host "Actualizado ejecutable en Descargas: $downloadsFallback"
+        }
+    }
+}
