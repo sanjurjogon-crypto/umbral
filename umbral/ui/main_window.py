@@ -56,7 +56,7 @@ from .shelf import apply_style
 from .style import active, is_dark, set_active
 from .theme import qss
 from .update_dialog import CheckWorker, DownloadWorker
-from .widgets import Backdrop, Toast, UpdateBanner
+from .widgets import Backdrop, StartupOverlay, Toast, UpdateBanner
 
 
 def _now_iso() -> str:
@@ -310,6 +310,10 @@ class MainWindow(QMainWindow):
         self.update_banner = UpdateBanner(self)
         self.update_banner.install_clicked.connect(self._install_update)
         self.update_banner.postpone_clicked.connect(self._postpone_update)
+        self._startup_overlay: Optional[StartupOverlay] = None
+        if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
+            self._startup_overlay = StartupOverlay(self)
+            self._startup_overlay.start()
         self._layout_chrome()
 
         search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
@@ -334,6 +338,9 @@ class MainWindow(QMainWindow):
             self.toast.raise_()
         if hasattr(self, "update_banner") and self.update_banner.isVisible():
             self.update_banner.raise_()
+        if hasattr(self, "_startup_overlay") and self._startup_overlay is not None and self._startup_overlay.isVisible():
+            self._startup_overlay.setGeometry(0, 0, width, height)
+            self._startup_overlay.raise_()
 
     def showEvent(self, event) -> None:  # noqa: N802 - API de Qt
         super().showEvent(event)

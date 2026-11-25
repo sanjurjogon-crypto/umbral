@@ -367,6 +367,31 @@ def test_home_hero_banner_and_card_row_redesign(monkeypatch, tmp_path: Path) -> 
     app.processEvents()
 
 
+def test_startup_overlay_renders_all_phases() -> None:
+    from PySide6.QtWidgets import QWidget
+
+    from umbral.ui.widgets import StartupOverlay
+
+    app = _app()
+    host = QWidget()
+    host.resize(1280, 720)
+    overlay = StartupOverlay(host)
+    overlay.setGeometry(0, 0, 1280, 720)
+    overlay.start()
+
+    for elapsed in (0, 1000, 1320, 1850, 2300):
+        overlay._elapsed_ms = elapsed
+        overlay.repaint()
+        app.processEvents()
+
+    overlay._elapsed_ms = overlay._total_ms
+    overlay._tick()
+    assert not overlay.isVisible()
+    host.close()
+    host.deleteLater()
+    app.processEvents()
+
+
 def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, tmp_path: Path) -> None:
     from umbral.ui.pages import SettingsPage
     from umbral.ui.widgets import EmptyState
@@ -476,4 +501,29 @@ def test_home_hero_banner_and_card_row_redesign(monkeypatch, tmp_path: Path) -> 
     assert any(lbl.text() == "1" for lbl in rows[0].findChildren(QLabel))
     home.close()
     home.deleteLater()
+    app.processEvents()
+
+
+def test_startup_overlay_renders_all_phases() -> None:
+    from PySide6.QtWidgets import QWidget
+
+    from umbral.ui.widgets import StartupOverlay
+
+    app = _app()
+    host = QWidget()
+    host.resize(1280, 720)
+    overlay = StartupOverlay(host)
+    overlay.setGeometry(0, 0, 1280, 720)
+    overlay.start()
+
+    for elapsed in (0, 1000, 1320, 1850, 2300):
+        overlay._elapsed_ms = elapsed
+        overlay.repaint()
+        app.processEvents()
+
+    overlay._elapsed_ms = overlay._total_ms
+    overlay._tick()
+    assert not overlay.isVisible()
+    host.close()
+    host.deleteLater()
     app.processEvents()
