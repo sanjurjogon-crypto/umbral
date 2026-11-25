@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QLabel,
+    QMenu,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -252,7 +253,7 @@ class LibraryPage(QWidget):
         header.setObjectName("shelfHeader")
         self.header = header
         header_body = QVBoxLayout(header)
-        header_body.setContentsMargins(32, 10, 32, 6)
+        header_body.setContentsMargins(32, 6, 32, 4)
         header_body.setSpacing(6)
 
         top_row = QHBoxLayout()
@@ -269,56 +270,15 @@ class LibraryPage(QWidget):
         top_row.addLayout(title_box)
         top_row.addStretch(1)
 
-        self.hide_demos_check = QCheckBox("Ocultar demos")
-        self.hide_demos_check.setChecked(self._hide_demos)
-        self.hide_demos_check.setCursor(Qt.PointingHandCursor)
-        self.hide_demos_check.toggled.connect(self._demos_toggled)
-        top_row.addWidget(self.hide_demos_check, 0, Qt.AlignVCenter)
-
-        self.shelf_view_btn = QPushButton("Estantería")
-        self.shelf_view_btn.setObjectName("chip")
-        self.shelf_view_btn.setCheckable(True)
-        self.shelf_view_btn.setChecked(self._view_mode == "shelf")
-        self.shelf_view_btn.setCursor(Qt.PointingHandCursor)
-        self.shelf_view_btn.clicked.connect(lambda: self._set_view_mode("shelf"))
-
-        self.grid_view_btn = QPushButton("Cuadrícula")
-        self.grid_view_btn.setObjectName("chip")
-        self.grid_view_btn.setCheckable(True)
-        self.grid_view_btn.setChecked(self._view_mode == "grid")
-        self.grid_view_btn.setCursor(Qt.PointingHandCursor)
-        self.grid_view_btn.clicked.connect(lambda: self._set_view_mode("grid"))
-
-        view_group = QButtonGroup(self)
-        view_group.setExclusive(True)
-        view_group.addButton(self.shelf_view_btn)
-        view_group.addButton(self.grid_view_btn)
-        top_row.addWidget(self.shelf_view_btn, 0, Qt.AlignVCenter)
-        top_row.addWidget(self.grid_view_btn, 0, Qt.AlignVCenter)
-
-        self.sort_combo = QComboBox()
-        self.sort_combo.setCursor(Qt.PointingHandCursor)
-        for key, label in SORT_OPTIONS:
-            self.sort_combo.addItem(label, key)
-        combo_index = self.sort_combo.findData(self._sort_key)
-        if combo_index >= 0:
-            self.sort_combo.setCurrentIndex(combo_index)
-        self.sort_combo.currentIndexChanged.connect(self._sort_changed)
-        self.order_button = QPushButton()
-        self.order_button.setObjectName("ghost")
-        self.order_button.setCursor(Qt.PointingHandCursor)
-        self.order_button.clicked.connect(self._toggle_order)
-        self.state_combo = QComboBox()
-        self.state_combo.setCursor(Qt.PointingHandCursor)
-        for key, label in STATE_OPTIONS:
-            self.state_combo.addItem(label, key)
-        self.state_combo.currentIndexChanged.connect(self._state_changed)
-        top_row.addSpacing(8)
-        top_row.addWidget(self.sort_combo, 0, Qt.AlignVCenter)
-        top_row.addWidget(self.order_button, 0, Qt.AlignVCenter)
-        top_row.addWidget(self.state_combo, 0, Qt.AlignVCenter)
+        self.filters_button = QPushButton("Filtros  ▾")
+        self.filters_button.setObjectName("filterBtn")
+        self.filters_button.setCursor(Qt.PointingHandCursor)
+        self.filters_button.setFocusPolicy(Qt.NoFocus)
+        self._filters_menu = self._build_filters_menu()
+        self.filters_button.setMenu(self._filters_menu)
+        top_row.addWidget(self.filters_button, 0, Qt.AlignVCenter)
         header_body.addLayout(top_row)
-        self._sync_order_button()
+        self._sync_filters_ui()
 
         self.canvas = ShelfCanvas(self)
         self.canvas.set_halo_enabled(bool(store.settings.get("shelf_halo", True)))
@@ -505,38 +465,87 @@ class LibraryPage(QWidget):
             self._filter = ""
         self.refresh()
 
-    def _sort_changed(self, _index: int) -> None:
-        key = self.sort_combo.currentData()
+    def _build_filters_menu(self) -> QMenu:
+        menu = QMenu(self)
+        view_group = QActionGroup(menu)
+        view_group.setExclusive(True)
+        self._view_actions: dict[str, QAction] = {}
+        for mode, label in (("shelf", "Vista: Estantería"), ("grid", "Vista: Cuadrícula")):
+            act = QAction(label, menu, checkable=True)
+            act.setChecked(self._view_mode == mode)
+            act.triggered.connect(lambda _c, m=mode: self._set_view_mode(m))
+            view_group.addAction(act)
+            menu.addAction(act)
+            self._view_actions[mode] = act
+
+        menu.addSeparator()
+        sort_menu = menu.addMenu("Ordenar por")
+        sort_group = QActionGroup(sort_menu)
+        sort_group.setExclusive(True)
+        self._sort_actions: dict[str, QAction] = {}
+        for key, label in SORT_OPTIONS:
+            act = QAction(label, sort_menu, checkable=True)
+            act.setChecked(self._sort_key == key)
+            act.triggered.connect(lambda _c, k=key: self._set_sort_key(k))
+            sort_group.addAction(act)
+            sort_menu.addAction(act)
+            self._sort_actions[key] = act
+
+        self.order_action = QAction("", menu)
+        self.order_action.triggered.connect(self._toggle_order)
+        menu.addAction(self.order_action)
+
+        state_menu = menu.addMenu("Estado")
+        state_group = QActionGroup(state_menu)
+        state_group.setExclusive(True)
+        self._state_actions: dict[str, QAction] = {}
+        for key, label in STATE_OPTIONS:
+            act = QAction(label, state_menu, checkable=True)
+            act.setChecked(self._state_filter == key)
+            act.triggered.connect(lambda _c, k=key: self._set_state_filter(k))
+            state_group.addAction(act)
+            state_menu.addAction(act)
+            self._state_actions[key] = act
+
+        menu.addSeparator()
+        self.hide_demos_action = QAction("Ocultar demos", menu, checkable=True)
+        self.hide_demos_action.setChecked(self._hide_demos)
+        self.hide_demos_action.toggled.connect(self._demos_toggled)
+        menu.addAction(self.hide_demos_action)
+        return menu
+
+    def _set_sort_key(self, key: str) -> None:
         if not key:
             return
         self._sort_key = str(key)
         self._sort_asc = SORT_DEFAULT_ASC.get(self._sort_key, True)
         self._save_sort()
-        self._sync_order_button()
+        self._sync_filters_ui()
         self.refresh(reset=True)
 
     def _toggle_order(self) -> None:
         self._sort_asc = not self._sort_asc
         self._save_sort()
-        self._sync_order_button()
+        self._sync_filters_ui()
         self.refresh(reset=True)
 
-    def _state_changed(self, _index: int) -> None:
-        self._state_filter = str(self.state_combo.currentData() or "")
+    def _set_state_filter(self, key: str) -> None:
+        self._state_filter = str(key or "")
+        self._sync_filters_ui()
         self.refresh(reset=True)
 
     def _demos_toggled(self, checked: bool) -> None:
         self._hide_demos = bool(checked)
         self.store.settings["hide_demos"] = self._hide_demos
         self.store.save_settings()
+        self._sync_filters_ui()
         self.refresh(reset=True)
 
     def _set_view_mode(self, mode: str) -> None:
         if mode not in {"shelf", "grid"}:
             return
         self._view_mode = mode
-        self.shelf_view_btn.setChecked(mode == "shelf")
-        self.grid_view_btn.setChecked(mode == "grid")
+        self._sync_filters_ui()
         self.store.settings["library_view"] = mode
         self.store.save_settings()
         self.refresh()
@@ -547,8 +556,21 @@ class LibraryPage(QWidget):
         self.store.settings["sort_asc"] = self._sort_asc
         self.store.save_settings()
 
-    def _sync_order_button(self) -> None:
-        self.order_button.setText("↑ Ascendente" if self._sort_asc else "↓ Descendente")
+    def _sync_filters_ui(self) -> None:
+        if hasattr(self, "order_action"):
+            self.order_action.setText("Orden: ↑ Ascendente" if self._sort_asc else "Orden: ↓ Descendente")
+        if hasattr(self, "_view_actions"):
+            for mode, act in self._view_actions.items():
+                act.setChecked(self._view_mode == mode)
+        if hasattr(self, "_sort_actions"):
+            for key, act in self._sort_actions.items():
+                act.setChecked(self._sort_key == key)
+        if hasattr(self, "_state_actions"):
+            for key, act in self._state_actions.items():
+                act.setChecked(self._state_filter == key)
+        if hasattr(self, "filters_button"):
+            active_badge = bool(self._state_filter or self._hide_demos)
+            self.filters_button.setText("Filtros •  ▾" if active_badge else "Filtros  ▾")
 
     def _visible_games(self) -> list[Game]:
         games = self.store.games

@@ -293,6 +293,42 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         border-color: __ACCENT__;
         color: __ACCENT_2__;
     }
+    QPushButton#filterBtn {
+        background: __SURFACE_2__;
+        border: __THIN__px solid __BORDER__;
+        border-radius: __RADIUS__px;
+        padding: 7px 14px;
+        color: __TEXT__;
+        font-family: "__HEADING__";
+        font-size: 11px;
+        font-weight: __WEIGHT__;
+        letter-spacing: 1px;
+        text-align: center;
+        __TRANSFORM__
+    }
+    QPushButton#filterBtn:hover {
+        background: __SURFACE_3__;
+        border-color: __ACCENT__;
+        color: __ACCENT_2__;
+    }
+    QPushButton#filterBtn::menu-indicator {
+        image: none;
+        width: 0px;
+    }
+    QPushButton#sidebarToggle {
+        background: __SURFACE_2__;
+        border: __THIN__px solid __BORDER__;
+        border-radius: __RADIUS__px;
+        padding: 0px;
+        color: __TEXT__;
+        font-size: 16px;
+        text-align: center;
+    }
+    QPushButton#sidebarToggle:hover {
+        background: __SURFACE_3__;
+        border-color: __ACCENT__;
+        color: __ACCENT_2__;
+    }
     QPushButton#icon {
         border: __THIN__px solid __BORDER__;
         border-radius: __RADIUS__px;
@@ -365,6 +401,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     QMenu {
         background: __SURFACE_2__;
         border: __THIN__px solid __BORDER__;
+        border-radius: __RADIUS__px;
         padding: 4px;
     }
     QMenu::item {

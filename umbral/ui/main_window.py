@@ -113,9 +113,10 @@ class MainWindow(QMainWindow):
         self._sidebar_width = self._sidebar_expanded_width
         self._sidebar_collapsed = False
         self._sidebar_anim = QVariantAnimation(self)
-        self._sidebar_anim.setDuration(180)
+        self._sidebar_anim.setDuration(260)
         self._sidebar_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._sidebar_anim.valueChanged.connect(self._apply_sidebar_width)
+        self._sidebar_anim.finished.connect(self._on_sidebar_anim_finished)
         self._topbar_height = 84
         self._systems_signature: tuple = ()
         self._system_buttons: dict[str, QPushButton] = {}
@@ -251,12 +252,12 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout(topbar)
         top.setContentsMargins(24, 18, 32, 10)
         top.setSpacing(12)
-        self.sidebar_toggle = QPushButton("☰")
-        self.sidebar_toggle.setObjectName("ghost")
+        self.sidebar_toggle = QPushButton("«")
+        self.sidebar_toggle.setObjectName("sidebarToggle")
         self.sidebar_toggle.setFixedSize(36, 34)
         self.sidebar_toggle.setFocusPolicy(Qt.NoFocus)
         self.sidebar_toggle.setCursor(Qt.PointingHandCursor)
-        self.sidebar_toggle.setToolTip("Mostrar u ocultar barra lateral")
+        self.sidebar_toggle.setToolTip("Ocultar barra lateral")
         self.sidebar_toggle.clicked.connect(self._toggle_sidebar)
         top.addWidget(self.sidebar_toggle)
         self.search = QLineEdit()
@@ -347,8 +348,9 @@ class MainWindow(QMainWindow):
         width = root.width() if root is not None and root.width() > 0 else self.width()
         height = root.height() if root is not None and root.height() > 0 else self.height()
         self.stack.setGeometry(0, 0, width, height)
+        sidebar_x = self._sidebar_width - self._sidebar_expanded_width
         self.sidebar.setVisible(self._sidebar_width > 0)
-        self.sidebar.setGeometry(0, 0, self._sidebar_width, height)
+        self.sidebar.setGeometry(sidebar_x, 0, self._sidebar_expanded_width, height)
         self.topbar.setGeometry(
             self._sidebar_width, 0, max(0, width - self._sidebar_width), self._topbar_height
         )
@@ -364,16 +366,33 @@ class MainWindow(QMainWindow):
 
     def _apply_sidebar_width(self, value) -> None:
         self._sidebar_width = max(0, int(value))
+        current = self.stack.currentWidget()
+        if current is self.library:
+            self.library.set_chrome_insets(self._sidebar_width, self._topbar_height)
+        elif current is not None:
+            current.setContentsMargins(self._sidebar_width, self._topbar_height, 0, 0)
+        self._layout_chrome()
+
+    def _on_sidebar_anim_finished(self) -> None:
         for padded_page in (self.home, self.stats, self.health, self.settings_page):
             padded_page.setContentsMargins(self._sidebar_width, self._topbar_height, 0, 0)
         self.library.set_chrome_insets(self._sidebar_width, self._topbar_height)
-        self._layout_chrome()
+
+    def _sync_sidebar_toggle(self) -> None:
+        if self._sidebar_collapsed:
+            self.sidebar_toggle.setText("»")
+            self.sidebar_toggle.setToolTip("Mostrar barra lateral")
+        else:
+            self.sidebar_toggle.setText("«")
+            self.sidebar_toggle.setToolTip("Ocultar barra lateral")
 
     def _toggle_sidebar(self) -> None:
         self._sidebar_collapsed = not self._sidebar_collapsed
+        self._sync_sidebar_toggle()
         target = 0 if self._sidebar_collapsed else self._sidebar_expanded_width
         if os.environ.get("QT_QPA_PLATFORM", "").lower() == "offscreen":
             self._apply_sidebar_width(target)
+            self._on_sidebar_anim_finished()
             return
         self._sidebar_anim.stop()
         self._sidebar_anim.setStartValue(self._sidebar_width)

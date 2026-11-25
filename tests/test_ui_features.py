@@ -208,7 +208,8 @@ def test_library_grid_view_and_hide_demos(monkeypatch, tmp_path: Path) -> None:
     page = LibraryPage(store)
     page.resize(1100, 720)
 
-    page.hide_demos_check.setChecked(True)
+    assert page.filters_button.objectName() == "filterBtn"
+    page.hide_demos_action.setChecked(True)
     assert [g.id for g in page._visible_games()] == ["g1"]
     assert store.settings["hide_demos"] is True
 
@@ -442,12 +443,19 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
 
     assert not hasattr(win.library, "details_button")
     assert win._sidebar_width == 238
+    assert win.sidebar_toggle.text() == "«"
     win.sidebar_toggle.click()
     assert win._sidebar_width == 0
+    assert win.sidebar_toggle.text() == "»"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 238
+    assert win.sidebar_toggle.text() == "«"
     assert win.sidebar.isVisible()
+
+    from umbral.ui.style import STYLES
+
+    assert all(style.radius == 8 for style in STYLES)
 
     # Right-click on centered ShelfCanvas item must NOT emit activated
     activated: list[Game] = []
@@ -671,12 +679,19 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
 
     assert not hasattr(win.library, "details_button")
     assert win._sidebar_width == 238
+    assert win.sidebar_toggle.text() == "«"
     win.sidebar_toggle.click()
     assert win._sidebar_width == 0
+    assert win.sidebar_toggle.text() == "»"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 238
+    assert win.sidebar_toggle.text() == "«"
     assert win.sidebar.isVisible()
+
+    from umbral.ui.style import STYLES
+
+    assert all(style.radius == 8 for style in STYLES)
 
     # Right-click on centered ShelfCanvas item must NOT emit activated
     activated: list[Game] = []
