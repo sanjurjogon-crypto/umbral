@@ -395,6 +395,33 @@ def test_library_shelf_title_expands_for_long_multiline_titles(monkeypatch, tmp_
     app.processEvents()
 
     assert lib.info_title.height() >= lib.info_title.fontMetrics().lineSpacing() * 2
+    center_x, center_y, cover_w, cover_h, _gap = lib.canvas._layout()
+    assert center_y + cover_h / 2.0 <= lib.bottom.y() + 2
     lib.close()
     lib.deleteLater()
+    app.processEvents()
+
+
+def test_sidebar_buttons_have_no_focus_and_arrows_stay_in_shelf(monkeypatch, tmp_path: Path) -> None:
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+    win.store.games = [
+        Game(id="g1", title="Zelda", system="Ports", system_key="ports"),
+        Game(id="g2", title="Hades", system="Steam", system_key="steam", source="steam"),
+    ]
+    win._rebuild_systems()
+    for btn in (*win.nav_buttons.values(), win.update_button, *win._system_buttons.values()):
+        assert btn.focusPolicy() == Qt.NoFocus
+
+    win.close()
+    win.deleteLater()
     app.processEvents()
