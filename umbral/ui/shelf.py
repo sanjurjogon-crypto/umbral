@@ -412,7 +412,7 @@ def _shelf_horizon_y(center_y: float, cover_h: float) -> float:
 
 
 def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarray:
-    """Apply real optical frosted-glass Gaussian blur with lighter translucent tint below floor_y."""
+    """Apply subtle, realistic frosted-glass Gaussian blur with low opacity so background stays visible."""
     if floor_y is None:
         return arr
     h, w = arr.shape[:2]
@@ -422,27 +422,21 @@ def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarra
         return arr
     lower_u8 = np.clip(arr[fy:, :, :], 0.0, 255.0).astype(np.uint8)
     pil_low = Image.fromarray(lower_u8, "RGB")
-    small_w = max(8, w // 2)
-    small_h = max(8, lower_h // 2)
-    blurred_small = pil_low.resize((small_w, small_h), Image.Resampling.BILINEAR).filter(
-        ImageFilter.GaussianBlur(radius=18)
-    )
-    blurred_full = blurred_small.resize((w, lower_h), Image.Resampling.BILINEAR)
-    frost_arr = np.asarray(blurred_full, dtype=np.float32)
+    blurred = pil_low.filter(ImageFilter.GaussianBlur(radius=7))
+    frost_arr = np.asarray(blurred, dtype=np.float32)
 
     y_rel = np.linspace(0.0, 1.0, lower_h, dtype=np.float32)[:, None, None]
-    # Lighter translucent milky frost near horizon with gentle bottom darkening
-    frost_base = np.array([204.0, 214.0, 228.0], dtype=np.float32)[None, None, :]
+    frost_base = np.array([210.0, 220.0, 234.0], dtype=np.float32)[None, None, :]
     deep_glass = np.array([10.0, 12.0, 16.0], dtype=np.float32)[None, None, :]
-    milky_w = 0.11 * np.exp(-y_rel * 3.0) + 0.03
-    dark_w = 0.12 + 0.30 * (y_rel ** 0.9)
+    milky_w = 0.06 * np.exp(-y_rel * 3.5) + 0.02
+    dark_w = 0.04 + 0.14 * (y_rel ** 1.1)
     out_low = frost_arr * (1.0 - milky_w) + frost_base * milky_w
     out_low = out_low * (1.0 - dark_w) + deep_glass * dark_w
 
     rng = np.random.default_rng(2027)
     u1 = rng.random((lower_h, w), dtype=np.float32)
     u2 = rng.random((lower_h, w), dtype=np.float32)
-    out_low += ((u1 + u2 - 1.0) * 2.2)[:, :, None]
+    out_low += ((u1 + u2 - 1.0) * 1.8)[:, :, None]
 
     res = arr.copy()
     res[fy:, :, :] = np.clip(out_low, 0.0, 255.0)
@@ -574,8 +568,8 @@ def render_custom_backdrop(
         arr = vis_arr
     dim_factor = max(0.25, min(1.0, 1.0 - float(dim)))
     y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
-    bottom_fade = np.where(y_norm > 0.56, np.clip((y_norm - 0.56) / 0.44, 0.0, 1.0), 0.0)
-    shade = (dim_factor * (1.0 - 0.72 * (bottom_fade ** 1.35)))[:, :, None]
+    bottom_fade = np.where(y_norm > 0.68, np.clip((y_norm - 0.68) / 0.32, 0.0, 1.0), 0.0)
+    shade = (dim_factor * (1.0 - 0.42 * (bottom_fade ** 1.25)))[:, :, None]
     arr = np.clip(arr * shade, 0.0, 255.0)
     arr = _apply_frosted_floor(arr, floor_y).astype(np.uint8)
     qimg = QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
@@ -1129,6 +1123,9 @@ class ShelfCanvas(QWidget):
             order.append((position, position - self._float, geometry))
         order.sort(key=lambda entry: -abs(entry[1]))
 
+        horizon_y = _shelf_horizon_y(center_y, cover_h)
+        painter.save()
+        painter.setClipRect(QRectF(0.0, horizon_y, float(self.width()), max(0.0, float(self.height()) - horizon_y)))
         for position, _, geometry in order:
             self._paint_reflection(
                 painter,
@@ -1140,6 +1137,7 @@ class ShelfCanvas(QWidget):
                 cover_h,
                 selected=(position == self.index),
             )
+        painter.restore()
 
         for position, _, geometry in order:
             self._paint_case(
@@ -1214,17 +1212,17 @@ class ShelfCanvas(QWidget):
 
         floor_rect = QRectF(0, floor_y, rect.width(), max(0.0, rect.bottom() - floor_y))
         frost_glass = QLinearGradient(0, floor_y, 0, rect.bottom())
-        tint_alpha = 18 if self._halo_enabled else 10
+        tint_alpha = 12 if self._halo_enabled else 6
         frost_glass.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), tint_alpha))
-        frost_glass.setColorAt(0.08, QColor(225, 232, 245, 18))
-        frost_glass.setColorAt(0.45, QColor(14, 16, 20, 46))
-        frost_glass.setColorAt(1.0, QColor(5, 6, 8, 125))
+        frost_glass.setColorAt(0.08, QColor(225, 232, 245, 14))
+        frost_glass.setColorAt(0.45, QColor(14, 16, 20, 26))
+        frost_glass.setColorAt(1.0, QColor(5, 6, 8, 64))
         painter.fillRect(floor_rect, QBrush(frost_glass))
 
         # Subtle frosted-glass highlight right below the horizon line
-        frost_h = min(26.0, max(10.0, floor_rect.height() * 0.14))
+        frost_h = min(22.0, max(8.0, floor_rect.height() * 0.12))
         frost = QLinearGradient(0, floor_y, 0, floor_y + frost_h)
-        frost.setColorAt(0.0, QColor(240, 245, 255, 26))
+        frost.setColorAt(0.0, QColor(240, 245, 255, 18))
         frost.setColorAt(1.0, QColor(240, 245, 255, 0))
         painter.fillRect(QRectF(0, floor_y, rect.width(), frost_h), QBrush(frost))
 
