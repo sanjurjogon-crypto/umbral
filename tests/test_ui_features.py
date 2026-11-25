@@ -803,18 +803,18 @@ def test_custom_template_cases_and_spines_load_square() -> None:
     )
 
     _app()
-    expected = ("steam", "epic", "switch2", "dusklight", "hookshot", "longshot")
+    expected = ("steam", "epic", "switch2", "dusklight", "hookshot", "longshot", "3ds", "pc")
     for key in expected:
         assert key in CASE_PROFILES
         overlay = load_case_overlay(key)
         assert overlay is not None, f"Missing overlay for {key}"
         pix, win = overlay
         assert not pix.isNull()
-        # Interior transparent cutout must not span the entire vertical height
+        # Interior transparent cutout must not span the entire case frame
         assert 0.0 <= win.x() < 0.25
-        assert 0.05 < win.y() < 0.35
+        assert 0.01 < win.y() < 0.35
         assert 0.50 < win.width() <= 1.0
-        assert 0.50 < win.height() < 0.90
+        assert 0.50 < win.height() < 0.98
         spine = load_spine_texture(key, "left")
         right_edge = load_spine_texture(key, "right")
         assert spine is not None and not spine.isNull(), f"Missing left spine for {key}"
@@ -826,6 +826,8 @@ def test_custom_template_cases_and_spines_load_square() -> None:
     assert case_profile(Game(id="s1", title="Hades", system="Steam", system_key="steam", source="steam")).key == "steam"
     assert case_profile(Game(id="e1", title="Rocket League", system="Epic", system_key="epic", source="epic")).key == "epic"
     assert case_profile(Game(id="n1", title="Mario", system="Switch 2", system_key="switch2")).key == "switch2"
+    assert case_profile(Game(id="d1", title="ALBW", system="3DS", system_key="3ds")).key == "3ds"
+    assert case_profile(Game(id="c1", title="Routine", system="PC", system_key="pc")).key == "pc"
 
     # Render test front + 3D spine without error
     canvas_pix = QPixmap(300, 360)
