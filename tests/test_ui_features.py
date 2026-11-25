@@ -839,3 +839,114 @@ def test_custom_template_cases_and_spines_load_square() -> None:
     assert art_rect.width() > 50 and art_rect.height() > 50
     paint_console_spine(painter, frame, prof, 0.5)
     painter.end()
+
+
+def test_refresh_paths_button_updates_moved_and_prunes_uninstalled_games(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from PySide6.QtWidgets import QPushButton
+    import umbral.detect as detect_mod
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    scan_dir = tmp_path / "ScanRoot"
+    moved_dir = scan_dir / "Hades"
+    moved_dir.mkdir(parents=True)
+    moved_exe = moved_dir / "Hades.exe"
+    moved_exe.write_bytes(b"MZ")
+
+    steam_exe = tmp_path / "steam.exe"
+    steam_exe.write_bytes(b"MZ")
+    gone_steam_dir = tmp_path / "steamapps" / "common" / "Portal"
+    gone_steam_dir.mkdir(parents=True)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+    win.store.settings["scan_folders"] = [str(scan_dir)]
+
+    moved_pc = Game(
+        id="pc-hades",
+        title="Hades",
+        system="PC",
+        system_key="pc",
+        executable=str(tmp_path / "OldLocation" / "Hades" / "Hades.exe"),
+        working_dir=str(tmp_path / "OldLocation" / "Hades"),
+        source="standalone",
+    )
+    uninstalled_pc = Game(
+        id="pc-gone",
+        title="Gone Game",
+        system="PC",
+        system_key="pc",
+        executable=str(tmp_path / "Deleted" / "GoneGame.exe"),
+        source="standalone",
+    )
+    uninstalled_steam = Game(
+        id="pc-steam-400",
+        title="Portal",
+        system="Steam",
+        system_key="steam",
+        executable=str(steam_exe),
+        working_dir=str(gone_steam_dir),
+        source="steam",
+    )
+    win.store.games = [moved_pc, uninstalled_pc, uninstalled_steam]
+    win._refresh_all()
+
+    buttons = [btn.text() for btn in win.topbar.findChildren(QPushButton)]
+    assert "Buscar juegos" in buttons
+    assert "Refrescar rutas" in buttons
+    assert buttons.index("Refrescar rutas") == buttons.index("Buscar juegos") + 1
+
+    # Simulate user clicking "Refrescar rutas" cleanly without walking host filesystem
+    class _Signal:
+        def __init__(self) -> None:
+            self._cbs = []
+
+        def connect(self, cb) -> None:
+            self._cbs.append(cb)
+
+        def emit(self, *args) -> None:
+            for cb in list(self._cbs):
+                cb(*args)
+
+    class _StubDetectWorker:
+        def __init__(self, *_args, **kwargs) -> None:
+            self.done = _Signal()
+            self.failed = _Signal()
+            self.finished = _Signal()
+            self.clear_cache = kwargs.get("clear_cache", False)
+            self._running = False
+
+        def isRunning(self) -> bool:
+            return self._running
+
+        def start(self) -> None:
+            self._running = True
+            self.done.emit(detect_mod.Detection(games=[], emulators=[]))
+            self._running = False
+            self.finished.emit()
+
+        def wait(self, *_args) -> bool:
+            return True
+
+        def deleteLater(self) -> None:
+            pass
+
+    monkeypatch.setattr(mw_mod, "DetectWorker", _StubDetectWorker)
+    monkeypatch.setattr(mw_mod, "QTimer", type("NoTimer", (), {"singleShot": staticmethod(lambda *_a, **_k: None)}))
+
+    win.refresh_button.click()
+
+    assert [g.id for g in win.store.games] == ["pc-hades"]
+    assert win.store.games[0].executable == str(moved_exe)
+    assert win.store.games[0].working_dir == str(moved_dir)
+    assert win.store.settings["hidden_games"] == []
+    win.close()
+    app.processEvents()
