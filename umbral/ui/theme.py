@@ -48,6 +48,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     softer = _rgba(accent, 0.06)
     opaque_primary = _mix(style.surface_2, accent, 0.14)
     opaque_primary_hover = _mix(style.surface_2, accent, 0.24)
+    sidebar_top = _mix(style.sidebar, accent, 0.10)
     border_accent = _rgba(accent, 0.55)
     glow = _rgba(accent, 0.35)
     hover_bg = _rgba(style.text, 0.05)
@@ -138,7 +139,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QFrame#sidebar {
-        background: rgba(10, 9, 7, 0.62);
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 __SIDEBAR_TOP__, stop:0.35 __SIDEBAR__, stop:1 __SIDEBAR_2__);
         border-right: __THIN__px solid __BORDER__;
     }
     QFrame#topbar {
@@ -620,6 +621,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         "__INPUT_BG__": input_bg,
         "__SIDEBAR__": style.sidebar,
         "__SIDEBAR_2__": style.sidebar_2,
+        "__SIDEBAR_TOP__": sidebar_top,
         "__CANVAS__": style.canvas,
     }
     for token, value in replacements.items():

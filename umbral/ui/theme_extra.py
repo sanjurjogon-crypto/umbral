@@ -4,13 +4,7 @@ from PySide6.QtGui import QColor
 
 from ..paths import assets_dir
 from .style import GameStyle
-
-
-def _rgba(color: str, alpha: float) -> str:
-    value = QColor(color)
-    if not value.isValid():
-        value = QColor("#c9a45f")
-    return f"rgba({value.red()}, {value.green()}, {value.blue()}, {alpha})"
+from .theme import _mix, _rgba
 
 
 def extra_qss(style: GameStyle) -> str:
@@ -24,10 +18,16 @@ def extra_qss(style: GameStyle) -> str:
     soft = _rgba(accent, 0.16)
     softer = _rgba(accent, 0.07)
     hair = _rgba(accent, 0.5)
+    primary_top = _mix(style.surface_3, accent, 0.20)
+    primary_mid = _mix(style.surface_2, accent, 0.10)
+    primary_bot = style.surface
+    primary_hover_top = _mix(style.surface_3, accent, 0.30)
+    primary_hover_bot = _mix(style.surface_2, accent, 0.14)
+    sidebar_top = _mix(style.sidebar, accent, 0.10)
     chevron = (assets_dir() / "chevron.svg").as_posix()
     return f"""
     QPushButton#primary {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.surface_3}, stop:0.45 {softer}, stop:1 {style.bg});
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {primary_top}, stop:0.5 {primary_mid}, stop:1 {primary_bot});
         border: {thin}px solid {accent};
         border-bottom: 2px solid {hair};
         color: {accent_2};
@@ -41,18 +41,18 @@ def extra_qss(style: GameStyle) -> str:
         {transform}
     }}
     QPushButton#primary:hover {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {soft}, stop:1 {style.surface});
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {primary_hover_top}, stop:1 {primary_hover_bot});
         border-color: {accent_2};
     }}
     QPushButton#primary:pressed {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {style.bg}, stop:1 {style.surface_2});
+        background: {style.surface};
         border-bottom-color: {accent};
     }}
     QPushButton#ghost {{
-        background: rgba(14, 12, 10, 0.44);
-        border: {thin}px solid rgba(255, 255, 255, 0.14);
+        background: {style.surface_2};
+        border: {thin}px solid {style.border};
         border-bottom: 2px solid {style.border_soft};
-        color: {style.muted};
+        color: {style.text};
         padding: 9px 18px;
         font-family: "{heading}";
         font-size: 12px;
@@ -61,7 +61,7 @@ def extra_qss(style: GameStyle) -> str:
         {transform}
     }}
     QPushButton#ghost:hover {{
-        background: {softer};
+        background: {style.surface_3};
         border-color: {accent};
         color: {accent};
     }}
@@ -139,7 +139,7 @@ def extra_qss(style: GameStyle) -> str:
         background: rgba(16, 14, 11, 0.65);
     }}
     QFrame#sidebar {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(10, 9, 7, 0.72), stop:0.85 rgba(10, 9, 7, 0.56), stop:1 rgba(10, 9, 7, 0.46));
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {sidebar_top}, stop:0.35 {style.sidebar}, stop:1 {style.sidebar_2});
         border-right: 1px solid {hair};
     }}
     QLabel#toast {{
