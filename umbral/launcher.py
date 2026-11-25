@@ -26,12 +26,18 @@ class LaunchError(Exception):
         self.details = details
 
 
+def _is_macos_app_bundle(path: Path) -> bool:
+    return path.suffix.lower() == ".app" and path.is_dir()
+
+
 def validate(game: Game) -> list[str]:
     issues: list[str] = []
     if not game.executable:
         issues.append("Falta la ruta del ejecutable del emulador o del port.")
-    elif not Path(game.executable).is_file():
-        issues.append(f"No existe el ejecutable: {game.executable}")
+    else:
+        exe_path = Path(game.executable)
+        if not exe_path.is_file() and not _is_macos_app_bundle(exe_path):
+            issues.append(f"No existe el ejecutable: {game.executable}")
     if game.rom_path and not Path(game.rom_path).exists():
         issues.append(f"No existe el archivo o la carpeta del juego: {game.rom_path}")
     if game.working_dir and not Path(game.working_dir).is_dir():
@@ -40,7 +46,14 @@ def validate(game: Game) -> list[str]:
 
 
 def build_command(game: Game) -> list[str]:
-    return [game.executable, *game.resolved_arguments()]
+    args = game.resolved_arguments()
+    exe_path = Path(game.executable)
+    if _is_macos_app_bundle(exe_path):
+        cmd = ["open", "-W", "-a", str(exe_path)]
+        if args:
+            cmd.extend(["--args", *args])
+        return cmd
+    return [game.executable, *args]
 
 
 def diagnostic_text(game: Game, log_path: Path | None = None) -> str:

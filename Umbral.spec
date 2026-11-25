@@ -3,7 +3,7 @@
 
 import sys
 
-win_icon = ['umbral/assets/umbral.ico'] if sys.platform.startswith('win') else None
+win_icon = 'umbral/assets/umbral.ico' if (sys.platform.startswith('win') or sys.platform == 'darwin') else None
 
 a = Analysis(
     ['main.py'],
@@ -41,3 +41,11 @@ exe = EXE(
     entitlements_file=None,
     icon=win_icon,
 )
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='Umbral.app',
+        icon=win_icon,
+        bundle_identifier='com.sanjurjo.umbral',
+    )

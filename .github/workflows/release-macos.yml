@@ -1,0 +1,50 @@
+name: release-macos
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de release (p. ej. v8.30.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias y PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Compilar Umbral.app
+        run: |
+          python -m PyInstaller --noconfirm Umbral.spec
+          ditto -c -k --keepParent dist/Umbral.app dist/Umbral-macos-arm64.zip
+          (cd dist && shasum -a 256 Umbral-macos-arm64.zip > Umbral-macos-arm64.zip.sha256)
+      - name: Subir binario macOS al release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          for i in $(seq 1 18); do
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release upload "$TAG" dist/Umbral-macos-arm64.zip dist/Umbral-macos-arm64.zip.sha256 --repo "${{ github.repository }}" --clobber
+              exit 0
+            fi
+            sleep 5
+          done
+          gh release create "$TAG" dist/Umbral-macos-arm64.zip dist/Umbral-macos-arm64.zip.sha256 \
+            --repo "${{ github.repository }}" \
+            --title "Umbral ${TAG#v}" \
+            --notes "Release automático para macOS (Apple Silicon)."
