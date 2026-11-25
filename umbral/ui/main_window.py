@@ -395,7 +395,7 @@ class MainWindow(QMainWindow):
         self.store.settings["first_run"] = False
         self.store.save_settings()
         QTimer.singleShot(2800, self._fetch_missing_covers)
-        QTimer.singleShot(4500, self._auto_check_updates)
+        QTimer.singleShot(2800, self._auto_check_updates)
         QTimer.singleShot(2800, self._restore_known_update)
 
     def _fetch_missing_covers(self) -> None:
@@ -1347,17 +1347,6 @@ class MainWindow(QMainWindow):
     def _auto_check_updates(self) -> None:
         if self._closing or self._updating:
             return
-        last = str(self.store.settings.get("update_last_check", ""))
-        try:
-            moment = datetime.fromisoformat(last.replace("Z", "+00:00"))
-        except ValueError:
-            moment = None
-        if moment is not None:
-            if moment.tzinfo is None:
-                moment = moment.replace(tzinfo=timezone.utc)
-            elapsed = datetime.now(timezone.utc) - moment
-            if timedelta(0) <= elapsed < timedelta(hours=24):
-                return
         self._check_updates(manual=False)
 
     def _check_updates(self, manual: bool = False) -> None:
