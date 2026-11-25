@@ -174,6 +174,30 @@ def test_banner_is_static_across_state_transitions_and_translucent() -> None:
     app.processEvents()
 
 
+def test_macos_updater_asset_selection_and_app_bundle_launch(tmp_path) -> None:
+    from umbral.launcher import build_command, validate
+    from umbral.models import Game
+    from umbral.updater import MACOS_ASSET_NAME, _pick_asset, expected_asset_name
+
+    assert expected_asset_name("darwin") == MACOS_ASSET_NAME
+    picked = _pick_asset(
+        [
+            {"name": "Umbral.exe", "browser_download_url": "https://example.com/Umbral.exe"},
+            {"name": "Umbral-linux-x86_64", "browser_download_url": "https://example.com/Umbral-linux-x86_64"},
+            {"name": "Umbral-macos-arm64.zip", "browser_download_url": "https://example.com/Umbral-macos-arm64.zip"},
+        ],
+        asset_name=MACOS_ASSET_NAME,
+    )
+    assert picked is not None
+    assert picked["name"] == "Umbral-macos-arm64.zip"
+
+    app_bundle = tmp_path / "RetroArch.app"
+    app_bundle.mkdir()
+    game = Game(id="mac1", title="Celeste", system="Ports", system_key="ports", executable=str(app_bundle), arguments=["--fullscreen"])
+    assert validate(game) == []
+    assert build_command(game) == ["open", "-W", "-a", str(app_bundle), "--args", "--fullscreen"]
+
+
 def test_banner_is_larger_has_no_graphics_effect_and_button_click_hits_visually() -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -209,3 +233,27 @@ def test_banner_is_larger_has_no_graphics_effect_and_button_click_hits_visually(
     host.close()
     host.deleteLater()
     app.processEvents()
+
+
+def test_macos_updater_asset_selection_and_app_bundle_launch(tmp_path) -> None:
+    from umbral.launcher import build_command, validate
+    from umbral.models import Game
+    from umbral.updater import MACOS_ASSET_NAME, _pick_asset, expected_asset_name
+
+    assert expected_asset_name("darwin") == MACOS_ASSET_NAME
+    picked = _pick_asset(
+        [
+            {"name": "Umbral.exe", "browser_download_url": "https://example.com/Umbral.exe"},
+            {"name": "Umbral-linux-x86_64", "browser_download_url": "https://example.com/Umbral-linux-x86_64"},
+            {"name": "Umbral-macos-arm64.zip", "browser_download_url": "https://example.com/Umbral-macos-arm64.zip"},
+        ],
+        asset_name=MACOS_ASSET_NAME,
+    )
+    assert picked is not None
+    assert picked["name"] == "Umbral-macos-arm64.zip"
+
+    app_bundle = tmp_path / "RetroArch.app"
+    app_bundle.mkdir()
+    game = Game(id="mac1", title="Celeste", system="Ports", system_key="ports", executable=str(app_bundle), arguments=["--fullscreen"])
+    assert validate(game) == []
+    assert build_command(game) == ["open", "-W", "-a", str(app_bundle), "--args", "--fullscreen"]

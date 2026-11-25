@@ -26,6 +26,7 @@ API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 WINDOWS_ASSET_NAME = "Umbral.exe"
 LINUX_ASSET_NAME = "Umbral-linux-x86_64"
+MACOS_ASSET_NAME = "Umbral-macos-arm64.zip"
 ASSET_NAME = WINDOWS_ASSET_NAME
 USER_AGENT = f"Umbral/{__version__}"
 
@@ -34,6 +35,8 @@ def expected_asset_name(platform_name: Optional[str] = None) -> str:
     target = (sys.platform if platform_name is None else platform_name).lower()
     if target.startswith("win"):
         return WINDOWS_ASSET_NAME
+    if target.startswith("darwin"):
+        return MACOS_ASSET_NAME
     return LINUX_ASSET_NAME
 
 
@@ -108,6 +111,11 @@ def _pick_asset(assets: list[dict], asset_name: Optional[str] = None) -> Optiona
     if wanted.endswith(".exe"):
         for item in candidates:
             if str(item.get("name", "")).lower().endswith(".exe"):
+                return item
+    elif "macos" in wanted or wanted.endswith(".zip"):
+        for item in candidates:
+            name = str(item.get("name", "")).lower()
+            if "macos" in name and name.endswith(".zip"):
                 return item
     else:
         for item in candidates:
@@ -553,6 +561,46 @@ log_msg "Actualización completada"
 """
 
 
+def _macos_app_replacement_script(app_bundle: Path, new_zip: Path, pid: int) -> str:
+    log_path = data_dir() / "update.log"
+    tmp_dir = app_bundle.with_name(f".{app_bundle.name}.tmp")
+    backup = app_bundle.with_name(f"{app_bundle.name}.bak")
+    return f"""#!/bin/sh
+set -eu
+APP={shlex.quote(str(app_bundle))}
+NEW={shlex.quote(str(new_zip))}
+TMP={shlex.quote(str(tmp_dir))}
+BACKUP={shlex.quote(str(backup))}
+LOG={shlex.quote(str(log_path))}
+PID={int(pid)}
+log_msg() {{
+  printf '%s %s\\n' "$(date -Iseconds 2>/dev/null || date)" "$1" >> "$LOG" 2>/dev/null || true
+}}
+log_msg "Esperando al proceso $PID"
+waited=0
+while [ "$waited" -lt 300 ]; do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+  waited=$((waited + 1))
+done
+rm -rf "$TMP" "$BACKUP"
+mkdir -p "$TMP"
+ditto -x -k "$NEW" "$TMP"
+NEW_APP="$TMP/Umbral.app"
+if [ ! -d "$NEW_APP" ]; then
+  log_msg "No se encontró Umbral.app dentro del zip"
+  exit 1
+fi
+mv "$APP" "$BACKUP"
+mv "$NEW_APP" "$APP"
+rm -rf "$TMP" "$BACKUP" "$NEW" 2>/dev/null || true
+log_msg "Nueva app macOS instalada"
+open -n "$APP" --args --relaunch >/dev/null 2>&1 || true
+"""
+
+
 def apply_update(new_exe: Path) -> None:
     if not getattr(sys, "frozen", False):
         raise UpdateError("La actualización automática solo funciona desde el ejecutable de Umbral.")
@@ -566,7 +614,7 @@ def apply_update(new_exe: Path) -> None:
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as exc:
-        folder_hint = "Descargas" if os.name == "nt" else "~/.local/bin o Descargas"
+        folder_hint = "Descargas" if os.name == "nt" else ("Aplicaciones" if sys.platform == "darwin" else "~/.local/bin o Descargas")
         raise UpdateError(
             f"No puedo escribir en la carpeta de Umbral. Mueve {target.name} a una carpeta "
             f"con permisos, como {folder_hint}, y vuelve a intentarlo."
@@ -574,7 +622,11 @@ def apply_update(new_exe: Path) -> None:
 
     if os.name != "nt":
         shell = shutil.which("sh") or "/bin/sh"
-        script = _posix_replacement_script(target, new_exe, os.getpid())
+        app_bundle = next((p for p in target.parents if p.suffix.lower() == ".app"), None)
+        if sys.platform == "darwin" and app_bundle is not None and new_exe.suffix.lower() == ".zip":
+            script = _macos_app_replacement_script(app_bundle, new_exe, os.getpid())
+        else:
+            script = _posix_replacement_script(target, new_exe, os.getpid())
         try:
             subprocess.Popen(
                 [shell, "-c", script],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path, PureWindowsPath
 
 APP_NAME = "Umbral"
@@ -25,6 +26,8 @@ def cache_root() -> Path:
         return Path(local)
     if os.name == "nt":
         return Path.home() / "AppData" / "Local"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches"
     xdg_cache = os.environ.get("XDG_CACHE_HOME", "").strip()
     return Path(xdg_cache) if xdg_cache else (Path.home() / ".cache")
 
@@ -35,6 +38,8 @@ def data_dir() -> Path:
         base = Path(appdata)
     elif os.name == "nt":
         base = Path.home() / "AppData" / "Roaming"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
     else:
         xdg_data = os.environ.get("XDG_DATA_HOME", "").strip()
         base = Path(xdg_data) if xdg_data else (Path.home() / ".local" / "share")
@@ -66,6 +71,8 @@ def settings_file() -> Path:
 def executable_file_filter() -> str:
     if os.name == "nt":
         return "Ejecutables (*.exe);;Todos los archivos (*)"
+    if sys.platform == "darwin":
+        return "Aplicaciones y ejecutables (*.app *.sh *.command);;Todos los archivos (*)"
     return "Todos los archivos (*);;AppImage y scripts (*.AppImage *.sh *.x86_64 *.exe)"
 
 

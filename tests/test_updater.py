@@ -53,6 +53,16 @@ def test_info_from_payload_extracts_exe_and_sha() -> None:
                 "name": "Umbral-linux-x86_64.sha256",
                 "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral-linux-x86_64.sha256",
             },
+            {
+                "name": "Umbral-macos-arm64.zip",
+                "size": 5120,
+                "digest": "sha256:" + "c" * 64,
+                "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral-macos-arm64.zip",
+            },
+            {
+                "name": "Umbral-macos-arm64.zip.sha256",
+                "browser_download_url": "https://github.com/sanjurjogon-crypto/umbral/releases/download/v8.22.0/Umbral-macos-arm64.zip.sha256",
+            },
         ],
     }
     win_info = _info_from_payload(payload, asset_name="Umbral.exe")
