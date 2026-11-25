@@ -434,14 +434,22 @@ class LibraryPage(QWidget):
     def _sync_info_title_height(self, inner_w: int) -> None:
         if not hasattr(self, "info_title"):
             return
+        from PySide6.QtCore import QRect
+
         icon_w = 36 if self.info_emu_icon.isVisible() else 0
-        avail_w = max(240, inner_w - 96 - icon_w)
+        avail_w = max(240, inner_w - 64 - icon_w)
         self.info_title.setMinimumHeight(0)
         self.info_title.setMaximumHeight(16777215)
         self.info_title.setMaximumWidth(avail_w)
-        needed_h = self.info_title.heightForWidth(avail_w)
+        h_qlabel = self.info_title.heightForWidth(avail_w)
+        h_fm = self.info_title.fontMetrics().boundingRect(
+            QRect(0, 0, avail_w, 1000),
+            Qt.AlignHCenter | Qt.TextWordWrap,
+            self.info_title.text(),
+        ).height()
+        needed_h = max(h_qlabel, h_fm)
         if needed_h > 0:
-            self.info_title.setFixedHeight(needed_h + 4)
+            self.info_title.setFixedHeight(needed_h + 14)
         self.info_title.updateGeometry()
 
     def _layout_overlays(self) -> None:

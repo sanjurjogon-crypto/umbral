@@ -118,18 +118,22 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame(root)
         sidebar.setObjectName("sidebar")
+        sidebar.setFocusPolicy(Qt.NoFocus)
         self.sidebar = sidebar
         sidebar_shell = QVBoxLayout(sidebar)
         sidebar_shell.setContentsMargins(0, 0, 0, 0)
         sidebar_shell.setSpacing(0)
         sidebar_scroll = QScrollArea()
         sidebar_scroll.setObjectName("sidebarScroll")
+        sidebar_scroll.setFocusPolicy(Qt.NoFocus)
         sidebar_scroll.setWidgetResizable(True)
         sidebar_scroll.setFrameShape(QFrame.NoFrame)
         sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         sidebar_scroll.viewport().setAutoFillBackground(False)
+        sidebar_scroll.viewport().setFocusPolicy(Qt.NoFocus)
         side_content = QWidget()
         side_content.setObjectName("sidebarContent")
+        side_content.setFocusPolicy(Qt.NoFocus)
         side_content.setAutoFillBackground(False)
         self._side_content = side_content
         side = QVBoxLayout(side_content)
@@ -311,6 +315,7 @@ class MainWindow(QMainWindow):
         self.update_banner.install_clicked.connect(self._install_update)
         self.update_banner.postpone_clicked.connect(self._postpone_update)
         self._startup_overlay: Optional[StartupOverlay] = None
+        self._manual_covers_scan = False
         if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
             self._startup_overlay = StartupOverlay(self)
             self._startup_overlay.start()
@@ -383,19 +388,15 @@ class MainWindow(QMainWindow):
             Emulator.from_dict(item) for item in stored if isinstance(item, dict)
         ]
         self._refresh_all()
-        if self.store.games:
-            self.toast.show_message(f"Biblioteca lista: {len(self.store.games)} juegos.")
-        else:
-            self.toast.show_message("No hay juegos todavía. Usa Añadir juego o revisa Ajustes.")
         notice = getattr(self.store, "recovery_notice", "")
         if notice:
-            QTimer.singleShot(1200, lambda text=notice: self.toast.show_message(text, 7000))
+            QTimer.singleShot(2800, lambda text=notice: self.toast.show_message(text, 7000))
         self._detect_and_merge()
         self.store.settings["first_run"] = False
         self.store.save_settings()
-        QTimer.singleShot(1200, self._fetch_missing_covers)
+        QTimer.singleShot(2800, self._fetch_missing_covers)
         QTimer.singleShot(4500, self._auto_check_updates)
-        QTimer.singleShot(2600, self._restore_known_update)
+        QTimer.singleShot(2800, self._restore_known_update)
 
     def _fetch_missing_covers(self) -> None:
         if self._closing:
@@ -405,6 +406,7 @@ class MainWindow(QMainWindow):
         pending = [game for game in self.store.games if cover_needs_refresh(game)]
         if not pending:
             return
+        self._manual_covers_scan = False
         self.cover_worker = CoverWorker(pending, missing_only=True)
         self.cover_worker.finished_with.connect(self._on_covers_done)
         self.cover_worker.finished.connect(self._clear_cover_worker)
@@ -417,6 +419,7 @@ class MainWindow(QMainWindow):
         if not self.store.games:
             self.toast.show_message("No hay juegos en la biblioteca.")
             return
+        self._manual_covers_scan = True
         self.cover_worker = CoverWorker(list(self.store.games), missing_only=False)
         self.cover_worker.finished_with.connect(self._on_covers_done)
         self.cover_worker.finished.connect(self._clear_cover_worker)
@@ -424,11 +427,14 @@ class MainWindow(QMainWindow):
         self.toast.show_message("Buscando carátulas para todos los juegos…")
 
     def _on_covers_done(self, found: int, errors: int) -> None:
+        manual = self._manual_covers_scan
+        self._manual_covers_scan = False
         if found:
             self._attach_covers()
             self.store.save_library()
             self._refresh_all()
-            self.toast.show_message(f"Carátulas añadidas: {found}.")
+            if manual:
+                self.toast.show_message(f"Carátulas añadidas: {found}.")
 
     def _attach_covers(self) -> None:
         for game in self.store.games:

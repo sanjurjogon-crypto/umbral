@@ -834,10 +834,10 @@ class ShelfCanvas(QWidget):
         carousel_bottom = max(carousel_top + 220.0, float(self.height()) - bottom_pad)
         carousel_h = carousel_bottom - carousel_top
         center_x = self._inset_left + usable_w / 2.0
-        scale = min(usable_w / 1240.0, (carousel_h - 14.0) / CASE_H, 1.18)
+        scale = min(usable_w / 1240.0, (carousel_h - 18.0) / CASE_H, 1.18)
         cover_w = CASE_W * max(0.64, scale)
         cover_h = CASE_H * max(0.64, scale)
-        center_y = min(carousel_top + carousel_h * 0.58, carousel_bottom - cover_h * 0.50 - 10.0)
+        center_y = min(carousel_top + carousel_h * 0.53, carousel_bottom - cover_h * 0.50 - 14.0)
         gap = cover_w * 0.86
         return center_x, center_y, cover_w, cover_h, gap
 
