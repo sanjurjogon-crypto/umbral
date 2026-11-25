@@ -789,3 +789,49 @@ def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path
     dlg.deleteLater()
     canvas.deleteLater()
     app.processEvents()
+
+
+def test_custom_template_cases_and_spines_load_square() -> None:
+    from PySide6.QtGui import QPainter, QPixmap
+    from umbral.ui.cases import (
+        CASE_PROFILES,
+        case_profile,
+        load_case_overlay,
+        load_spine_texture,
+        paint_console_case,
+        paint_console_spine,
+    )
+
+    _app()
+    expected = ("steam", "epic", "switch2", "dusklight", "hookshot", "longshot")
+    for key in expected:
+        assert key in CASE_PROFILES
+        overlay = load_case_overlay(key)
+        assert overlay is not None, f"Missing overlay for {key}"
+        pix, win = overlay
+        assert not pix.isNull()
+        # Interior transparent cutout must not span the entire vertical height
+        assert 0.0 <= win.x() < 0.25
+        assert 0.05 < win.y() < 0.35
+        assert 0.50 < win.width() <= 1.0
+        assert 0.50 < win.height() < 0.90
+        spine = load_spine_texture(key)
+        assert spine is not None and not spine.isNull(), f"Missing spine for {key}"
+
+    assert case_profile(Game(id="p1", title="Zelda", system="Ports", system_key="ports", emulator="Dusklight")).key == "dusklight"
+    assert case_profile(Game(id="p2", title="Zelda", system="Ports", system_key="ports", emulator="Hookshot")).key == "hookshot"
+    assert case_profile(Game(id="p3", title="Zelda", system="Ports", system_key="ports", emulator="Longshot")).key == "longshot"
+    assert case_profile(Game(id="s1", title="Hades", system="Steam", system_key="steam", source="steam")).key == "steam"
+    assert case_profile(Game(id="e1", title="Rocket League", system="Epic", system_key="epic", source="epic")).key == "epic"
+    assert case_profile(Game(id="n1", title="Mario", system="Switch 2", system_key="switch2")).key == "switch2"
+
+    # Render test front + 3D spine without error
+    canvas_pix = QPixmap(300, 360)
+    painter = QPainter(canvas_pix)
+    prof = CASE_PROFILES["hookshot"]
+    from PySide6.QtCore import QRectF
+    frame = QRectF(40, 20, 220, 300)
+    art_rect = paint_console_case(painter, frame, prof, QPixmap(200, 300), lambda _p, _r: None)
+    assert art_rect.width() > 50 and art_rect.height() > 50
+    paint_console_spine(painter, frame, prof, 0.5)
+    painter.end()

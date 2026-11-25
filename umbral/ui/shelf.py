@@ -1283,9 +1283,10 @@ class ShelfCanvas(QWidget):
         profile = item.profile
         radius = profile.radius
 
-        outer = QPainterPath()
-        outer.addRoundedRect(frame, radius, radius)
-        buf.setClipPath(outer)
+        if profile.shell_kind != "template":
+            outer = QPainterPath()
+            outer.addRoundedRect(frame, radius, radius)
+            buf.setClipPath(outer)
 
         if profile.shell_kind == "pc_keepcase":
             band_h = height * 0.115
