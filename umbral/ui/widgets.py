@@ -1350,3 +1350,139 @@ class StylePreview(QFrame):
             painter.drawEllipse(QPointF(rect.right() - 14, rect.top() + 14), 4, 4)
         painter.end()
 
+
+class StartupOverlay(QWidget):
+    """Animated intro: half-diamond brackets swallow 'UMBRAL' and reveal the glowing inner diamond."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._elapsed_ms = 0
+        self._total_ms = 2550
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._tick)
+
+    def start(self) -> None:
+        self._elapsed_ms = 0
+        self.show()
+        self.raise_()
+        self._timer.start()
+
+    def _tick(self) -> None:
+        self._elapsed_ms += 16
+        if self._elapsed_ms >= self._total_ms:
+            self._timer.stop()
+            self.hide()
+            self.deleteLater()
+            return
+        self.update()
+
+    @staticmethod
+    def _ease_in_out_cubic(t: float) -> float:
+        t = max(0.0, min(1.0, t))
+        return 4 * t * t * t if t < 0.5 else 1 - ((-2 * t + 2) ** 3) / 2
+
+    def paintEvent(self, event) -> None:
+        t = float(self._elapsed_ms)
+        fade_out = 1.0
+        if t > 2150.0:
+            fade_out = max(0.0, 1.0 - self._ease_in_out_cubic((t - 2150.0) / 400.0))
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.setOpacity(fade_out)
+
+        style = active_style()
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w * 0.5, h * 0.48
+        accent = QColor(style.accent)
+        accent_2 = QColor(style.accent_2)
+
+        # Black-to-gold gradient background matching Umbral's dark gold theme
+        bg_grad = QLinearGradient(0.0, 0.0, w, h)
+        bg_grad.setColorAt(0.0, QColor("#070604"))
+        bg_grad.setColorAt(0.55, QColor(style.bg))
+        bg_grad.setColorAt(1.0, QColor(accent.red() // 6, accent.green() // 6, accent.blue() // 8))
+        painter.fillRect(self.rect(), QBrush(bg_grad))
+
+        amb = QRadialGradient(cx, cy, max(w, h) * 0.42)
+        amb.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 44))
+        amb.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 14))
+        amb.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(self.rect(), QBrush(amb))
+
+        # Typography measurement for "UMBRAL"
+        title_font = QFont(style.heading_font or "Cinzel")
+        title_font.setPixelSize(44)
+        title_font.setWeight(QFont.DemiBold)
+        title_font.setLetterSpacing(QFont.AbsoluteSpacing, 9.0)
+        fm = QFontMetrics(title_font)
+        text = "UMBRAL"
+        text_w = float(fm.horizontalAdvance(text))
+
+        # Outer diamond geometry (scaled up from umbral.svg: 30x46 -> ~64x98)
+        half_w = 34.0
+        half_h = 52.0
+        spread = text_w * 0.5 + 34.0
+
+        # Phase 1: 0..1000ms hold; Phase 2: 1000..1650ms close brackets
+        close_p = 0.0 if t <= 1000.0 else self._ease_in_out_cubic((t - 1000.0) / 650.0)
+        offset = spread * (1.0 - close_p)
+
+        # Draw "UMBRAL" clipped strictly between the two closing half-diamond inner edges
+        clip_half = max(0.0, offset)
+        if clip_half > 1.0:
+            painter.save()
+            clip_rect = QRectF(cx - clip_half, cy - 48.0, clip_half * 2.0, 96.0)
+            painter.setClipRect(clip_rect)
+            painter.setFont(title_font)
+            painter.setPen(accent_2)
+            painter.drawText(QRectF(cx - text_w, cy - 40.0, text_w * 2.0, 80.0), Qt.AlignCenter, text)
+            painter.restore()
+
+        # Draw left (<) and right (>) half-diamond brackets
+        pen = QPen(accent, 4.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        left_path = QPainterPath()
+        left_path.moveTo(cx - offset, cy - half_h)
+        left_path.lineTo(cx - offset - half_w, cy)
+        left_path.lineTo(cx - offset, cy + half_h)
+        painter.drawPath(left_path)
+
+        right_path = QPainterPath()
+        right_path.moveTo(cx + offset, cy - half_h)
+        right_path.lineTo(cx + offset + half_w, cy)
+        right_path.lineTo(cx + offset, cy + half_h)
+        painter.drawPath(right_path)
+
+        # Phase 3: 1600..2150ms inner golden diamond appears & glows
+        if t > 1600.0:
+            glow_p = self._ease_in_out_cubic((t - 1600.0) / 480.0)
+            bloom_r = 26.0 + 52.0 * glow_p
+            bloom = QRadialGradient(cx, cy, bloom_r)
+            bloom_alpha = int(170 * glow_p * (1.15 - 0.35 * glow_p))
+            bloom.setColorAt(0.0, QColor(accent_2.red(), accent_2.green(), accent_2.blue(), min(255, bloom_alpha)))
+            bloom.setColorAt(0.45, QColor(accent.red(), accent.green(), accent.blue(), int(bloom_alpha * 0.55)))
+            bloom.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(bloom))
+            painter.drawEllipse(QPointF(cx, cy), bloom_r, bloom_r)
+
+            # Inner solid diamond (scaled from umbral.svg: 12x22 -> ~14x25)
+            in_w = 13.5 * (0.65 + 0.35 * glow_p)
+            in_h = 24.5 * (0.65 + 0.35 * glow_p)
+            inner_diamond = QPainterPath()
+            inner_diamond.moveTo(cx, cy - in_h)
+            inner_diamond.lineTo(cx + in_w, cy)
+            inner_diamond.lineTo(cx, cy + in_h)
+            inner_diamond.lineTo(cx - in_w, cy)
+            inner_diamond.closeSubpath()
+            fill = QColor(accent)
+            fill.setAlpha(int(255 * glow_p))
+            painter.setBrush(fill)
+            painter.drawPath(inner_diamond)
+
