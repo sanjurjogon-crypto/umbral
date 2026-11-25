@@ -392,6 +392,30 @@ def test_startup_overlay_renders_all_phases() -> None:
     app.processEvents()
 
 
+def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import SettingsPage
+    from umbral.ui.style import STYLES, set_active, style_for
+    from umbral.ui.widgets import StylePreview
+
+    app = _app()
+    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest"]
+    assert style_for("neon").key == "neon"
+    set_active("umbral")
+
+    store = _store(monkeypatch, tmp_path, [])
+    page = SettingsPage(store)
+    page.refresh()
+    page.set_section("appearance")
+    cards = page.findChildren(StylePreview)
+    assert len(cards) == 4
+    picked: list[str] = []
+    page.style_changed.connect(picked.append)
+    cards[1].clicked.emit("obsidian")
+    assert picked == ["obsidian"]
+    page.deleteLater()
+    app.processEvents()
+
+
 def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, tmp_path: Path) -> None:
     from umbral.ui.pages import SettingsPage
     from umbral.ui.widgets import EmptyState
@@ -533,4 +557,28 @@ def test_startup_overlay_renders_all_phases() -> None:
     assert not overlay.isVisible()
     host.close()
     host.deleteLater()
+    app.processEvents()
+
+
+def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import SettingsPage
+    from umbral.ui.style import STYLES, set_active, style_for
+    from umbral.ui.widgets import StylePreview
+
+    app = _app()
+    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest"]
+    assert style_for("neon").key == "neon"
+    set_active("umbral")
+
+    store = _store(monkeypatch, tmp_path, [])
+    page = SettingsPage(store)
+    page.refresh()
+    page.set_section("appearance")
+    cards = page.findChildren(StylePreview)
+    assert len(cards) == 4
+    picked: list[str] = []
+    page.style_changed.connect(picked.append)
+    cards[1].clicked.emit("obsidian")
+    assert picked == ["obsidian"]
+    page.deleteLater()
     app.processEvents()

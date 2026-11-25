@@ -377,7 +377,8 @@ class MainWindow(QMainWindow):
             from .theme_extra import extra_qss
 
             style = active()
-            sheet = qss(style.accent, style.key) + extra_qss(style)
+            accent = str(self.store.settings.get("accent") or "").strip() or style.accent
+            sheet = qss(accent, style.key) + extra_qss(style)
             app.setStyleSheet(sheet)
 
     def _bootstrap(self) -> None:
@@ -730,6 +731,24 @@ class MainWindow(QMainWindow):
 
         if self.stack.currentIndex() != index:
             self.stack.setCurrentIndex(index)
+            target_page = self.stack.currentWidget()
+            if (
+                target_page is not None
+                and os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen"
+            ):
+                from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+                effect = QGraphicsOpacityEffect(target_page)
+                effect.setOpacity(0.0)
+                target_page.setGraphicsEffect(effect)
+                anim = QPropertyAnimation(effect, b"opacity", target_page)
+                anim.setDuration(175)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.OutCubic)
+                anim.finished.connect(lambda w=target_page: w.setGraphicsEffect(None))
+                self._page_anim = anim
+                anim.start()
         if key in ("library", "favorites"):
             self.library.focus_canvas()
         for name, button in self.nav_buttons.items():

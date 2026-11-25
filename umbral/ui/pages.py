@@ -1210,7 +1210,56 @@ class SettingsPage(QWidget):
         return container
 
     def _build_appearance_tab(self) -> QWidget:
+        from PySide6.QtWidgets import QColorDialog
+
+        from .style import STYLES
+        from .theme import ACCENTS
+        from .widgets import StylePreview
+
         container, layout = self._make_tab_container()
+        layout.addWidget(SectionHeader("Estilo visual"))
+        current_style = active_style().key
+        styles_grid = QGridLayout()
+        styles_grid.setSpacing(12)
+        for index, style in enumerate(STYLES):
+            card = StylePreview(style, selected=(style.key == current_style))
+            card.clicked.connect(self.style_changed.emit)
+            styles_grid.addWidget(card, index // 2, index % 2)
+        layout.addLayout(styles_grid)
+
+        layout.addWidget(SectionHeader("Color de acento"))
+        accent_row = QHBoxLayout()
+        accent_row.setSpacing(10)
+        current_accent = str(self.store.settings.get("accent") or active_style().accent).lower()
+        for label, color in ACCENTS:
+            swatch = QPushButton("")
+            swatch.setToolTip(label)
+            swatch.setFixedSize(28, 28)
+            swatch.setCursor(Qt.PointingHandCursor)
+            selected = color.lower() == current_accent
+            ring = f"2px solid {active_style().accent_2}" if selected else "1px solid rgba(255, 255, 255, 0.25)"
+            swatch.setStyleSheet(
+                f"QPushButton {{ background: {color}; border: {ring}; border-radius: 14px; }}"
+                "QPushButton:hover { border: 2px solid #ffffff; }"
+            )
+            swatch.clicked.connect(lambda _checked=False, c=color: self.accent_changed.emit(c))
+            accent_row.addWidget(swatch)
+
+        def _pick_custom_accent() -> None:
+            from PySide6.QtGui import QColor
+
+            chosen = QColorDialog.getColor(QColor(current_accent), self, "Elegir color de acento")
+            if chosen.isValid():
+                self.accent_changed.emit(chosen.name())
+
+        custom_btn = QPushButton("Personalizar…")
+        custom_btn.setObjectName("ghost")
+        custom_btn.setCursor(Qt.PointingHandCursor)
+        custom_btn.clicked.connect(_pick_custom_accent)
+        accent_row.addWidget(custom_btn)
+        accent_row.addStretch(1)
+        layout.addLayout(accent_row)
+
         layout.addWidget(SectionHeader("Carátulas"))
         covers_text = QLabel(
             "Umbral descarga la carátula oficial de cada juego desde IGDB, Steam o itch.io. "
