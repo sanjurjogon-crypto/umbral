@@ -297,7 +297,7 @@ def test_download_bytes_retries_transient_error_and_reports_progress(monkeypatch
             self._offset += len(chunk)
             return chunk
 
-    def fake_urlopen(request, timeout=18.0):
+    def fake_urlopen(request, timeout=18.0, **_kwargs):
         nonlocal calls
         calls += 1
         if calls == 1:

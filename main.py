@@ -12,6 +12,15 @@ from PySide6.QtWidgets import QApplication
 from umbral.paths import assets_dir
 from umbral.ui.main_window import MainWindow
 
+
+def _configure_tls() -> None:
+    try:
+        import certifi
+
+        os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    except Exception:
+        pass
+
 INSTANCE_KEY = os.environ.get("UMBRAL_INSTANCE_KEY") or "Umbral-single-instance"
 
 
@@ -70,6 +79,7 @@ def _load_fonts() -> None:
 
 
 def main() -> int:
+    _configure_tls()
     app = QApplication(sys.argv)
     app.setApplicationName("Umbral")
     app.setApplicationDisplayName("Umbral")

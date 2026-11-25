@@ -947,16 +947,20 @@ def _title_match(left: str, right: str) -> bool:
 
 
 def _request_json(url: str) -> dict:
+    from .net import ssl_context
+
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urlopen(request, timeout=5) as response:
+    with urlopen(request, timeout=5, context=ssl_context()) as response:
         payload = response.read(512_000)
     data = json.loads(payload.decode("utf-8", errors="replace"))
     return data if isinstance(data, dict) else {}
 
 
 def _request_text(url: str, limit: int = 400_000) -> str:
+    from .net import ssl_context
+
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
-    with urlopen(request, timeout=5) as response:
+    with urlopen(request, timeout=5, context=ssl_context()) as response:
         return response.read(limit).decode("utf-8", errors="replace")
 
 

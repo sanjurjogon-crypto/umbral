@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from . import __version__
+from .net import ssl_context
 from .paths import cache_root, data_dir
 
 REPO = "sanjurjogon-crypto/umbral"
@@ -90,7 +91,7 @@ def _request_json(url: str, timeout: float = 8.0) -> dict:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urlopen(request, timeout=timeout) as response:
+    with urlopen(request, timeout=timeout, context=ssl_context()) as response:
         payload = response.read(1_500_000)
     return json.loads(payload.decode("utf-8"))
 
@@ -206,7 +207,7 @@ def update_dir() -> Path:
 def _read_sha_file(url: str) -> str:
     try:
         request = Request(url, headers={"User-Agent": USER_AGENT})
-        with urlopen(request, timeout=8.0) as response:
+        with urlopen(request, timeout=8.0, context=ssl_context()) as response:
             text = response.read(4096).decode("utf-8", "ignore")
     except (HTTPError, URLError, OSError, TimeoutError, ValueError):
         return ""
@@ -235,7 +236,7 @@ def _download_once(
     request = Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
     done = 0
-    with urlopen(request, timeout=18.0) as response:
+    with urlopen(request, timeout=18.0, context=ssl_context()) as response:
         total = int(response.headers.get("Content-Length") or expected_size or 0)
         if progress is not None:
             progress(0, total)
