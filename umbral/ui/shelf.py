@@ -1121,25 +1121,33 @@ class ShelfCanvas(QWidget):
 
         floor_rect = QRectF(0, floor_y, rect.width(), max(0.0, rect.bottom() - floor_y))
         marble = QLinearGradient(0, floor_y, 0, rect.bottom())
-        tint_alpha = 26 if self._halo_enabled else 10
+        tint_alpha = 34 if self._halo_enabled else 16
         marble.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), tint_alpha))
-        marble.setColorAt(0.28, QColor(11, 10, 9, 175))
-        marble.setColorAt(1.0, QColor(4, 4, 3, 240))
+        marble.setColorAt(0.08, QColor(215, 224, 238, 28))
+        marble.setColorAt(0.32, QColor(18, 20, 26, 178))
+        marble.setColorAt(1.0, QColor(6, 7, 9, 238))
         painter.fillRect(floor_rect, QBrush(marble))
+
+        # Subtle frosted glass band right under the horizon
+        frost_h = min(28.0, max(10.0, floor_rect.height() * 0.18))
+        frost = QLinearGradient(0, floor_y, 0, floor_y + frost_h)
+        frost.setColorAt(0.0, QColor(235, 242, 252, 30))
+        frost.setColorAt(1.0, QColor(235, 242, 252, 0))
+        painter.fillRect(QRectF(0, floor_y, rect.width(), frost_h), QBrush(frost))
 
         sheen = QLinearGradient(0, floor_y, rect.width(), floor_y)
         sheen.setColorAt(0.0, QColor(0, 0, 0, 0))
         sheen.setColorAt(
             0.30,
-            QColor(dominant.red(), dominant.green(), dominant.blue(), 42 if self._halo_enabled else 18),
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 46 if self._halo_enabled else 22),
         )
-        sheen.setColorAt(0.55, QColor(255, 250, 238, 72))
+        sheen.setColorAt(0.55, QColor(255, 250, 238, 92))
         sheen.setColorAt(
             0.78,
-            QColor(dominant.red(), dominant.green(), dominant.blue(), 42 if self._halo_enabled else 18),
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 46 if self._halo_enabled else 22),
         )
         sheen.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setPen(QPen(QBrush(sheen), 1.2))
+        painter.setPen(QPen(QBrush(sheen), 1.4))
         painter.drawLine(QPointF(0, floor_y), QPointF(rect.width(), floor_y))
 
     def _front_pixmap_for(
