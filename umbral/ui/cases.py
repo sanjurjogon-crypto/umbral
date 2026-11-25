@@ -21,6 +21,7 @@ from PySide6.QtGui import (
 
 from ..consoles import SYSTEM_LABELS
 from ..models import Game
+from ..paths import assets_dir
 from ..profiles import PROFILES
 from ..rom_rules import path_hint, rom_system
 from .style import active as active_style
@@ -1137,6 +1138,17 @@ def _paint_switch(painter: QPainter, frame: QRectF, inner: QRectF, _profile: Cas
     painter.restore()
 
 
+_3DS_STRIP_PIXMAP: Optional[QPixmap] = None
+
+
+def _3ds_strip_pixmap() -> QPixmap:
+    global _3DS_STRIP_PIXMAP
+    if _3DS_STRIP_PIXMAP is None:
+        path = assets_dir() / "3ds_strip_logo.png"
+        _3DS_STRIP_PIXMAP = QPixmap(str(path)) if path.is_file() else QPixmap()
+    return _3DS_STRIP_PIXMAP
+
+
 def _paint_3ds(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseProfile) -> None:
     strip_w = inner.width() * 0.145
     strip = QRectF(inner.right() - strip_w, inner.top(), strip_w, inner.height())
@@ -1146,10 +1158,35 @@ def _paint_3ds(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CasePr
     grad.setColorAt(1.0, QColor("#f4f6f9"))
     painter.fillRect(strip, grad)
 
-    # Clean vertical divider rule (authentic white PAL 3DS side bar, no invented red circle)
+    # Clean vertical divider rule (authentic white PAL 3DS side bar)
     painter.fillRect(QRectF(strip.left(), strip.top(), 1.1, strip.height()), QColor("#d1d5db"))
 
-    # Vertical rotated "NINTENDO 3DS" text along the white right strip
+    logo = _3ds_strip_pixmap()
+    if not logo.isNull():
+        pad_x = max(1.5, strip_w * 0.14)
+        pad_y = max(4.0, strip.height() * 0.08)
+        avail_w = max(4.0, strip.width() - 2.0 * pad_x)
+        avail_h = max(8.0, strip.height() - 2.0 * pad_y)
+        aspect = logo.width() / max(1, logo.height())
+        if avail_w / avail_h > aspect:
+            draw_h = avail_h
+            draw_w = draw_h * aspect
+        else:
+            draw_w = avail_w
+            draw_h = draw_w / aspect
+        target = QRectF(
+            strip.center().x() - draw_w / 2.0,
+            strip.center().y() - draw_h / 2.0,
+            draw_w,
+            draw_h,
+        )
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap(target, logo, QRectF(logo.rect()))
+        painter.restore()
+        return
+
+    # Fallback vertical rotated "NINTENDO 3DS" text if asset is missing
     painter.save()
     cx = strip.center().x()
     cy = strip.center().y()
