@@ -752,7 +752,8 @@ def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path
     cx2, cy2, cw2, ch2, _ = canvas._layout()
     pix_sidebar = canvas._backdrop_for(canvas._current_item(), cx2, cy2, cw2, ch2)
     img2 = pix_sidebar.toImage()
-    assert img2.pixelColor(100, 100).blue() < 20
+    # Left strip mirrors image pixels so collapsing sidebar never exposes black gaps
+    assert img2.pixelColor(100, 100).blue() > 80
     assert img2.pixelColor(520, 100).blue() > 180
 
     # Per-game backdrop settings (dim, blur, align) + bottom-right menu
