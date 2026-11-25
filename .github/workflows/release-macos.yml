@@ -1,9 +1,7 @@
 name: release-macos
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Tag trigger disabled temporarily until requested
   workflow_dispatch:
     inputs:
       tag:

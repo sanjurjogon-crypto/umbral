@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,7 +17,9 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
+    QPolygonF,
     QRadialGradient,
+    QTransform,
 )
 
 from ..consoles import SYSTEM_LABELS
@@ -62,18 +65,18 @@ class CaseProfile:
 CASE_PROFILES: dict[str, CaseProfile] = {
     "switch2": CaseProfile(
         key="switch2",
-        w_scale=0.88,
-        h_scale=1.00,
+        w_scale=1.08,
+        h_scale=0.95,
         radius=5.5,
         spine_color="#e60012",
         header_bg="#e60012",
         header_accent="#ff5a5f",
         header_text="#ffffff",
         band_label="SWITCH 2",
-        depth_scale=0.76,
-        shell_kind="translucent_tint",
+        depth_scale=1.05,
+        shell_kind="template",
         shell_color="#e60012",
-        shell_alpha=230,
+        shell_alpha=245,
         bezel=(0.032, 0.026, 0.032, 0.026),
     ),
     "switch": CaseProfile(
@@ -524,35 +527,83 @@ CASE_PROFILES: dict[str, CaseProfile] = {
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
+    "dusklight": CaseProfile(
+        key="dusklight",
+        w_scale=1.08,
+        h_scale=0.95,
+        radius=5.5,
+        spine_color="#1a1714",
+        header_bg="#14110f",
+        header_accent="#d97706",
+        header_text="#fef3c7",
+        band_label="DUSKLIGHT",
+        depth_scale=1.05,
+        shell_kind="template",
+        shell_color="#14110f",
+        shell_alpha=255,
+        bezel=(0.0, 0.0, 0.0, 0.0),
+    ),
+    "hookshot": CaseProfile(
+        key="hookshot",
+        w_scale=0.955,
+        h_scale=1.00,
+        radius=5.5,
+        spine_color="#0e2240",
+        header_bg="#0b1a33",
+        header_accent="#60a5fa",
+        header_text="#f8fafc",
+        band_label="HOOKSHOT",
+        depth_scale=0.98,
+        shell_kind="template",
+        shell_color="#0b1a33",
+        shell_alpha=255,
+        bezel=(0.0, 0.0, 0.0, 0.0),
+    ),
+    "longshot": CaseProfile(
+        key="longshot",
+        w_scale=0.955,
+        h_scale=1.00,
+        radius=5.5,
+        spine_color="#2a1640",
+        header_bg="#1d0f2e",
+        header_accent="#c084fc",
+        header_text="#faf5ff",
+        band_label="LONGSHOT",
+        depth_scale=0.98,
+        shell_kind="template",
+        shell_color="#1d0f2e",
+        shell_alpha=255,
+        bezel=(0.0, 0.0, 0.0, 0.0),
+    ),
     "steam": CaseProfile(
         key="steam",
-        w_scale=0.90,
-        h_scale=1.00,
-        radius=4.5,
-        spine_color="#181b20",
-        header_bg="#14171c",
+        w_scale=1.00,
+        h_scale=0.945,
+        radius=5.5,
+        spine_color="#0c1522",
+        header_bg="#0a121d",
         header_accent="#66c0f4",
         header_text="#e5e9f0",
         band_label="STEAM",
-        depth_scale=0.95,
-        shell_kind="pc_keepcase",
-        shell_color="#14171c",
+        depth_scale=1.00,
+        shell_kind="template",
+        shell_color="#0a121d",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
     "epic": CaseProfile(
         key="epic",
-        w_scale=0.90,
-        h_scale=1.00,
-        radius=4.5,
-        spine_color="#181b20",
-        header_bg="#14171c",
-        header_accent="#d4d8df",
-        header_text="#e5e9f0",
+        w_scale=0.96,
+        h_scale=0.96,
+        radius=5.5,
+        spine_color="#161124",
+        header_bg="#120e1e",
+        header_accent="#a855f7",
+        header_text="#f3e8ff",
         band_label="EPIC GAMES",
-        depth_scale=0.95,
-        shell_kind="pc_keepcase",
-        shell_color="#14171c",
+        depth_scale=0.92,
+        shell_kind="template",
+        shell_color="#120e1e",
         shell_alpha=255,
         bezel=(0.0, 0.0, 0.0, 0.0),
     ),
@@ -652,6 +703,10 @@ def _effective_system_key(game: Game) -> str:
 
 def case_profile(game: Game) -> CaseProfile:
     """Return physical box dimensions and European PAL styling for a game."""
+    port_hint = f"{game.title} {game.emulator} {game.executable}".lower()
+    for port_key in ("dusklight", "hookshot", "longshot"):
+        if port_key in port_hint:
+            return CASE_PROFILES[port_key]
     source = (game.source or "").strip().lower()
     sys_key = _effective_system_key(game)
     if sys_key in CASE_PROFILES and sys_key not in {"pc", "ports"}:
@@ -1802,32 +1857,80 @@ _OVERLAY_PAINTERS: dict[str, Callable[[QPainter, QRectF, QRectF, CaseProfile], N
 
 
 _OVERLAY_CACHE: dict[str, Optional[tuple[QPixmap, QRectF]]] = {}
+_SPINE_CACHE: dict[str, Optional[QPixmap]] = {}
 
 
 def _detect_transparent_window(pixmap: QPixmap) -> QRectF:
-    """Find the normalized [0..1] bounding box of the transparent artwork cutout in a PNG overlay."""
-    probe = pixmap.toImage().scaled(128, 128, Qt.IgnoreAspectRatio, Qt.FastTransformation)
-    min_x, min_y = 128, 128
-    max_x, max_y = -1, -1
-    for y in range(128):
-        for x in range(128):
-            if probe.pixelColor(x, y).alpha() < 32:
-                if x < min_x:
-                    min_x = x
-                if y < min_y:
-                    min_y = y
-                if x > max_x:
-                    max_x = x
-                if y > max_y:
-                    max_y = y
-    if max_x < min_x or max_y < min_y:
-        return QRectF(0.0, 0.0, 1.0, 1.0)
-    return QRectF(
-        min_x / 128.0,
-        min_y / 128.0,
-        (max_x - min_x + 1) / 128.0,
-        (max_y - min_y + 1) / 128.0,
+    """Find the normalized [0..1] bounding box of the interior transparent cutout in a PNG overlay."""
+    size = 128
+    probe = pixmap.toImage().scaled(size, size, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+    cx, cy = size // 2, size // 2
+    if probe.pixelColor(cx, cy).alpha() >= 64:
+        best_dist = 10**9
+        found = False
+        for y in range(12, size - 12):
+            for x in range(12, size - 12):
+                if probe.pixelColor(x, y).alpha() < 64:
+                    d = (x - cx) ** 2 + (y - cy) ** 2
+                    if d < best_dist:
+                        best_dist = d
+                        cx, cy = x, y
+                        found = True
+        if not found:
+            return QRectF(0.0, 0.0, 1.0, 1.0)
+
+    visited = {(cx, cy)}
+    q = deque([(cx, cy)])
+    min_x, min_y = cx, cy
+    max_x, max_y = cx, cy
+    while q:
+        px, py = q.popleft()
+        if px < min_x:
+            min_x = px
+        if py < min_y:
+            min_y = py
+        if px > max_x:
+            max_x = px
+        if py > max_y:
+            max_y = py
+        for nx, ny in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
+            if 2 <= nx < size - 2 and 2 <= ny < size - 2 and (nx, ny) not in visited:
+                if probe.pixelColor(nx, ny).alpha() < 64:
+                    visited.add((nx, ny))
+                    q.append((nx, ny))
+
+    pad = 1.0 / size
+    x0 = max(0.0, min_x / size - pad)
+    y0 = max(0.0, min_y / size - pad)
+    x1 = min(1.0, (max_x + 1) / size + pad)
+    y1 = min(1.0, (max_y + 1) / size + pad)
+    return QRectF(x0, y0, max(0.05, x1 - x0), max(0.05, y1 - y0))
+
+
+def load_spine_texture(system_key: str) -> Optional[QPixmap]:
+    """Load an authentic vertical spine PNG texture from user data or bundled assets if available."""
+    key = (system_key or "").strip().lower()
+    if not key:
+        return None
+    from ..paths import data_dir
+
+    candidates = (
+        data_dir() / "cases" / f"{key}_spine.png",
+        assets_dir() / "cases" / f"{key}_spine.png",
     )
+    for path in candidates:
+        if not path.is_file():
+            continue
+        cache_key = f"{key}_spine:{path}:{path.stat().st_mtime_ns}"
+        if cache_key in _SPINE_CACHE:
+            return _SPINE_CACHE[cache_key]
+        pix = QPixmap(str(path))
+        if pix.isNull():
+            _SPINE_CACHE[cache_key] = None
+            continue
+        _SPINE_CACHE[cache_key] = pix
+        return pix
+    return None
 
 
 def load_case_overlay(system_key: str) -> Optional[tuple[QPixmap, QRectF]]:
@@ -1839,7 +1942,7 @@ def load_case_overlay(system_key: str) -> Optional[tuple[QPixmap, QRectF]]:
 
     candidates = (
         data_dir() / "cases" / f"{key}.png",
-        Path(__file__).resolve().parent.parent / "assets" / "cases" / f"{key}.png",
+        assets_dir() / "cases" / f"{key}.png",
     )
     for path in candidates:
         if not path.is_file():
@@ -1875,12 +1978,22 @@ def paint_console_case(
             max(8.0, frame.height() * norm_win.height()),
         )
         painter.save()
+        # Keep cover artwork safely inside the outer translucent plastic case rim
+        clip_path = QPainterPath()
+        clip_rect = frame.adjusted(
+            frame.width() * 0.015,
+            frame.height() * 0.012,
+            -frame.width() * 0.015,
+            -frame.height() * 0.012,
+        )
+        clip_path.addRoundedRect(clip_rect, max(2.0, profile.radius * 0.8), max(2.0, profile.radius * 0.8))
+        painter.setClipPath(clip_path)
         if pixmap is not None and not pixmap.isNull():
             _draw_cover_art(painter, art, pixmap)
         else:
             placeholder_fn(painter, art)
-        painter.drawPixmap(frame.toRect(), overlay_pix)
         painter.restore()
+        painter.drawPixmap(frame.toRect(), overlay_pix)
         return art
 
     w, h = frame.width(), frame.height()
@@ -1929,17 +2042,44 @@ def paint_console_spine(
     left_depth = max_depth * (0.28 + 0.72 * max(0.0, clamped))
     right_depth = max_depth * (0.28 + 0.72 * max(0.0, -clamped))
 
+    spine_tex = load_spine_texture(profile.key)
     for is_left, depth in ((True, left_depth), (False, right_depth)):
         path = QPainterPath()
         if is_left:
             x0, x1 = target.left(), target.left() - depth
         else:
             x0, x1 = target.right(), target.right() + depth
-        path.moveTo(x0, target.top())
-        path.lineTo(x1, target.top() + depth * 0.32)
-        path.lineTo(x1, target.bottom() - depth * 0.32)
-        path.lineTo(x0, target.bottom())
+        p0 = QPointF(x0, target.top())
+        p1 = QPointF(x1, target.top() + depth * 0.32)
+        p2 = QPointF(x1, target.bottom() - depth * 0.32)
+        p3 = QPointF(x0, target.bottom())
+        path.moveTo(p0)
+        path.lineTo(p1)
+        path.lineTo(p2)
+        path.lineTo(p3)
         path.closeSubpath()
+
+        if spine_tex is not None and not spine_tex.isNull() and depth > 1.5:
+            painter.save()
+            painter.setClipPath(path)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            src_poly = QPolygonF(QRectF(spine_tex.rect()))
+            if is_left:
+                dst_poly = QPolygonF([p1, p0, p3, p2])
+            else:
+                dst_poly = QPolygonF([p0, p1, p2, p3])
+            tx = QTransform()
+            if QTransform.quadToQuad(src_poly, dst_poly, tx):
+                painter.setTransform(tx, True)
+                painter.drawPixmap(spine_tex.rect(), spine_tex)
+            painter.restore()
+            shade = QLinearGradient(x0, 0, x1, 0)
+            shade.setColorAt(0.0, QColor(0, 0, 0, 12))
+            shade.setColorAt(1.0, QColor(0, 0, 0, 72))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(shade))
+            painter.drawPath(path)
+            continue
 
         grad = QLinearGradient(x0, 0, x1, 0)
         if profile.shell_kind in {"translucent_clear", "jewel_clear"}:
