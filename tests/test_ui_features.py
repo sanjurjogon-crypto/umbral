@@ -767,13 +767,14 @@ def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path
     page.resize(900, 650)
     page.refresh()
     assert page.backdrop_button.objectName() == "filterBtn"
+    assert page.title_box_frame.objectName() == "shelfTitleBox"
     page._populate_backdrop_menu()
     labels = [act.text() for act in page._backdrop_menu.actions() if act.text()]
-    assert "Brillo / Oscuridad" in labels
-    assert "Desenfoque" in labels
     assert "Encuadre" in labels
     assert "Cambiar fondo..." in labels
     assert "Restaurar por defecto" in labels
+    from PySide6.QtWidgets import QSlider
+    assert len(page._backdrop_menu.findChildren(QSlider)) == 2
 
     monkeypatch.setattr(
         "umbral.ui.backdrop_dialog.search_backdrops",

@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from .. import __version__
@@ -261,7 +263,10 @@ class LibraryPage(QWidget):
         top_row = QHBoxLayout()
         top_row.setSpacing(10)
 
-        title_box = QVBoxLayout()
+        self.title_box_frame = QFrame()
+        self.title_box_frame.setObjectName("shelfTitleBox")
+        title_box = QVBoxLayout(self.title_box_frame)
+        title_box.setContentsMargins(14, 6, 14, 6)
         title_box.setSpacing(2)
         self.title_label = QLabel("Biblioteca")
         self.title_label.setObjectName("shelfWord")
@@ -269,7 +274,7 @@ class LibraryPage(QWidget):
         self.count_label.setObjectName("shelfCount")
         title_box.addWidget(self.title_label)
         title_box.addWidget(self.count_label)
-        top_row.addLayout(title_box)
+        top_row.addWidget(self.title_box_frame)
         top_row.addStretch(1)
 
         self.filters_button = QPushButton("Filtros  ▾")
@@ -344,15 +349,11 @@ class LibraryPage(QWidget):
         info_body.addSpacing(4)
         info_body.addLayout(self.info_actions)
 
-        hint = QLabel("← →  moverse   ·   Enter  jugar   ·   I  detalles   ·   rueda del ratón")
-        hint.setObjectName("shelfHint")
-        hint.setAlignment(Qt.AlignCenter)
         self.bottom = QWidget(self)
         bottom_body = QVBoxLayout(self.bottom)
-        bottom_body.setContentsMargins(0, 0, 0, 0)
+        bottom_body.setContentsMargins(0, 0, 0, 10)
         bottom_body.setSpacing(0)
         bottom_body.addWidget(self.info)
-        bottom_body.addWidget(hint)
 
         self.backdrop_button = QPushButton("Fondo  ▾", self)
         self.backdrop_button.setObjectName("filterBtn")
@@ -595,6 +596,45 @@ class LibraryPage(QWidget):
             active_badge = bool(self._state_filter or self._hide_demos)
             self.filters_button.setText("Filtros •  ▾" if active_badge else "Filtros  ▾")
 
+    def _add_slider_action(
+        self,
+        menu: QMenu,
+        title: str,
+        min_val: int,
+        max_val: int,
+        current: int,
+        fmt,
+        on_change,
+    ) -> None:
+        container = QWidget(menu)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(4)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel(title)
+        val_lbl = QLabel(fmt(current))
+        val_lbl.setObjectName("muted")
+        header.addWidget(lbl)
+        header.addStretch(1)
+        header.addWidget(val_lbl)
+        slider = QSlider(Qt.Horizontal, container)
+        slider.setRange(min_val, max_val)
+        slider.setValue(current)
+        slider.setFixedWidth(180)
+        slider.setCursor(Qt.PointingHandCursor)
+
+        def _changed(val: int) -> None:
+            val_lbl.setText(fmt(val))
+            on_change(val)
+
+        slider.valueChanged.connect(_changed)
+        layout.addLayout(header)
+        layout.addWidget(slider)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(container)
+        menu.addAction(action)
+
     def _populate_backdrop_menu(self) -> None:
         menu = self._backdrop_menu
         menu.clear()
@@ -602,27 +642,27 @@ class LibraryPage(QWidget):
         if game is None:
             return
 
-        dim_menu = menu.addMenu("Brillo / Oscuridad")
-        dim_group = QActionGroup(dim_menu)
-        dim_group.setExclusive(True)
-        cur_dim = float(getattr(game, "backdrop_dim", 0.0) or 0.0)
-        for label, val in (("Normal", 0.0), ("Oscuro", 0.30), ("Muy oscuro", 0.55)):
-            act = QAction(label, dim_menu, checkable=True)
-            act.setChecked(abs(cur_dim - val) < 0.05)
-            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_dim=v))
-            dim_group.addAction(act)
-            dim_menu.addAction(act)
+        cur_dim = int(round(float(getattr(game, "backdrop_dim", 0.0) or 0.0) * 100))
+        self._add_slider_action(
+            menu,
+            "Oscuridad",
+            0,
+            70,
+            max(0, min(70, cur_dim)),
+            lambda v: f"{v}%",
+            lambda v: self._update_backdrop_setting(backdrop_dim=v / 100.0),
+        )
 
-        blur_menu = menu.addMenu("Desenfoque")
-        blur_group = QActionGroup(blur_menu)
-        blur_group.setExclusive(True)
         cur_blur = int(getattr(game, "backdrop_blur", 0) or 0)
-        for label, val in (("Nítido", 0), ("Suave", 6), ("Difuminado", 18)):
-            act = QAction(label, blur_menu, checkable=True)
-            act.setChecked(cur_blur == val)
-            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_blur=v))
-            blur_group.addAction(act)
-            blur_menu.addAction(act)
+        self._add_slider_action(
+            menu,
+            "Desenfoque",
+            0,
+            24,
+            max(0, min(24, cur_blur)),
+            lambda v: "Nítido" if v == 0 else f"{v} px",
+            lambda v: self._update_backdrop_setting(backdrop_blur=v),
+        )
 
         align_menu = menu.addMenu("Encuadre")
         align_group = QActionGroup(align_menu)

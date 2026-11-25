@@ -1053,11 +1053,46 @@ def _draw_gamecube_cube(painter: QPainter, center: QPointF, r: float) -> None:
     painter.restore()
 
 
+_SWITCH2_STRIP_PIXMAP: Optional[QPixmap] = None
+
+
+def _switch2_strip_pixmap() -> QPixmap:
+    global _SWITCH2_STRIP_PIXMAP
+    if _SWITCH2_STRIP_PIXMAP is None:
+        path = assets_dir() / "switch2_strip_logo.png"
+        _SWITCH2_STRIP_PIXMAP = QPixmap(str(path)) if path.is_file() else QPixmap()
+    return _SWITCH2_STRIP_PIXMAP
+
+
 def _paint_switch2(painter: QPainter, frame: QRectF, inner: QRectF, _profile: CaseProfile) -> None:
     bar = QRectF(inner.left(), inner.top(), inner.width(), inner.height() * 0.145)
     painter.fillRect(bar, QColor("#e60012"))
 
-    # Centered [Joy-Con emblem] + "2" on top, "NINTENDO SWITCH" stacked underneath
+    logo = _switch2_strip_pixmap()
+    if not logo.isNull():
+        pad_y = max(2.0, bar.height() * 0.10)
+        avail_w = max(8.0, bar.width() * 0.86)
+        avail_h = max(6.0, bar.height() - 2.0 * pad_y)
+        aspect = logo.width() / max(1, logo.height())
+        if avail_w / avail_h > aspect:
+            draw_h = avail_h
+            draw_w = draw_h * aspect
+        else:
+            draw_w = avail_w
+            draw_h = draw_w / aspect
+        target = QRectF(
+            bar.center().x() - draw_w / 2.0,
+            bar.center().y() - draw_h / 2.0,
+            draw_w,
+            draw_h,
+        )
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawPixmap(target, logo, QRectF(logo.rect()))
+        painter.restore()
+        return
+
+    # Fallback centered [Joy-Con emblem] + "2" on top, "NINTENDO SWITCH" stacked underneath
     top_h = bar.height() * 0.50
     icon_s = top_h * 0.82
     font_two = QFont(NINTENDO_FONT)

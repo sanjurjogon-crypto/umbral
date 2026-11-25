@@ -46,9 +46,8 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     accent = accent or style.accent
     soft = _rgba(accent, 0.14)
     softer = _rgba(accent, 0.06)
-    translucent_bg = _rgba(style.bg, 0.78)
-    translucent_primary = _rgba(_mix(style.bg, accent, 0.16), 0.84)
-    translucent_hover = _rgba(_mix(style.bg, accent, 0.28), 0.90)
+    opaque_primary = _mix(style.surface_2, accent, 0.14)
+    opaque_primary_hover = _mix(style.surface_2, accent, 0.24)
     border_accent = _rgba(accent, 0.55)
     glow = _rgba(accent, 0.35)
     hover_bg = _rgba(style.text, 0.05)
@@ -192,7 +191,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         color: __ACCENT__;
     }
     QPushButton#primary {
-        background: __TRANSLUCENT_PRIMARY__;
+        background: __OPAQUE_PRIMARY__;
         border: __THIN__px solid __ACCENT__;
         color: __ACCENT_2__;
         font-family: "__HEADING__";
@@ -205,15 +204,15 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QPushButton#primary:hover {
-        background: __TRANSLUCENT_HOVER__;
+        background: __OPAQUE_PRIMARY_HOVER__;
         color: __ACCENT_2__;
     }
     QPushButton#primary:pressed {
-        background: __TRANSLUCENT_BG__;
+        background: __SURFACE__;
     }
     QPushButton#ghost {
         border: __THIN__px solid __BORDER__;
-        background: __TRANSLUCENT_BG__;
+        background: __SURFACE_2__;
         padding: 9px 18px;
         color: __TEXT__;
         font-family: "__HEADING__";
@@ -224,6 +223,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QPushButton#ghost:hover {
+        background: __SURFACE_3__;
         border-color: __ACCENT__;
         color: __ACCENT__;
     }
@@ -322,9 +322,10 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         background: __SURFACE_2__;
         border: __THIN__px solid __BORDER__;
         border-radius: __RADIUS__px;
-        padding: 0px;
+        padding: 0px 0px 2px 0px;
         color: __TEXT__;
-        font-size: 16px;
+        font-size: 18px;
+        font-weight: 600;
         text-align: center;
     }
     QPushButton#sidebarToggle:hover {
@@ -364,7 +365,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QPushButton#play {
-        background: __TRANSLUCENT_PRIMARY__;
+        background: __OPAQUE_PRIMARY__;
         color: __ACCENT_2__;
         border: __THIN__px solid __ACCENT__;
         border-radius: __RADIUS__px;
@@ -491,6 +492,11 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     QWidget#shelfHeader {
         background: transparent;
     }
+    QFrame#shelfTitleBox {
+        background: __SURFACE_2__;
+        border: __THIN__px solid __BORDER__;
+        border-radius: __RADIUS__px;
+    }
     QLabel#shelfWord {
         font-family: "__HEADING__";
         font-size: 30px;
@@ -607,9 +613,8 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         "__GLOW__": glow,
         "__SOFT__": soft,
         "__SOFTER__": softer,
-        "__TRANSLUCENT_BG__": translucent_bg,
-        "__TRANSLUCENT_PRIMARY__": translucent_primary,
-        "__TRANSLUCENT_HOVER__": translucent_hover,
+        "__OPAQUE_PRIMARY__": opaque_primary,
+        "__OPAQUE_PRIMARY_HOVER__": opaque_primary_hover,
         "__HOVER_BG__": hover_bg,
         "__SCROLL__": scroll,
         "__INPUT_BG__": input_bg,

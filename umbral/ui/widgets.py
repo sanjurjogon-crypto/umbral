@@ -766,9 +766,10 @@ class HeroBanner(QFrame):
             self.update()
             return
 
+        from ..backdrops import game_backdrop
         from ..covers import game_cover
 
-        cover_path = game_cover(game)
+        cover_path = game_backdrop(game) or game_cover(game)
         if cover_path is not None:
             pix = QPixmap(str(cover_path))
             if not pix.isNull():
