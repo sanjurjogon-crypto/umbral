@@ -425,7 +425,8 @@ class LibraryPage(QWidget):
         self.header.setGeometry(left, top, inner_w, header_h)
         if hasattr(self, "grid_scroll"):
             self.grid_scroll.setGeometry(left, top + header_h, inner_w, max(0, inner_h - header_h))
-        self._sync_info_title_height(inner_w)
+        if not self.canvas._chrome_animating:
+            self._sync_info_title_height(inner_w)
         bottom_h = self._bottom_height(inner_w)
         self.canvas.set_chrome_insets(left, top, bottom_h, header_h)
         self.bottom.setGeometry(left, height - bottom_h, inner_w, bottom_h)
