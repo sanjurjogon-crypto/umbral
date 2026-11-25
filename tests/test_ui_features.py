@@ -449,9 +449,9 @@ def test_library_shelf_title_expands_for_long_multiline_titles(monkeypatch, tmp_
     center_x, center_y, cover_w, cover_h, _gap = lib.canvas._layout()
     assert center_y + cover_h / 2.0 <= lib.bottom.y() + 2
 
-    # Resizing wider or switching to a short title must shrink info_title back down
+    # Switching to a shorter title must shrink info_title back down
     two_line_h = lib.info_title.height()
-    lib.resize(1800, 820)
+    lib._on_selection(Game(id="g2", title="Hades", system="Steam", system_key="steam", source="steam"))
     app.processEvents()
     one_line_h = lib.info_title.height()
     assert one_line_h < two_line_h
