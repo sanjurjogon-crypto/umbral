@@ -437,9 +437,7 @@ class LibraryPage(QWidget):
         icon_w = 36 if self.info_emu_icon.isVisible() else 0
         avail_w = max(240, inner_w - 96 - icon_w)
         self.info_title.setMaximumWidth(avail_w)
-        single_w = self.info_title.sizeHint().width()
-        target_w = min(avail_w, max(120, single_w)) if single_w > 0 else avail_w
-        needed_h = self.info_title.heightForWidth(target_w)
+        needed_h = self.info_title.heightForWidth(avail_w)
         if needed_h > 0:
             self.info_title.setMinimumHeight(needed_h + 4)
         self.info_title.updateGeometry()
@@ -460,6 +458,7 @@ class LibraryPage(QWidget):
             self.grid_scroll.setGeometry(left, top + header_h, inner_w, max(0, inner_h - header_h))
         self._sync_info_title_height(inner_w)
         bottom_h = self._bottom_height(inner_w)
+        self.canvas.set_chrome_insets(left, top, bottom_h)
         self.bottom.setGeometry(left, height - bottom_h, inner_w, bottom_h)
         if self._view_mode == "grid" and hasattr(self, "grid_scroll"):
             self.grid_scroll.lower()

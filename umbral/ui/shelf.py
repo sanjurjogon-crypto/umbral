@@ -516,6 +516,7 @@ class ShelfCanvas(QWidget):
         self._tilt_target_y = 0.0
         self._inset_left = 0
         self._inset_top = 0
+        self._inset_bottom = 0
         self._halo_enabled = True
         self._backdrop_mix = 1.0
         self._prev_backdrop_item: Optional[ShelfItem] = None
@@ -538,13 +539,15 @@ class ShelfCanvas(QWidget):
         self._tilt_timer.setInterval(16)
         self._tilt_timer.timeout.connect(self._step_tilt)
 
-    def set_chrome_insets(self, left: int, top: int) -> None:
+    def set_chrome_insets(self, left: int, top: int, bottom: int = 0) -> None:
         left_val = max(0, int(left))
         top_val = max(0, int(top))
-        if (left_val, top_val) == (self._inset_left, self._inset_top):
+        bottom_val = max(0, int(bottom))
+        if (left_val, top_val, bottom_val) == (self._inset_left, self._inset_top, self._inset_bottom):
             return
         self._inset_left = left_val
         self._inset_top = top_val
+        self._inset_bottom = bottom_val
         self._backdrop_cache.clear()
         self.update()
 
@@ -742,6 +745,9 @@ class ShelfCanvas(QWidget):
                 self.details_requested.emit(game)
             event.accept()
             return
+        if key == Qt.Key_Down:
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - API de Qt
@@ -815,12 +821,13 @@ class ShelfCanvas(QWidget):
 
     def _layout(self):
         usable_w = max(320.0, float(self.width() - self._inset_left))
-        usable_h = max(240.0, float(self.height() - self._inset_top))
+        bottom_pad = max(130, self._inset_bottom)
+        usable_h = max(200.0, float(self.height() - self._inset_top - bottom_pad))
         center_x = self._inset_left + usable_w / 2.0
-        center_y = self._inset_top + usable_h * 0.445
-        scale = min(usable_w / 1240.0, 1.18)
-        cover_w = CASE_W * max(0.72, scale)
-        cover_h = CASE_H * max(0.72, scale)
+        scale = min(usable_w / 1240.0, usable_h / 390.0, 1.18)
+        cover_w = CASE_W * max(0.64, scale)
+        cover_h = CASE_H * max(0.64, scale)
+        center_y = self._inset_top + usable_h * 0.49
         gap = cover_w * 0.86
         return center_x, center_y, cover_w, cover_h, gap
 

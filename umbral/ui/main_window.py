@@ -179,6 +179,7 @@ class MainWindow(QMainWindow):
             button = QPushButton(label)
             button.setObjectName("nav")
             button.setCheckable(True)
+            button.setFocusPolicy(Qt.NoFocus)
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, value=key: self._navigate(value))
             self.nav_buttons[key] = button
@@ -214,12 +215,14 @@ class MainWindow(QMainWindow):
         settings_button = QPushButton("Ajustes")
         settings_button.setObjectName("nav")
         settings_button.setCheckable(True)
+        settings_button.setFocusPolicy(Qt.NoFocus)
         settings_button.setCursor(Qt.PointingHandCursor)
         settings_button.clicked.connect(lambda: self._navigate("settings"))
         self.nav_buttons["settings"] = settings_button
         side.addWidget(settings_button)
         self.update_button = QPushButton("Buscar actualizaciones")
         self.update_button.setObjectName("nav")
+        self.update_button.setFocusPolicy(Qt.NoFocus)
         self.update_button.setCursor(Qt.PointingHandCursor)
         self.update_button.clicked.connect(lambda: self._check_updates(manual=True))
         side.addWidget(self.update_button)
@@ -641,6 +644,7 @@ class MainWindow(QMainWindow):
                 total = QPushButton("Todos")
                 total.setObjectName("system")
                 total.setCheckable(True)
+                total.setFocusPolicy(Qt.NoFocus)
                 total.setCursor(Qt.PointingHandCursor)
                 total.clicked.connect(lambda _checked=False: self._filter_system(""))
                 self.systems_box.addWidget(total)
@@ -649,6 +653,7 @@ class MainWindow(QMainWindow):
                     button = QPushButton(f"{label}   {count}")
                     button.setObjectName("system")
                     button.setCheckable(True)
+                    button.setFocusPolicy(Qt.NoFocus)
                     button.setCursor(Qt.PointingHandCursor)
                     button.clicked.connect(
                         lambda _checked=False, value=system_key: self._filter_system(value)
@@ -680,6 +685,19 @@ class MainWindow(QMainWindow):
         elif page is self.home or page is self.library:
             page.set_filter(key)
         self._rebuild_systems()
+        if self.stack.currentWidget() is self.library:
+            self.library.focus_canvas()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        if (
+            self.stack.currentWidget() is self.library
+            and self.library._view_mode == "shelf"
+            and not isinstance(self.focusWidget(), QLineEdit)
+            and event.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down)
+        ):
+            self.library.canvas.keyPressEvent(event)
+            return
+        super().keyPressEvent(event)
 
     def _navigate(self, key: str, system_filter: Optional[str] = None) -> None:
         self._current_page_key = "favorites" if key == "favorites" else key
