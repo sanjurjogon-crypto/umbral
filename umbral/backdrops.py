@@ -4,6 +4,7 @@ import html
 import io
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
@@ -230,6 +231,8 @@ def _bing_image_search(query: str, limit: int = 8) -> list[BackdropOption]:
             meta = json.loads(blob)
         except ValueError:
             continue
+        if not isinstance(meta, dict):
+            continue
         murl = str(meta.get("murl", "")).strip()
         turl = str(meta.get("turl", "")).strip() or murl
         title = str(meta.get("t", "")).strip() or query
@@ -248,16 +251,24 @@ def search_backdrops(query: str, game: Game | None = None, max_results: int = 12
     if not clean:
         return []
 
-    raw_options: list[BackdropOption] = []
     app_id = _steam_app_id(game) if game is not None else ""
-    if app_id:
-        raw_options.extend(_steam_options_for_app(app_id, game.title if game else clean))
     sys_key = game.system_key if game is not None else ""
-    raw_options.extend(_gamedb_backdrops(clean, sys_key))
-    if not app_id:
-        raw_options.extend(_steam_search_backdrops(clean))
-    if len(raw_options) < max_results:
-        raw_options.extend(_bing_image_search(clean, limit=max_results))
+
+    def _run_steam() -> list[BackdropOption]:
+        if app_id:
+            return _steam_options_for_app(app_id, game.title if game else clean)
+        return _steam_search_backdrops(clean)
+
+    raw_options: list[BackdropOption] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_steam = pool.submit(_run_steam)
+        f_gamedb = pool.submit(_gamedb_backdrops, clean, sys_key)
+        f_bing = pool.submit(_bing_image_search, clean, max_results)
+        for fut in (f_steam, f_gamedb, f_bing):
+            try:
+                raw_options.extend(fut.result(timeout=15))
+            except Exception:  # noqa: BLE001 - una fuente caída no debe abortar las demás
+                continue
 
     seen: set[str] = set()
     unique: list[BackdropOption] = []

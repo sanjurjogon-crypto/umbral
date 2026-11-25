@@ -30,7 +30,10 @@ class _SearchWorker(QThread):
         self.game = game
 
     def run(self) -> None:
-        results = search_backdrops(self.query, game=self.game, max_results=12)
+        try:
+            results = search_backdrops(self.query, game=self.game, max_results=12)
+        except Exception:  # noqa: BLE001
+            results = []
         if not self.isInterruptionRequested():
             self.found.emit(results)
 
