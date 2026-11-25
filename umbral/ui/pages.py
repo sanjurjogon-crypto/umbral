@@ -664,17 +664,6 @@ class LibraryPage(QWidget):
             lambda v: self._update_backdrop_setting(backdrop_blur=v),
         )
 
-        align_menu = menu.addMenu("Encuadre")
-        align_group = QActionGroup(align_menu)
-        align_group.setExclusive(True)
-        cur_align = str(getattr(game, "backdrop_align", "center") or "center")
-        for label, val in (("Arriba", "top"), ("Centro", "center"), ("Abajo", "bottom")):
-            act = QAction(label, align_menu, checkable=True)
-            act.setChecked(cur_align == val)
-            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_align=v))
-            align_group.addAction(act)
-            align_menu.addAction(act)
-
         menu.addSeparator()
         pick_act = QAction("Cambiar fondo...", menu)
         pick_act.triggered.connect(lambda: self.backdrop_change_requested.emit(game))
