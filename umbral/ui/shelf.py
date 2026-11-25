@@ -478,21 +478,31 @@ def render_debanded_backdrop(
     return QPixmap.fromImage(qimg)
 
 
-def render_custom_backdrop(width: int, height: int, backdrop_path: str) -> Optional[QPixmap]:
-    """Render a crisp custom backdrop without blur, darkened only near the bottom for title legibility."""
+def render_custom_backdrop(
+    width: int, height: int, left: int, backdrop_path: str
+) -> Optional[QPixmap]:
+    """Render a crisp custom backdrop centered in the visible shelf area (to the right of sidebar)."""
     w = max(16, int(width))
     h = max(16, int(height))
+    left_px = max(0, min(w - 16, int(left)))
+    vis_w = max(16, w - left_px)
     try:
         with Image.open(backdrop_path) as loaded:
             fitted = ImageOps.fit(
                 loaded.convert("RGB"),
-                (w, h),
+                (vis_w, h),
                 method=Image.Resampling.LANCZOS,
                 centering=(0.5, 0.45),
             )
-            arr = np.asarray(fitted, dtype=np.float32)
+            vis_arr = np.asarray(fitted, dtype=np.float32)
     except OSError:
         return None
+    if left_px > 0:
+        arr = np.zeros((h, w, 3), dtype=np.float32)
+        arr[:, :left_px, :] = 6.0
+        arr[:, left_px:, :] = vis_arr
+    else:
+        arr = vis_arr
     y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
     bottom_fade = np.where(y_norm > 0.56, np.clip((y_norm - 0.56) / 0.44, 0.0, 1.0), 0.0)
     shade = (1.0 - 0.72 * (bottom_fade ** 1.35))[:, :, None]
@@ -547,6 +557,9 @@ class ShelfCanvas(QWidget):
         self._prev_backdrop_item: Optional[ShelfItem] = None
         self._active_backdrop_id: str = ""
         self._backdrop_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+        self._chrome_animating = False
+        self._chrome_anim_start_left = 0
+        self._last_backdrop_by_id: dict[str, QPixmap] = {}
 
         self._anim = QPropertyAnimation(self, b"position", self)
         self._anim.setDuration(380)
@@ -563,6 +576,13 @@ class ShelfCanvas(QWidget):
         self._tilt_timer = QTimer(self)
         self._tilt_timer.setInterval(16)
         self._tilt_timer.timeout.connect(self._step_tilt)
+
+    def set_chrome_animating(self, active: bool) -> None:
+        if active and not self._chrome_animating:
+            self._chrome_anim_start_left = self._inset_left
+        self._chrome_animating = bool(active)
+        if not self._chrome_animating:
+            self.update()
 
     def set_chrome_insets(self, left: int, top: int, bottom: int = 0, header: int = 0) -> None:
         left_val = max(0, int(left))
@@ -931,6 +951,8 @@ class ShelfCanvas(QWidget):
         cover_h: float,
     ) -> QPixmap:
         key_id = item.game.id if item is not None else "__none__"
+        if self._chrome_animating and key_id in self._last_backdrop_by_id:
+            return self._last_backdrop_by_id[key_id]
         cov_key = item.cover_path if item is not None else ""
         custom_path = str(game_backdrop(item.game) or "") if item is not None else ""
         cache_key = (
@@ -939,6 +961,7 @@ class ShelfCanvas(QWidget):
             custom_path,
             self.width(),
             self.height(),
+            self._inset_left,
             int(center_x),
             int(center_y),
             self._halo_enabled,
@@ -946,8 +969,13 @@ class ShelfCanvas(QWidget):
         cached = self._backdrop_cache.get(cache_key)
         if cached is not None:
             self._backdrop_cache.move_to_end(cache_key)
+            self._last_backdrop_by_id[key_id] = cached
             return cached
-        rendered = render_custom_backdrop(self.width(), self.height(), custom_path) if custom_path else None
+        rendered = (
+            render_custom_backdrop(self.width(), self.height(), self._inset_left, custom_path)
+            if custom_path
+            else None
+        )
         if rendered is None:
             fallback = QColor(active_style().accent)
             rendered = render_debanded_backdrop(
@@ -963,6 +991,7 @@ class ShelfCanvas(QWidget):
                 self._halo_enabled,
             )
         self._backdrop_cache[cache_key] = rendered
+        self._last_backdrop_by_id[key_id] = rendered
         if len(self._backdrop_cache) > 18:
             self._backdrop_cache.popitem(last=False)
         return rendered
@@ -1043,7 +1072,8 @@ class ShelfCanvas(QWidget):
             painter.restore()
             return
         cur_bg = self._backdrop_for(current_item, center_x, center_y, cover_w, cover_h)
-        painter.drawPixmap(0, 0, cur_bg)
+        dx = int((self._inset_left - self._chrome_anim_start_left) * 0.5) if self._chrome_animating else 0
+        painter.drawPixmap(dx, 0, cur_bg)
 
     def _paint_floor(
         self,

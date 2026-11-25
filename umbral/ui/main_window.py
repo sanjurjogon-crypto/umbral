@@ -374,6 +374,7 @@ class MainWindow(QMainWindow):
         self._layout_chrome()
 
     def _on_sidebar_anim_finished(self) -> None:
+        self.library.canvas.set_chrome_animating(False)
         for padded_page in (self.home, self.stats, self.health, self.settings_page):
             padded_page.setContentsMargins(self._sidebar_width, self._topbar_height, 0, 0)
         self.library.set_chrome_insets(self._sidebar_width, self._topbar_height)
@@ -395,6 +396,7 @@ class MainWindow(QMainWindow):
             self._on_sidebar_anim_finished()
             return
         self._sidebar_anim.stop()
+        self.library.canvas.set_chrome_animating(True)
         self._sidebar_anim.setStartValue(self._sidebar_width)
         self._sidebar_anim.setEndValue(target)
         self._sidebar_anim.start()
