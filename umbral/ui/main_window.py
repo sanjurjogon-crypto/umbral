@@ -1046,6 +1046,10 @@ class MainWindow(QMainWindow):
             "Desmarcar terminado" if game.progress == "finished" else "Marcar terminado"
         )
         edit_action = menu.addAction("Editar ficha")
+        backdrop_action = menu.addAction("Buscar fondo en internet...")
+        restore_bg_action = (
+            menu.addAction("Restaurar fondo por defecto") if game.backdrop else None
+        )
         folder_action = menu.addAction("Abrir carpeta")
         menu.addSeparator()
         remove_action = menu.addAction("Quitar de Umbral")
@@ -1065,6 +1069,13 @@ class MainWindow(QMainWindow):
             self._save_and_refresh()
         elif chosen is edit_action:
             self._edit_game(game)
+        elif chosen is backdrop_action:
+            self._pick_game_backdrop(game)
+        elif restore_bg_action is not None and chosen is restore_bg_action:
+            game.backdrop = ""
+            self.library.canvas._backdrop_cache.clear()
+            self._save_and_refresh()
+            self.toast.show_message("Fondo restaurado.")
         elif chosen is folder_action:
             self._open_game_folder(game)
         elif chosen is remove_action:
@@ -1078,6 +1089,23 @@ class MainWindow(QMainWindow):
             )
             if answer == QMessageBox.Yes:
                 self._remove_game(game)
+
+    def _pick_game_backdrop(self, game: Game) -> None:
+        from .backdrop_dialog import BackdropPickerDialog
+
+        dialog = BackdropPickerDialog(game, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        if dialog.restore_default:
+            game.backdrop = ""
+            self.library.canvas._backdrop_cache.clear()
+            self._save_and_refresh()
+            self.toast.show_message("Fondo restaurado.")
+        elif dialog.selected_path:
+            game.backdrop = dialog.selected_path
+            self.library.canvas._backdrop_cache.clear()
+            self._save_and_refresh()
+            self.toast.show_message("Fondo actualizado.")
 
     def _open_game_folder(self, game: Game) -> None:
         candidates: list[str] = []

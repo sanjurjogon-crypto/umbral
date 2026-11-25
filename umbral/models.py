@@ -34,6 +34,7 @@ class Game:
     emulator: str = ""
     accent: str = "#E9B949"
     cover: str = ""
+    backdrop: str = ""
     favorite: bool = False
     progress: str = ""
     playtime_seconds: int = 0
