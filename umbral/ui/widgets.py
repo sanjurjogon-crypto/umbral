@@ -606,12 +606,10 @@ class GameCard(QFrame):
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
-            self._details_timer.start()
+            self.play_requested.emit(self.game)
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
-        self._details_timer.stop()
-        self.play_requested.emit(self.game)
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - API de Qt

@@ -416,6 +416,67 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     app.processEvents()
 
 
+def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+    from umbral.ui.widgets import GameCard
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+    game = Game(id="g1", title="Zelda", system="Ports", system_key="ports")
+    win.store.games = [game]
+    win._refresh_all()
+    win.resize(1280, 760)
+    win.show()
+    app.processEvents()
+
+    assert not hasattr(win.library, "details_button")
+    assert win._sidebar_width == 238
+    win.sidebar_toggle.click()
+    assert win._sidebar_width == 0
+    assert not win.sidebar.isVisible()
+    win.sidebar_toggle.click()
+    assert win._sidebar_width == 238
+    assert win.sidebar.isVisible()
+
+    # Right-click on centered ShelfCanvas item must NOT emit activated
+    activated: list[Game] = []
+    win.library.canvas.activated.connect(activated.append)
+    cx, cy, _w, _h, _g = win.library.canvas._layout()
+    evt = QMouseEvent(
+        QMouseEvent.MouseButtonPress,
+        QPointF(cx, cy),
+        QPointF(cx, cy),
+        Qt.RightButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    win.library.canvas.mousePressEvent(evt)
+    assert activated == []
+
+    # Left-click on GameCard emits play_requested directly
+    card = GameCard(game)
+    played: list[Game] = []
+    card.play_requested.connect(played.append)
+    QTest.mouseClick(card, Qt.LeftButton, pos=card.rect().center())
+    assert played == [game]
+
+    card.deleteLater()
+    win.close()
+    win.deleteLater()
+    app.processEvents()
+
+
 def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, tmp_path: Path) -> None:
     from umbral.ui.pages import SettingsPage
     from umbral.ui.widgets import EmptyState
@@ -581,4 +642,65 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     cards[1].clicked.emit("obsidian")
     assert picked == ["obsidian"]
     page.deleteLater()
+    app.processEvents()
+
+
+def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtTest import QTest
+
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+    from umbral.ui.widgets import GameCard
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+    game = Game(id="g1", title="Zelda", system="Ports", system_key="ports")
+    win.store.games = [game]
+    win._refresh_all()
+    win.resize(1280, 760)
+    win.show()
+    app.processEvents()
+
+    assert not hasattr(win.library, "details_button")
+    assert win._sidebar_width == 238
+    win.sidebar_toggle.click()
+    assert win._sidebar_width == 0
+    assert not win.sidebar.isVisible()
+    win.sidebar_toggle.click()
+    assert win._sidebar_width == 238
+    assert win.sidebar.isVisible()
+
+    # Right-click on centered ShelfCanvas item must NOT emit activated
+    activated: list[Game] = []
+    win.library.canvas.activated.connect(activated.append)
+    cx, cy, _w, _h, _g = win.library.canvas._layout()
+    evt = QMouseEvent(
+        QMouseEvent.MouseButtonPress,
+        QPointF(cx, cy),
+        QPointF(cx, cy),
+        Qt.RightButton,
+        Qt.RightButton,
+        Qt.NoModifier,
+    )
+    win.library.canvas.mousePressEvent(evt)
+    assert activated == []
+
+    # Left-click on GameCard emits play_requested directly
+    card = GameCard(game)
+    played: list[Game] = []
+    card.play_requested.connect(played.append)
+    QTest.mouseClick(card, Qt.LeftButton, pos=card.rect().center())
+    assert played == [game]
+
+    card.deleteLater()
+    win.close()
+    win.deleteLater()
     app.processEvents()

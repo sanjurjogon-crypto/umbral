@@ -801,6 +801,9 @@ class ShelfCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        if event.button() != Qt.LeftButton:
+            super().mousePressEvent(event)
+            return
         position = self._hit_test(event.position())
         if position < 0:
             return
@@ -813,9 +816,6 @@ class ShelfCanvas(QWidget):
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        game = self.current_game()
-        if game is not None:
-            self.details_requested.emit(game)
         event.accept()
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - API de Qt
