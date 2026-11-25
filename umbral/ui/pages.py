@@ -144,7 +144,7 @@ class HomePage(QWidget):
         self.body.addWidget(self.hero)
 
         self.rows = QVBoxLayout()
-        self.rows.setSpacing(26)
+        self.rows.setSpacing(22)
         self.body.addLayout(self.rows)
         self.body.addStretch(1)
 

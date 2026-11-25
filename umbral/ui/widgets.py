@@ -311,9 +311,20 @@ class FlowLayout(QLayout):
 
 
 class CoverArt(QWidget):
-    def __init__(self, game: Game, width: int = 202, height: int = 288, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        game: Game,
+        width: int = 202,
+        height: int = 288,
+        parent: Optional[QWidget] = None,
+        *,
+        show_pill: bool = True,
+        radius: Optional[float] = None,
+    ) -> None:
         super().__init__(parent)
         self.game = game
+        self._show_pill = show_pill
+        self._custom_radius = radius
         self._pixmap: Optional[QPixmap] = None
         self._cached_render: Optional[QPixmap] = None
         self._cached_style_key = ""
@@ -359,7 +370,7 @@ class CoverArt(QWidget):
             buf.setRenderHint(QPainter.Antialiasing)
             buf.setRenderHint(QPainter.SmoothPixmapTransform)
             rect = self.rect().adjusted(1, 1, -1, -1)
-            radius = style.radius
+            radius = self._custom_radius if self._custom_radius is not None else style.radius
             path = QPainterPath()
             path.addRoundedRect(QRectF(rect), radius, radius)
             buf.setClipPath(path)
@@ -429,12 +440,13 @@ class CoverArt(QWidget):
                 scaled.copy(QRect(source_x, source_y, rect.width(), rect.height())),
             )
 
-        shade = QLinearGradient(0, self.height() * 0.62, 0, self.height())
-        shade.setColorAt(0.0, QColor(0, 0, 0, 0))
-        shade.setColorAt(1.0, QColor(0, 0, 0, 190))
-        painter.fillRect(rect, QBrush(shade))
+        if self._show_pill:
+            shade = QLinearGradient(0, self.height() * 0.62, 0, self.height())
+            shade.setColorAt(0.0, QColor(0, 0, 0, 0))
+            shade.setColorAt(1.0, QColor(0, 0, 0, 190))
+            painter.fillRect(rect, QBrush(shade))
 
-        self._paint_pill(painter, accent, top=False)
+            self._paint_pill(painter, accent, top=False)
 
     def _paint_generated(self, painter: QPainter, rect: QRect, accent: QColor) -> None:
         style = active_style()
@@ -522,36 +534,40 @@ class GameCard(QFrame):
         super().__init__(parent)
         self.game = game
         self.setObjectName("card")
-        self.setFixedWidth(222)
+        self.setFixedWidth(188)
         self.setCursor(Qt.PointingHandCursor)
         self.setAttribute(Qt.WA_Hover, True)
         self.setProperty("hovered", False)
 
         body = QVBoxLayout(self)
-        body.setContentsMargins(10, 10, 10, 12)
-        body.setSpacing(8)
+        body.setContentsMargins(10, 10, 10, 10)
+        body.setSpacing(6)
 
-        self.cover = CoverArt(game)
+        self.cover = CoverArt(game, 168, 236, show_pill=False, radius=8.0)
         body.addWidget(self.cover, 0, Qt.AlignHCenter)
 
         self.title_label = QLabel(game.title)
         self.title_label.setObjectName("cardTitle")
         self.title_label.setWordWrap(True)
-        self.title_label.setMaximumHeight(48)
+        self.title_label.setMaximumHeight(44)
         body.addWidget(self.title_label)
 
-        self.subtitle_label = QLabel(game.subtitle or game.system)
+        sub_parts = [game.subtitle or game.system]
+        if game.playtime_seconds:
+            sub_parts.append(game.playtime_text)
+        self.subtitle_label = QLabel(" · ".join(part for part in sub_parts if part))
         self.subtitle_label.setObjectName("muted")
         self.subtitle_label.setWordWrap(True)
-        self.subtitle_label.setStyleSheet("font-size: 12px;")
+        self.subtitle_label.setStyleSheet("font-size: 11.5px;")
         body.addWidget(self.subtitle_label)
 
         self.play_button = QPushButton("▶", self.cover)
         self.play_button.setObjectName("play")
         self.play_button.setCursor(Qt.PointingHandCursor)
-        self.play_button.setFixedSize(36, 36)
-        self.play_button.move(202 - 36 - 12, 288 - 36 - 52)
+        self.play_button.setFixedSize(34, 34)
+        self.play_button.move(168 - 34 - 10, 236 - 34 - 10)
         self.play_button.clicked.connect(lambda: self.play_requested.emit(self.game))
+        self.play_button.hide()
         self.play_button.raise_()
 
         self._shadow = QGraphicsDropShadowEffect(self)
@@ -573,6 +589,7 @@ class GameCard(QFrame):
         self.setProperty("hovered", hovered)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.play_button.setVisible(hovered)
         self._animation.stop()
         self._animation.setStartValue(self._shadow.blurRadius())
         self._animation.setEndValue(36 if hovered else 18)
@@ -604,7 +621,7 @@ class GameCard(QFrame):
 
 
 class SectionHeader(QWidget):
-    def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, title: str, count_text: str = "", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -616,6 +633,14 @@ class SectionHeader(QWidget):
         label = QLabel(title)
         label.setObjectName("sectionTitle")
         row.addWidget(label)
+        if count_text:
+            badge = QLabel(count_text)
+            badge.setObjectName("tiny")
+            badge.setStyleSheet(
+                f"color: {active_style().muted}; background: rgba(255, 255, 255, 0.06);"
+                " border-radius: 9px; padding: 2px 8px; font-weight: 600;"
+            )
+            row.addWidget(badge)
         row.addStretch(1)
 
 
@@ -630,19 +655,19 @@ class CardRow(QWidget):
 
         body = QVBoxLayout(self)
         body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(12)
-        body.addWidget(SectionHeader(title))
+        body.setSpacing(10)
+        body.addWidget(SectionHeader(title, count_text=str(len(games))))
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setFixedHeight(400)
+        scroll.setFixedHeight(344)
 
         inner = QWidget()
         row = QHBoxLayout(inner)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(18)
+        row.setSpacing(16)
         for game in games:
             card = GameCard(game)
             card.play_requested.connect(self.play_requested)
@@ -661,16 +686,19 @@ class HeroBanner(QFrame):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("hero")
-        self.setFixedHeight(320)
+        self.setFixedHeight(252)
         self.game: Optional[Game] = None
+        self._backdrop_source: Optional[QPixmap] = None
+        self._backdrop_cache: Optional[QPixmap] = None
+        self._backdrop_key: tuple[str, int, int] = ("", 0, 0)
         self.setAttribute(Qt.WA_StyledBackground, False)
 
         body = QHBoxLayout(self)
-        body.setContentsMargins(34, 30, 34, 30)
-        body.setSpacing(26)
+        body.setContentsMargins(28, 22, 28, 22)
+        body.setSpacing(24)
 
         left = QVBoxLayout()
-        left.setSpacing(8)
+        left.setSpacing(6)
         self.kicker = QLabel("DESTACADO")
         self.kicker.setObjectName("kicker")
         left.addWidget(self.kicker)
@@ -687,7 +715,7 @@ class HeroBanner(QFrame):
         self.description = QLabel("")
         self.description.setObjectName("muted")
         self.description.setWordWrap(True)
-        self.description.setMaximumHeight(54)
+        self.description.setMaximumHeight(40)
         left.addWidget(self.description)
         left.addStretch(1)
 
@@ -715,14 +743,19 @@ class HeroBanner(QFrame):
                 system="Biblioteca",
                 system_key="placeholder",
             ),
-            212,
-            302,
+            152,
+            208,
+            show_pill=False,
+            radius=8.0,
         )
         self.cover.setVisible(False)
         body.addWidget(self.cover, 0, Qt.AlignVCenter)
 
     def set_game(self, game: Optional[Game]) -> None:
         self.game = game
+        self._backdrop_source = None
+        self._backdrop_cache = None
+        self._backdrop_key = ("", 0, 0)
         if game is None:
             self.kicker.setText("BIENVENIDO")
             self.title.setText("Tu biblioteca empieza aquí")
@@ -734,6 +767,14 @@ class HeroBanner(QFrame):
             self.cover.setVisible(False)
             self.update()
             return
+
+        from ..covers import game_cover
+
+        cover_path = game_cover(game)
+        if cover_path is not None:
+            pix = QPixmap(str(cover_path))
+            if not pix.isNull():
+                self._backdrop_source = pix
 
         self.kicker.setText("CONTINUAR JUGANDO" if game.last_played else "DESTACADO")
         self.title.setText(game.title)
@@ -754,12 +795,30 @@ class HeroBanner(QFrame):
         self.cover.setVisible(True)
         self.update()
 
+    def _blurred_backdrop(self) -> Optional[QPixmap]:
+        if self._backdrop_source is None or self._backdrop_source.isNull():
+            return None
+        key = (self.game.id if self.game else "", self.width(), self.height())
+        if self._backdrop_cache is not None and self._backdrop_key == key:
+            return self._backdrop_cache
+        w = max(1, self.width())
+        h = max(1, self.height())
+        tiny_w = max(24, w // 18)
+        tiny_h = max(16, h // 18)
+        blurred = self._backdrop_source.scaled(
+            tiny_w, tiny_h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+        ).scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        self._backdrop_cache = blurred
+        self._backdrop_key = key
+        return blurred
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
         rect = self.rect().adjusted(0, 0, -1, -1)
         style = active_style()
-        radius = style.radius
+        radius = max(10.0, float(style.radius))
         path = QPainterPath()
         path.addRoundedRect(QRectF(rect), radius, radius)
         painter.setClipPath(path)
@@ -770,21 +829,29 @@ class HeroBanner(QFrame):
         base.setColorAt(1.0, QColor(style.bg))
         painter.fillRect(rect, QBrush(base))
 
+        backdrop = self._blurred_backdrop()
+        if backdrop is not None:
+            painter.setOpacity(0.32)
+            sx = max(0, (backdrop.width() - self.width()) // 2)
+            sy = max(0, (backdrop.height() - self.height()) // 3)
+            painter.drawPixmap(0, 0, backdrop.copy(sx, sy, self.width(), self.height()))
+            painter.setOpacity(1.0)
+            scrim = QLinearGradient(0, 0, self.width(), 0)
+            scrim_bg = QColor(style.bg)
+            scrim.setColorAt(0.0, QColor(scrim_bg.red(), scrim_bg.green(), scrim_bg.blue(), 225))
+            scrim.setColorAt(0.58, QColor(scrim_bg.red(), scrim_bg.green(), scrim_bg.blue(), 170))
+            scrim.setColorAt(1.0, QColor(scrim_bg.red(), scrim_bg.green(), scrim_bg.blue(), 110))
+            painter.fillRect(rect, QBrush(scrim))
+
         accent = QColor(style.accent)
         glow = QRadialGradient(self.width() * 0.82, self.height() * 0.45, self.width() * 0.55)
-        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 46))
+        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 38))
         glow.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.fillRect(rect, QBrush(glow))
 
-        lines = QColor(style.accent)
-        lines.setAlpha(12)
-        painter.setPen(QPen(lines, 1))
-        for offset in range(-self.height(), self.width(), 42):
-            painter.drawLine(offset, 0, offset + self.height(), self.height())
-
         painter.setClipping(False)
         border = QColor(style.accent)
-        border.setAlpha(60)
+        border.setAlpha(55)
         painter.setPen(QPen(border, style.border_width))
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(rect, radius, radius)

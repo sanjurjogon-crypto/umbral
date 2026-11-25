@@ -341,6 +341,32 @@ def test_main_window_chrome_insets_and_sidebar_indicators(monkeypatch, tmp_path:
     app.processEvents()
 
 
+def test_home_hero_banner_and_card_row_redesign(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    from umbral.ui.pages import HomePage
+    from umbral.ui.widgets import CardRow
+
+    app = _app()
+    store = _store(
+        monkeypatch,
+        tmp_path,
+        [
+            Game(id="g1", title="Zelda", system="Switch", system_key="switch", favorite=True, last_played="2026-11-24T12:00:00"),
+            Game(id="g2", title="Hades", system="Steam", system_key="steam", source="steam", playtime_seconds=7200),
+        ],
+    )
+    home = HomePage(store)
+    home.refresh()
+    assert home.hero.height() <= 260
+    rows = home.findChildren(CardRow)
+    assert len(rows) >= 1
+    assert any(lbl.text() == "1" for lbl in rows[0].findChildren(QLabel))
+    home.close()
+    home.deleteLater()
+    app.processEvents()
+
+
 def test_settings_page_uses_submenus_and_empty_state_does_not_clip(monkeypatch, tmp_path: Path) -> None:
     from umbral.ui.pages import SettingsPage
     from umbral.ui.widgets import EmptyState
@@ -424,4 +450,30 @@ def test_sidebar_buttons_have_no_focus_and_arrows_stay_in_shelf(monkeypatch, tmp
 
     win.close()
     win.deleteLater()
+    app.processEvents()
+
+
+def test_home_hero_banner_and_card_row_redesign(monkeypatch, tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    from umbral.ui.pages import HomePage
+    from umbral.ui.widgets import CardRow
+
+    app = _app()
+    store = _store(
+        monkeypatch,
+        tmp_path,
+        [
+            Game(id="g1", title="Zelda", system="Switch", system_key="switch", favorite=True, last_played="2026-11-24T12:00:00"),
+            Game(id="g2", title="Hades", system="Steam", system_key="steam", source="steam", playtime_seconds=7200),
+        ],
+    )
+    home = HomePage(store)
+    home.refresh()
+    assert home.hero.height() <= 260
+    rows = home.findChildren(CardRow)
+    assert len(rows) >= 1
+    assert any(lbl.text() == "1" for lbl in rows[0].findChildren(QLabel))
+    home.close()
+    home.deleteLater()
     app.processEvents()
