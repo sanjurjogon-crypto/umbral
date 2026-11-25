@@ -719,3 +719,44 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
     win.close()
     win.deleteLater()
     app.processEvents()
+
+
+def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path) -> None:
+    from PIL import Image
+    from umbral.backdrops import BackdropOption, game_backdrop
+    from umbral.ui.backdrop_dialog import BackdropPickerDialog
+    from umbral.ui.shelf import ShelfCanvas
+
+    app = _app()
+    bg_file = tmp_path / "custom_bg.jpg"
+    Image.new("RGB", (640, 360), (20, 120, 210)).save(bg_file)
+
+    game = Game(id="bg1", title="Hollow Knight", system="PC", system_key="pc", backdrop=str(bg_file))
+    assert game_backdrop(game) == bg_file
+
+    canvas = ShelfCanvas()
+    canvas.resize(800, 600)
+    canvas.set_games([game])
+    cx, cy, cw, ch, _gap = canvas._layout()
+    pix = canvas._backdrop_for(canvas._current_item(), cx, cy, cw, ch)
+    assert not pix.isNull()
+    assert pix.width() == 800 and pix.height() == 600
+    # Top half should preserve crisp blue color without blur/washout, bottom is darkened
+    img = pix.toImage()
+    top_pixel = img.pixelColor(400, 100)
+    bot_pixel = img.pixelColor(400, 580)
+    assert top_pixel.blue() > 180
+    assert bot_pixel.blue() < top_pixel.blue()
+
+    monkeypatch.setattr(
+        "umbral.ui.backdrop_dialog.search_backdrops",
+        lambda q, game=None, max_results=12: [
+            BackdropOption(url="https://example.com/a.jpg", thumb_url="https://example.com/t.jpg", title=q, source="IGDB")
+        ],
+    )
+    monkeypatch.setattr("umbral.ui.backdrop_dialog.fetch_thumbnail", lambda _url: None)
+    dlg = BackdropPickerDialog(game)
+    dlg.close()
+    dlg.deleteLater()
+    canvas.deleteLater()
+    app.processEvents()

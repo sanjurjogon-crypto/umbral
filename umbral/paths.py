@@ -60,6 +60,12 @@ def covers_dir() -> Path:
     return path
 
 
+def backdrops_dir() -> Path:
+    path = data_dir() / "backdrops"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def library_file() -> Path:
     return data_dir() / "library.json"
 

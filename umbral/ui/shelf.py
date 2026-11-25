@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
@@ -36,6 +36,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+from ..backdrops import game_backdrop
 from ..covers import game_cover
 from ..icons import exe_pixmap
 from ..models import Game
@@ -477,6 +478,29 @@ def render_debanded_backdrop(
     return QPixmap.fromImage(qimg)
 
 
+def render_custom_backdrop(width: int, height: int, backdrop_path: str) -> Optional[QPixmap]:
+    """Render a crisp custom backdrop without blur, darkened only near the bottom for title legibility."""
+    w = max(16, int(width))
+    h = max(16, int(height))
+    try:
+        with Image.open(backdrop_path) as loaded:
+            fitted = ImageOps.fit(
+                loaded.convert("RGB"),
+                (w, h),
+                method=Image.Resampling.LANCZOS,
+                centering=(0.5, 0.45),
+            )
+            arr = np.asarray(fitted, dtype=np.float32)
+    except OSError:
+        return None
+    y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+    bottom_fade = np.where(y_norm > 0.56, np.clip((y_norm - 0.56) / 0.44, 0.0, 1.0), 0.0)
+    shade = (1.0 - 0.72 * (bottom_fade ** 1.35))[:, :, None]
+    arr = np.clip(arr * shade, 0.0, 255.0).astype(np.uint8)
+    qimg = QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
+    return QPixmap.fromImage(qimg)
+
+
 @dataclass
 class ShelfItem:
     game: Game
@@ -908,9 +932,11 @@ class ShelfCanvas(QWidget):
     ) -> QPixmap:
         key_id = item.game.id if item is not None else "__none__"
         cov_key = item.cover_path if item is not None else ""
+        custom_path = str(game_backdrop(item.game) or "") if item is not None else ""
         cache_key = (
             key_id,
             cov_key,
+            custom_path,
             self.width(),
             self.height(),
             int(center_x),
@@ -921,19 +947,21 @@ class ShelfCanvas(QWidget):
         if cached is not None:
             self._backdrop_cache.move_to_end(cache_key)
             return cached
-        fallback = QColor(active_style().accent)
-        rendered = render_debanded_backdrop(
-            self.width(),
-            self.height(),
-            center_x,
-            center_y,
-            cover_w,
-            cover_h,
-            cov_key,
-            item.pixmap if item is not None else None,
-            item.dominant if item is not None else fallback,
-            self._halo_enabled,
-        )
+        rendered = render_custom_backdrop(self.width(), self.height(), custom_path) if custom_path else None
+        if rendered is None:
+            fallback = QColor(active_style().accent)
+            rendered = render_debanded_backdrop(
+                self.width(),
+                self.height(),
+                center_x,
+                center_y,
+                cover_w,
+                cover_h,
+                cov_key,
+                item.pixmap if item is not None else None,
+                item.dominant if item is not None else fallback,
+                self._halo_enabled,
+            )
         self._backdrop_cache[cache_key] = rendered
         if len(self._backdrop_cache) > 18:
             self._backdrop_cache.popitem(last=False)
