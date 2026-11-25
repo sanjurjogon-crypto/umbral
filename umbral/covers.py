@@ -19,6 +19,7 @@ from urllib.request import Request, urlopen
 from PIL import Image, ImageFilter, UnidentifiedImageError
 
 from .models import Game, slugify
+from .net import ssl_context
 from .paths import covers_dir, data_dir, safe_path
 
 USER_AGENT = (
@@ -349,7 +350,7 @@ def _cache_valid(entry: dict) -> bool:
 
 def _request_json(url: str, limit: int = 8_000_000) -> dict:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=20, context=ssl_context()) as response:
         payload = response.read(limit)
     data = json.loads(payload.decode("utf-8", errors="replace"))
     return data if isinstance(data, dict) else {}
@@ -357,7 +358,7 @@ def _request_json(url: str, limit: int = 8_000_000) -> dict:
 
 def _request_bytes(url: str) -> bytes:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
-    with urlopen(request, timeout=25) as response:
+    with urlopen(request, timeout=25, context=ssl_context()) as response:
         return response.read(4_000_000)
 
 
