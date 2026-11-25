@@ -1907,21 +1907,22 @@ def _detect_transparent_window(pixmap: QPixmap) -> QRectF:
     return QRectF(x0, y0, max(0.05, x1 - x0), max(0.05, y1 - y0))
 
 
-def load_spine_texture(system_key: str) -> Optional[QPixmap]:
-    """Load an authentic vertical spine PNG texture from user data or bundled assets if available."""
+def load_spine_texture(system_key: str, side: str = "left") -> Optional[QPixmap]:
+    """Load an authentic vertical spine (left) or clasp (right) PNG texture if available."""
     key = (system_key or "").strip().lower()
     if not key:
         return None
+    suffix = "_right.png" if side == "right" else "_spine.png"
     from ..paths import data_dir
 
     candidates = (
-        data_dir() / "cases" / f"{key}_spine.png",
-        assets_dir() / "cases" / f"{key}_spine.png",
+        data_dir() / "cases" / f"{key}{suffix}",
+        assets_dir() / "cases" / f"{key}{suffix}",
     )
     for path in candidates:
         if not path.is_file():
             continue
-        cache_key = f"{key}_spine:{path}:{path.stat().st_mtime_ns}"
+        cache_key = f"{key}{suffix}:{path}:{path.stat().st_mtime_ns}"
         if cache_key in _SPINE_CACHE:
             return _SPINE_CACHE[cache_key]
         pix = QPixmap(str(path))
@@ -2042,8 +2043,8 @@ def paint_console_spine(
     left_depth = max_depth * (0.28 + 0.72 * max(0.0, clamped))
     right_depth = max_depth * (0.28 + 0.72 * max(0.0, -clamped))
 
-    spine_tex = load_spine_texture(profile.key)
     for is_left, depth in ((True, left_depth), (False, right_depth)):
+        spine_tex = load_spine_texture(profile.key, "left" if is_left else "right")
         path = QPainterPath()
         if is_left:
             x0, x1 = target.left(), target.left() - depth

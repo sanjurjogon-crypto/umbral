@@ -815,8 +815,10 @@ def test_custom_template_cases_and_spines_load_square() -> None:
         assert 0.05 < win.y() < 0.35
         assert 0.50 < win.width() <= 1.0
         assert 0.50 < win.height() < 0.90
-        spine = load_spine_texture(key)
-        assert spine is not None and not spine.isNull(), f"Missing spine for {key}"
+        spine = load_spine_texture(key, "left")
+        right_edge = load_spine_texture(key, "right")
+        assert spine is not None and not spine.isNull(), f"Missing left spine for {key}"
+        assert right_edge is not None and not right_edge.isNull(), f"Missing right edge for {key}"
 
     assert case_profile(Game(id="p1", title="Zelda", system="Ports", system_key="ports", emulator="Dusklight")).key == "dusklight"
     assert case_profile(Game(id="p2", title="Zelda", system="Ports", system_key="ports", emulator="Hookshot")).key == "hookshot"
