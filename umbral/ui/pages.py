@@ -436,10 +436,12 @@ class LibraryPage(QWidget):
             return
         icon_w = 36 if self.info_emu_icon.isVisible() else 0
         avail_w = max(240, inner_w - 96 - icon_w)
+        self.info_title.setMinimumHeight(0)
+        self.info_title.setMaximumHeight(16777215)
         self.info_title.setMaximumWidth(avail_w)
         needed_h = self.info_title.heightForWidth(avail_w)
         if needed_h > 0:
-            self.info_title.setMinimumHeight(needed_h + 4)
+            self.info_title.setFixedHeight(needed_h + 4)
         self.info_title.updateGeometry()
 
     def _layout_overlays(self) -> None:
