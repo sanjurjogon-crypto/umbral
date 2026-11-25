@@ -439,9 +439,8 @@ class LibraryPage(QWidget):
 
         icon_w = 36 if self.info_emu_icon.isVisible() else 0
         avail_w = max(240, inner_w - 64 - icon_w)
-        self.info_title.setMinimumHeight(0)
-        self.info_title.setMaximumHeight(16777215)
-        self.info_title.setMaximumWidth(avail_w)
+        self.info_title.setMinimumSize(0, 0)
+        self.info_title.setMaximumSize(16777215, 16777215)
 
         style = active_style()
         measure_font = QFont(style.heading_font or "Cinzel")
@@ -449,12 +448,16 @@ class LibraryPage(QWidget):
         measure_font.setLetterSpacing(QFont.AbsoluteSpacing, 2.0)
         raw = self.info_title.text() or ""
         shown = raw.upper() if style.uppercase_headings else raw
-        h_fm = QFontMetrics(measure_font).boundingRect(
-            QRect(0, 0, avail_w, 1000),
+        fm = QFontMetrics(measure_font)
+        single_w = max(fm.horizontalAdvance(shown), fm.boundingRect(shown).width()) + 36
+        target_w = min(avail_w, max(120, single_w))
+        self.info_title.setFixedWidth(target_w)
+        h_fm = fm.boundingRect(
+            QRect(0, 0, target_w, 1000),
             Qt.AlignHCenter | Qt.TextWordWrap,
             shown,
         ).height()
-        h_qlabel = self.info_title.heightForWidth(avail_w)
+        h_qlabel = self.info_title.heightForWidth(target_w)
         needed_h = max(h_qlabel, h_fm)
         if needed_h > 0:
             self.info_title.setFixedHeight(needed_h + 16)
