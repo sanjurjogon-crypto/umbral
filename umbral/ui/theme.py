@@ -511,7 +511,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         font-size: 11px;
         letter-spacing: 1px;
         color: __MUTED_2__;
-        padding: 6px 0 14px 0;
+        padding: 2px 0 8px 0;
         background: transparent;
     }
     QWidget#shelfInfo {

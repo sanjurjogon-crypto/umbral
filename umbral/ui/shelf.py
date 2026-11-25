@@ -517,6 +517,7 @@ class ShelfCanvas(QWidget):
         self._inset_left = 0
         self._inset_top = 0
         self._inset_bottom = 0
+        self._inset_header = 0
         self._halo_enabled = True
         self._backdrop_mix = 1.0
         self._prev_backdrop_item: Optional[ShelfItem] = None
@@ -539,15 +540,22 @@ class ShelfCanvas(QWidget):
         self._tilt_timer.setInterval(16)
         self._tilt_timer.timeout.connect(self._step_tilt)
 
-    def set_chrome_insets(self, left: int, top: int, bottom: int = 0) -> None:
+    def set_chrome_insets(self, left: int, top: int, bottom: int = 0, header: int = 0) -> None:
         left_val = max(0, int(left))
         top_val = max(0, int(top))
         bottom_val = max(0, int(bottom))
-        if (left_val, top_val, bottom_val) == (self._inset_left, self._inset_top, self._inset_bottom):
+        header_val = max(0, int(header))
+        if (left_val, top_val, bottom_val, header_val) == (
+            self._inset_left,
+            self._inset_top,
+            self._inset_bottom,
+            self._inset_header,
+        ):
             return
         self._inset_left = left_val
         self._inset_top = top_val
         self._inset_bottom = bottom_val
+        self._inset_header = header_val
         self._backdrop_cache.clear()
         self.update()
 
@@ -821,13 +829,15 @@ class ShelfCanvas(QWidget):
 
     def _layout(self):
         usable_w = max(320.0, float(self.width() - self._inset_left))
-        bottom_pad = max(130, self._inset_bottom)
-        usable_h = max(200.0, float(self.height() - self._inset_top - bottom_pad))
+        carousel_top = float(self._inset_top + self._inset_header)
+        bottom_pad = float(self._inset_bottom) if self._inset_bottom > 0 else 140.0
+        carousel_bottom = max(carousel_top + 220.0, float(self.height()) - bottom_pad)
+        carousel_h = carousel_bottom - carousel_top
         center_x = self._inset_left + usable_w / 2.0
-        scale = min(usable_w / 1240.0, usable_h / 390.0, 1.18)
+        scale = min(usable_w / 1240.0, (carousel_h - 18.0) / CASE_H, 1.18)
         cover_w = CASE_W * max(0.64, scale)
         cover_h = CASE_H * max(0.64, scale)
-        center_y = self._inset_top + usable_h * 0.49
+        center_y = carousel_top + carousel_h * 0.50
         gap = cover_w * 0.86
         return center_x, center_y, cover_w, cover_h, gap
 
