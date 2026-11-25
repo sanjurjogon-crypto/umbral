@@ -1415,17 +1415,17 @@ class StartupOverlay(QWidget):
 
         # Typography measurement for "UMBRAL"
         title_font = QFont(style.heading_font or "Cinzel")
-        title_font.setPixelSize(44)
+        title_font.setPixelSize(64)
         title_font.setWeight(QFont.DemiBold)
-        title_font.setLetterSpacing(QFont.AbsoluteSpacing, 9.0)
+        title_font.setLetterSpacing(QFont.AbsoluteSpacing, 12.0)
         fm = QFontMetrics(title_font)
         text = "UMBRAL"
         text_w = float(fm.horizontalAdvance(text))
 
-        # Outer diamond geometry (scaled up from umbral.svg: 30x46 -> ~64x98)
-        half_w = 34.0
-        half_h = 52.0
-        spread = text_w * 0.5 + 34.0
+        # Sharper, larger outer diamond geometry (acute mitered tips)
+        half_w = 42.0
+        half_h = 84.0
+        spread = text_w * 0.5 + 48.0
 
         # Phase 1: 0..1000ms hold; Phase 2: 1000..1650ms close brackets
         close_p = 0.0 if t <= 1000.0 else self._ease_in_out_cubic((t - 1000.0) / 650.0)
@@ -1435,15 +1435,15 @@ class StartupOverlay(QWidget):
         clip_half = max(0.0, offset)
         if clip_half > 1.0:
             painter.save()
-            clip_rect = QRectF(cx - clip_half, cy - 48.0, clip_half * 2.0, 96.0)
+            clip_rect = QRectF(cx - clip_half, cy - 64.0, clip_half * 2.0, 128.0)
             painter.setClipRect(clip_rect)
             painter.setFont(title_font)
             painter.setPen(accent_2)
-            painter.drawText(QRectF(cx - text_w, cy - 40.0, text_w * 2.0, 80.0), Qt.AlignCenter, text)
+            painter.drawText(QRectF(cx - text_w, cy - 52.0, text_w * 2.0, 104.0), Qt.AlignCenter, text)
             painter.restore()
 
-        # Draw left (<) and right (>) half-diamond brackets
-        pen = QPen(accent, 4.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        # Draw sharp left (<) and right (>) half-diamond brackets
+        pen = QPen(accent, 4.4, Qt.SolidLine, Qt.FlatCap, Qt.MiterJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
 
@@ -1459,12 +1459,26 @@ class StartupOverlay(QWidget):
         right_path.lineTo(cx + offset, cy + half_h)
         painter.drawPath(right_path)
 
+        # Subtitle "Gonzalo Sanjurjo" below
+        sub_font = QFont(style.heading_font or "Cinzel")
+        sub_font.setPixelSize(16)
+        sub_font.setLetterSpacing(QFont.AbsoluteSpacing, 5.5)
+        painter.setFont(sub_font)
+        sub_color = QColor(accent_2)
+        sub_color.setAlpha(205)
+        painter.setPen(sub_color)
+        painter.drawText(
+            QRectF(0.0, cy + half_h + 26.0, w, 34.0),
+            Qt.AlignHCenter | Qt.AlignTop,
+            "Gonzalo Sanjurjo",
+        )
+
         # Phase 3: 1600..2150ms inner golden diamond appears & glows
         if t > 1600.0:
             glow_p = self._ease_in_out_cubic((t - 1600.0) / 480.0)
-            bloom_r = 26.0 + 52.0 * glow_p
+            bloom_r = 34.0 + 68.0 * glow_p
             bloom = QRadialGradient(cx, cy, bloom_r)
-            bloom_alpha = int(170 * glow_p * (1.15 - 0.35 * glow_p))
+            bloom_alpha = int(175 * glow_p * (1.15 - 0.35 * glow_p))
             bloom.setColorAt(0.0, QColor(accent_2.red(), accent_2.green(), accent_2.blue(), min(255, bloom_alpha)))
             bloom.setColorAt(0.45, QColor(accent.red(), accent.green(), accent.blue(), int(bloom_alpha * 0.55)))
             bloom.setColorAt(1.0, QColor(0, 0, 0, 0))
@@ -1472,9 +1486,8 @@ class StartupOverlay(QWidget):
             painter.setBrush(QBrush(bloom))
             painter.drawEllipse(QPointF(cx, cy), bloom_r, bloom_r)
 
-            # Inner solid diamond (scaled from umbral.svg: 12x22 -> ~14x25)
-            in_w = 13.5 * (0.65 + 0.35 * glow_p)
-            in_h = 24.5 * (0.65 + 0.35 * glow_p)
+            in_w = 16.5 * (0.65 + 0.35 * glow_p)
+            in_h = 38.0 * (0.65 + 0.35 * glow_p)
             inner_diamond = QPainterPath()
             inner_diamond.moveTo(cx, cy - in_h)
             inner_diamond.lineTo(cx + in_w, cy)
