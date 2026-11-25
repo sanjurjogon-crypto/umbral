@@ -407,6 +407,44 @@ def _pillow_sharp_cover(
     return ambient_arr
 
 
+def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarray:
+    """Apply real optical frosted-glass Gaussian blur and milky/dark frost tint below floor_y."""
+    if floor_y is None:
+        return arr
+    h, w = arr.shape[:2]
+    fy = max(8, min(h - 8, int(round(floor_y))))
+    lower_h = h - fy
+    if lower_h < 8:
+        return arr
+    lower_u8 = np.clip(arr[fy:, :, :], 0.0, 255.0).astype(np.uint8)
+    pil_low = Image.fromarray(lower_u8, "RGB")
+    small_w = max(8, w // 2)
+    small_h = max(8, lower_h // 2)
+    blurred_small = pil_low.resize((small_w, small_h), Image.Resampling.BILINEAR).filter(
+        ImageFilter.GaussianBlur(radius=18)
+    )
+    blurred_full = blurred_small.resize((w, lower_h), Image.Resampling.BILINEAR)
+    frost_arr = np.asarray(blurred_full, dtype=np.float32)
+
+    y_rel = np.linspace(0.0, 1.0, lower_h, dtype=np.float32)[:, None, None]
+    # Stronger frosted milky scatter near horizon, deepening smoothly toward bottom
+    frost_base = np.array([196.0, 208.0, 224.0], dtype=np.float32)[None, None, :]
+    deep_glass = np.array([10.0, 12.0, 16.0], dtype=np.float32)[None, None, :]
+    milky_w = 0.20 * np.exp(-y_rel * 3.2) + 0.08
+    dark_w = 0.34 + 0.50 * (y_rel ** 0.85)
+    out_low = frost_arr * (1.0 - milky_w) + frost_base * milky_w
+    out_low = out_low * (1.0 - dark_w) + deep_glass * dark_w
+
+    rng = np.random.default_rng(2027)
+    u1 = rng.random((lower_h, w), dtype=np.float32)
+    u2 = rng.random((lower_h, w), dtype=np.float32)
+    out_low += ((u1 + u2 - 1.0) * 2.4)[:, :, None]
+
+    res = arr.copy()
+    res[fy:, :, :] = np.clip(out_low, 0.0, 255.0)
+    return res
+
+
 def render_debanded_backdrop(
     width: int,
     height: int,
@@ -418,6 +456,7 @@ def render_debanded_backdrop(
     pixmap: Optional[QPixmap],
     dominant: QColor,
     halo_enabled: bool,
+    floor_y: Optional[float] = None,
 ) -> QPixmap:
     """Render a crisp full-res backdrop with triangular-PDF debanding and subtle film grain."""
     w = max(16, int(width))
@@ -472,7 +511,8 @@ def render_debanded_backdrop(
     u1 = rng.random((h, w), dtype=np.float32)
     u2 = rng.random((h, w), dtype=np.float32)
     grain = (u1 + u2 - 1.0) * 3.1
-    base = np.clip(base + grain[:, :, None], 0.0, 255.0).astype(np.uint8)
+    base = np.clip(base + grain[:, :, None], 0.0, 255.0)
+    base = _apply_frosted_floor(base, floor_y).astype(np.uint8)
 
     qimg = QImage(base.data, w, h, w * 3, QImage.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
@@ -493,6 +533,7 @@ def render_custom_backdrop(
     dim: float = 0.0,
     blur: int = 0,
     align: str = "center",
+    floor_y: Optional[float] = None,
 ) -> Optional[QPixmap]:
     """Render a custom backdrop centered in the visible shelf area with per-game dim/blur/align."""
     w = max(16, int(width))
@@ -523,7 +564,8 @@ def render_custom_backdrop(
     y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
     bottom_fade = np.where(y_norm > 0.56, np.clip((y_norm - 0.56) / 0.44, 0.0, 1.0), 0.0)
     shade = (dim_factor * (1.0 - 0.72 * (bottom_fade ** 1.35)))[:, :, None]
-    arr = np.clip(arr * shade, 0.0, 255.0).astype(np.uint8)
+    arr = np.clip(arr * shade, 0.0, 255.0)
+    arr = _apply_frosted_floor(arr, floor_y).astype(np.uint8)
     qimg = QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
 
@@ -1003,6 +1045,7 @@ class ShelfCanvas(QWidget):
                 dim=bg_dim,
                 blur=bg_blur,
                 align=bg_align,
+                floor_y=center_y,
             )
             if custom_path
             else None
@@ -1020,6 +1063,7 @@ class ShelfCanvas(QWidget):
                 item.pixmap if item is not None else None,
                 item.dominant if item is not None else fallback,
                 self._halo_enabled,
+                floor_y=center_y,
             )
         self._backdrop_cache[cache_key] = rendered
         self._last_backdrop_by_id[key_id] = rendered
@@ -1116,35 +1160,36 @@ class ShelfCanvas(QWidget):
         cover_h: float,
     ) -> None:
         rect = QRectF(self.rect())
-        floor_y = center_y + cover_h * 0.50 + 2
+        # Place the glass-table horizon behind the middle of the focused case without moving cases
+        floor_y = center_y
         dominant = self._blended_dominant(current_item) if self._halo_enabled else QColor(active_style().accent)
 
         floor_rect = QRectF(0, floor_y, rect.width(), max(0.0, rect.bottom() - floor_y))
-        marble = QLinearGradient(0, floor_y, 0, rect.bottom())
-        tint_alpha = 34 if self._halo_enabled else 16
-        marble.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), tint_alpha))
-        marble.setColorAt(0.08, QColor(215, 224, 238, 28))
-        marble.setColorAt(0.32, QColor(18, 20, 26, 178))
-        marble.setColorAt(1.0, QColor(6, 7, 9, 238))
-        painter.fillRect(floor_rect, QBrush(marble))
+        frost_glass = QLinearGradient(0, floor_y, 0, rect.bottom())
+        tint_alpha = 26 if self._halo_enabled else 12
+        frost_glass.setColorAt(0.0, QColor(dominant.red(), dominant.green(), dominant.blue(), tint_alpha))
+        frost_glass.setColorAt(0.06, QColor(225, 232, 245, 26))
+        frost_glass.setColorAt(0.35, QColor(14, 16, 20, 72))
+        frost_glass.setColorAt(1.0, QColor(5, 6, 8, 175))
+        painter.fillRect(floor_rect, QBrush(frost_glass))
 
-        # Subtle frosted glass band right under the horizon
-        frost_h = min(28.0, max(10.0, floor_rect.height() * 0.18))
+        # Crisp frosted-glass specular bevel band right below the horizon line
+        frost_h = min(34.0, max(12.0, floor_rect.height() * 0.14))
         frost = QLinearGradient(0, floor_y, 0, floor_y + frost_h)
-        frost.setColorAt(0.0, QColor(235, 242, 252, 30))
-        frost.setColorAt(1.0, QColor(235, 242, 252, 0))
+        frost.setColorAt(0.0, QColor(240, 245, 255, 38))
+        frost.setColorAt(1.0, QColor(240, 245, 255, 0))
         painter.fillRect(QRectF(0, floor_y, rect.width(), frost_h), QBrush(frost))
 
         sheen = QLinearGradient(0, floor_y, rect.width(), floor_y)
         sheen.setColorAt(0.0, QColor(0, 0, 0, 0))
         sheen.setColorAt(
             0.30,
-            QColor(dominant.red(), dominant.green(), dominant.blue(), 46 if self._halo_enabled else 22),
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 56 if self._halo_enabled else 26),
         )
-        sheen.setColorAt(0.55, QColor(255, 250, 238, 92))
+        sheen.setColorAt(0.55, QColor(255, 252, 244, 112))
         sheen.setColorAt(
             0.78,
-            QColor(dominant.red(), dominant.green(), dominant.blue(), 46 if self._halo_enabled else 22),
+            QColor(dominant.red(), dominant.green(), dominant.blue(), 56 if self._halo_enabled else 26),
         )
         sheen.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(QPen(QBrush(sheen), 1.4))
@@ -1262,16 +1307,27 @@ class ShelfCanvas(QWidget):
 
         flipped_full = front.transformed(QTransform().scale(1.0, -1.0))
         cropped = flipped_full.copy(0, 0, front.width(), min(refl_h, flipped_full.height()))
+        frost_blur = cropped.scaled(
+            max(8, int(round(cropped.width() * 0.34))),
+            max(8, int(round(cropped.height() * 0.34))),
+            Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation,
+        ).scaled(cropped.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 
         out = QPixmap(front.width(), refl_h)
         out.fill(Qt.transparent)
         p = QPainter(out)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        # Blend crisp near the contact edge into optical frosted blur further down
         p.drawPixmap(0, 0, cropped)
+        p.setOpacity(0.68)
+        p.drawPixmap(0, 0, frost_blur)
+        p.setOpacity(1.0)
         # Smooth continuous alpha mask fading completely to 0 before the bottom edge
         mask = QLinearGradient(0, 0, 0, refl_h)
-        mask.setColorAt(0.0, QColor(0, 0, 0, 195))
-        mask.setColorAt(0.28, QColor(0, 0, 0, 110))
-        mask.setColorAt(0.68, QColor(0, 0, 0, 28))
+        mask.setColorAt(0.0, QColor(0, 0, 0, 205))
+        mask.setColorAt(0.28, QColor(0, 0, 0, 132))
+        mask.setColorAt(0.66, QColor(0, 0, 0, 44))
         mask.setColorAt(0.92, QColor(0, 0, 0, 0))
         mask.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
@@ -1294,7 +1350,8 @@ class ShelfCanvas(QWidget):
         selected: bool,
     ) -> None:
         focus = geometry["focus"]
-        strength = max(0.42, focus) * (1.0 - min(0.55, geometry["dim"] * 0.65))
+        dist = float(geometry.get("distance", 0.0))
+        strength = max(0.55, 0.70 + 0.30 * focus) * (1.0 - min(0.45, dist * 0.14))
         if strength <= 0.08:
             return
         target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
@@ -1307,9 +1364,16 @@ class ShelfCanvas(QWidget):
         )
 
         # Anchor flipped 3D reflection directly under the bottom perspective edge of the case
-        bl = QPointF(target.center().x() + quad[3].x(), target.center().y() + quad[3].y() + 2.0)
-        br = QPointF(target.center().x() + quad[2].x(), target.center().y() + quad[2].y() + 2.0)
-        refl_h = target.height() * 0.68
+        bl = QPointF(target.center().x() + quad[3].x(), target.center().y() + quad[3].y() + 1.5)
+        br = QPointF(target.center().x() + quad[2].x(), target.center().y() + quad[2].y() + 1.5)
+
+        # Soft contact shadow grounding the standing case onto the glass tabletop
+        painter.save()
+        painter.setPen(QPen(QColor(0, 0, 0, int(140 * strength)), 4.0, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(bl, br)
+        painter.restore()
+
+        refl_h = target.height() * 0.62
         l_drop = refl_h + (quad[3].y() - quad[2].y()) * 0.35
         r_drop = refl_h + (quad[2].y() - quad[3].y()) * 0.35
         refl_quad = [
@@ -1318,7 +1382,7 @@ class ShelfCanvas(QWidget):
             QPointF(br.x(), br.y() + r_drop),
             QPointF(bl.x(), bl.y() + l_drop),
         ]
-        refl_rect = QRectF(target.left(), target.bottom() + 2.0, target.width(), refl_h)
+        refl_rect = QRectF(target.left(), target.bottom() + 1.5, target.width(), refl_h)
         source = [
             QPointF(refl_rect.left(), refl_rect.top()),
             QPointF(refl_rect.right(), refl_rect.top()),
@@ -1333,7 +1397,7 @@ class ShelfCanvas(QWidget):
 
         painter.save()
         painter.setTransform(trans, False)
-        painter.setOpacity(0.56 * strength if selected else 0.44 * strength)
+        painter.setOpacity((0.64 if selected else 0.50) * strength)
         # Mirror both left & right 3D spines continuously into floor
         max_depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
         left_depth = max_depth * (0.28 + 0.72 * max(0.0, turn))
