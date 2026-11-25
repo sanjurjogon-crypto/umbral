@@ -35,6 +35,9 @@ class Game:
     accent: str = "#E9B949"
     cover: str = ""
     backdrop: str = ""
+    backdrop_dim: float = 0.0
+    backdrop_blur: int = 0
+    backdrop_align: str = "center"
     favorite: bool = False
     progress: str = ""
     playtime_seconds: int = 0

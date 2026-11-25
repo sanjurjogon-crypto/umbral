@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
             page.details_requested.connect(self._details)
             page.context_requested.connect(self._show_game_menu)
             page.add_requested.connect(self._add_game)
+        self.library.backdrop_change_requested.connect(self._pick_game_backdrop)
         self.health.rescan_requested.connect(self._rescan)
         self.health.relink_requested.connect(self._relink_game)
         self.health.add_folder_requested.connect(self._add_scan_folder)

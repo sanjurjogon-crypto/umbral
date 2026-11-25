@@ -755,6 +755,26 @@ def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path
     assert img2.pixelColor(100, 100).blue() < 20
     assert img2.pixelColor(520, 100).blue() > 180
 
+    # Per-game backdrop settings (dim, blur, align) + bottom-right menu
+    game.backdrop_dim = 0.55
+    game.backdrop_blur = 6
+    game.backdrop_align = "top"
+    pix_dim = canvas._backdrop_for(canvas._current_item(), cx2, cy2, cw2, ch2)
+    assert pix_dim.toImage().pixelColor(520, 100).blue() < img2.pixelColor(520, 100).blue()
+
+    store = _store(monkeypatch, tmp_path, [game])
+    page = LibraryPage(store)
+    page.resize(900, 650)
+    page.refresh()
+    assert page.backdrop_button.objectName() == "filterBtn"
+    page._populate_backdrop_menu()
+    labels = [act.text() for act in page._backdrop_menu.actions() if act.text()]
+    assert "Brillo / Oscuridad" in labels
+    assert "Desenfoque" in labels
+    assert "Encuadre" in labels
+    assert "Cambiar fondo..." in labels
+    assert "Restaurar por defecto" in labels
+
     monkeypatch.setattr(
         "umbral.ui.backdrop_dialog.search_backdrops",
         lambda q, game=None, max_results=12: [

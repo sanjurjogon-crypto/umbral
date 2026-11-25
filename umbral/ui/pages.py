@@ -128,6 +128,7 @@ class HomePage(QWidget):
     details_requested = Signal(object)
     context_requested = Signal(object, object)
     add_requested = Signal()
+    backdrop_change_requested = Signal(object)
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -229,6 +230,7 @@ class LibraryPage(QWidget):
     details_requested = Signal(object)
     context_requested = Signal(object, object)
     add_requested = Signal()
+    backdrop_change_requested = Signal(object)
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -352,6 +354,14 @@ class LibraryPage(QWidget):
         bottom_body.addWidget(self.info)
         bottom_body.addWidget(hint)
 
+        self.backdrop_button = QPushButton("Fondo  ▾", self)
+        self.backdrop_button.setObjectName("filterBtn")
+        self.backdrop_button.setCursor(Qt.PointingHandCursor)
+        self.backdrop_button.setFocusPolicy(Qt.NoFocus)
+        self._backdrop_menu = QMenu(self)
+        self._backdrop_menu.aboutToShow.connect(self._populate_backdrop_menu)
+        self.backdrop_button.setMenu(self._backdrop_menu)
+
         self._empty = EmptyState(
             "No hay juegos en esta vista",
             "Prueba otro sistema, vuelve a detectar o añade un juego a mano.",
@@ -436,6 +446,18 @@ class LibraryPage(QWidget):
             self.canvas.lower()
         self.header.raise_()
         self.bottom.raise_()
+        if hasattr(self, "backdrop_button"):
+            show_bg_btn = self._view_mode == "shelf" and bool(self.canvas.items)
+            self.backdrop_button.setVisible(show_bg_btn)
+            if show_bg_btn:
+                btn_sz = self.backdrop_button.sizeHint()
+                self.backdrop_button.setGeometry(
+                    max(left, width - btn_sz.width() - 28),
+                    max(top, height - btn_sz.height() - 18),
+                    btn_sz.width(),
+                    btn_sz.height(),
+                )
+                self.backdrop_button.raise_()
         if hasattr(self, "_empty"):
             self._empty.setGeometry(left, top, inner_w, inner_h)
             if self._empty.isVisible():
@@ -572,6 +594,77 @@ class LibraryPage(QWidget):
         if hasattr(self, "filters_button"):
             active_badge = bool(self._state_filter or self._hide_demos)
             self.filters_button.setText("Filtros •  ▾" if active_badge else "Filtros  ▾")
+
+    def _populate_backdrop_menu(self) -> None:
+        menu = self._backdrop_menu
+        menu.clear()
+        game = self.canvas.current_game()
+        if game is None:
+            return
+
+        dim_menu = menu.addMenu("Brillo / Oscuridad")
+        dim_group = QActionGroup(dim_menu)
+        dim_group.setExclusive(True)
+        cur_dim = float(getattr(game, "backdrop_dim", 0.0) or 0.0)
+        for label, val in (("Normal", 0.0), ("Oscuro", 0.30), ("Muy oscuro", 0.55)):
+            act = QAction(label, dim_menu, checkable=True)
+            act.setChecked(abs(cur_dim - val) < 0.05)
+            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_dim=v))
+            dim_group.addAction(act)
+            dim_menu.addAction(act)
+
+        blur_menu = menu.addMenu("Desenfoque")
+        blur_group = QActionGroup(blur_menu)
+        blur_group.setExclusive(True)
+        cur_blur = int(getattr(game, "backdrop_blur", 0) or 0)
+        for label, val in (("Nítido", 0), ("Suave", 6), ("Difuminado", 18)):
+            act = QAction(label, blur_menu, checkable=True)
+            act.setChecked(cur_blur == val)
+            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_blur=v))
+            blur_group.addAction(act)
+            blur_menu.addAction(act)
+
+        align_menu = menu.addMenu("Encuadre")
+        align_group = QActionGroup(align_menu)
+        align_group.setExclusive(True)
+        cur_align = str(getattr(game, "backdrop_align", "center") or "center")
+        for label, val in (("Arriba", "top"), ("Centro", "center"), ("Abajo", "bottom")):
+            act = QAction(label, align_menu, checkable=True)
+            act.setChecked(cur_align == val)
+            act.triggered.connect(lambda _c, v=val: self._update_backdrop_setting(backdrop_align=v))
+            align_group.addAction(act)
+            align_menu.addAction(act)
+
+        menu.addSeparator()
+        pick_act = QAction("Cambiar fondo...", menu)
+        pick_act.triggered.connect(lambda: self.backdrop_change_requested.emit(game))
+        menu.addAction(pick_act)
+        if game.backdrop:
+            reset_act = QAction("Restaurar por defecto", menu)
+            reset_act.triggered.connect(self._reset_current_backdrop)
+            menu.addAction(reset_act)
+
+    def _update_backdrop_setting(self, **kwargs) -> None:
+        game = self.canvas.current_game()
+        if game is None:
+            return
+        for key, value in kwargs.items():
+            setattr(game, key, value)
+        self.store.save_library()
+        self.canvas._backdrop_cache.clear()
+        self.canvas.update()
+
+    def _reset_current_backdrop(self) -> None:
+        game = self.canvas.current_game()
+        if game is None:
+            return
+        game.backdrop = ""
+        game.backdrop_dim = 0.0
+        game.backdrop_blur = 0
+        game.backdrop_align = "center"
+        self.store.save_library()
+        self.canvas._backdrop_cache.clear()
+        self.canvas.update()
 
     def _visible_games(self) -> list[Game]:
         games = self.store.games

@@ -46,6 +46,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     accent = accent or style.accent
     soft = _rgba(accent, 0.14)
     softer = _rgba(accent, 0.06)
+    translucent_bg = _rgba(style.bg, 0.78)
+    translucent_primary = _rgba(_mix(style.bg, accent, 0.16), 0.84)
+    translucent_hover = _rgba(_mix(style.bg, accent, 0.28), 0.90)
     border_accent = _rgba(accent, 0.55)
     glow = _rgba(accent, 0.35)
     hover_bg = _rgba(style.text, 0.05)
@@ -189,7 +192,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         color: __ACCENT__;
     }
     QPushButton#primary {
-        background: __SOFTER__;
+        background: __TRANSLUCENT_PRIMARY__;
         border: __THIN__px solid __ACCENT__;
         color: __ACCENT_2__;
         font-family: "__HEADING__";
@@ -202,17 +205,17 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QPushButton#primary:hover {
-        background: __ACCENT_SOFT__;
+        background: __TRANSLUCENT_HOVER__;
         color: __ACCENT_2__;
     }
     QPushButton#primary:pressed {
-        background: __ACCENT_SOFTER__;
+        background: __TRANSLUCENT_BG__;
     }
     QPushButton#ghost {
         border: __THIN__px solid __BORDER__;
-        background: transparent;
+        background: __TRANSLUCENT_BG__;
         padding: 9px 18px;
-        color: __MUTED__;
+        color: __TEXT__;
         font-family: "__HEADING__";
         font-size: 12px;
         letter-spacing: 1.5px;
@@ -361,7 +364,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         __TRANSFORM__
     }
     QPushButton#play {
-        background: __SOFTER__;
+        background: __TRANSLUCENT_PRIMARY__;
         color: __ACCENT_2__;
         border: __THIN__px solid __ACCENT__;
         border-radius: __RADIUS__px;
@@ -604,6 +607,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         "__GLOW__": glow,
         "__SOFT__": soft,
         "__SOFTER__": softer,
+        "__TRANSLUCENT_BG__": translucent_bg,
+        "__TRANSLUCENT_PRIMARY__": translucent_primary,
+        "__TRANSLUCENT_HOVER__": translucent_hover,
         "__HOVER_BG__": hover_bg,
         "__SCROLL__": scroll,
         "__INPUT_BG__": input_bg,
