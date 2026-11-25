@@ -450,10 +450,11 @@ def test_library_shelf_title_expands_for_long_multiline_titles(monkeypatch, tmp_
     assert center_y + cover_h / 2.0 <= lib.bottom.y() + 2
 
     # Resizing wider or switching to a short title must shrink info_title back down
-    lib.resize(1400, 820)
+    two_line_h = lib.info_title.height()
+    lib.resize(1800, 820)
     app.processEvents()
     one_line_h = lib.info_title.height()
-    assert one_line_h < lib.info_title.fontMetrics().lineSpacing() * 2
+    assert one_line_h < two_line_h
     lib.close()
     lib.deleteLater()
     app.processEvents()

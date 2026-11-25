@@ -352,7 +352,7 @@ class LibraryPage(QWidget):
         self.info = QWidget(self)
         self.info.setObjectName("shelfInfo")
         info_body = QVBoxLayout(self.info)
-        info_body.setContentsMargins(38, 2, 38, 6)
+        info_body.setContentsMargins(38, 8, 38, 8)
         info_body.setSpacing(4)
         self.info_title_row = QHBoxLayout()
         self.info_title_row.setContentsMargins(0, 0, 0, 0)
@@ -435,21 +435,29 @@ class LibraryPage(QWidget):
         if not hasattr(self, "info_title"):
             return
         from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFont, QFontMetrics
 
         icon_w = 36 if self.info_emu_icon.isVisible() else 0
         avail_w = max(240, inner_w - 64 - icon_w)
         self.info_title.setMinimumHeight(0)
         self.info_title.setMaximumHeight(16777215)
         self.info_title.setMaximumWidth(avail_w)
-        h_qlabel = self.info_title.heightForWidth(avail_w)
-        h_fm = self.info_title.fontMetrics().boundingRect(
+
+        style = active_style()
+        measure_font = QFont(style.heading_font or "Cinzel")
+        measure_font.setPixelSize(29)
+        measure_font.setLetterSpacing(QFont.AbsoluteSpacing, 2.0)
+        raw = self.info_title.text() or ""
+        shown = raw.upper() if style.uppercase_headings else raw
+        h_fm = QFontMetrics(measure_font).boundingRect(
             QRect(0, 0, avail_w, 1000),
             Qt.AlignHCenter | Qt.TextWordWrap,
-            self.info_title.text(),
+            shown,
         ).height()
+        h_qlabel = self.info_title.heightForWidth(avail_w)
         needed_h = max(h_qlabel, h_fm)
         if needed_h > 0:
-            self.info_title.setFixedHeight(needed_h + 14)
+            self.info_title.setFixedHeight(needed_h + 16)
         self.info_title.updateGeometry()
 
     def _layout_overlays(self) -> None:
