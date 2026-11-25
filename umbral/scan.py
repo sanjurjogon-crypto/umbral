@@ -22,14 +22,18 @@ class DetectWorker(QThread):
         emulator_paths: dict[str, str] | None = None,
         scan_folders: list[str] | None = None,
         extra_profiles: list[object] | None = None,
+        clear_cache: bool = False,
     ) -> None:
         super().__init__()
         self._emulator_paths = emulator_paths or {}
         self._scan_folders = scan_folders or []
         self._extra_profiles = extra_profiles or []
+        self._clear_cache = clear_cache
 
     def run(self) -> None:
         try:
+            if self._clear_cache:
+                invalidate()
             self.done.emit(detect(self._emulator_paths, self._scan_folders, self._extra_profiles))
         except Exception as error:  # noqa: BLE001 - la detección no debe tumbar la app
             self.failed.emit(str(error))

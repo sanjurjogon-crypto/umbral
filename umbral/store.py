@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -8,6 +9,7 @@ from typing import Any
 
 from .models import Game, now_iso
 from .paths import library_file, path_key as _path_key, settings_file
+from .relink import is_installed
 from .rom_rules import is_ambiguous, plausible
 
 BACKUP_COUNT = 3
@@ -96,7 +98,7 @@ class Store:
         loaded, settings_backup = _read_json(settings_file(), {})
         if not isinstance(loaded, dict):
             loaded = {}
-        self.settings: dict[str, Any] = {**DEFAULT_SETTINGS, **loaded}
+        self.settings: dict[str, Any] = {**copy.deepcopy(DEFAULT_SETTINGS), **loaded}
         self.recovery_notice = ""
         if settings_backup is not None:
             self.recovery_notice = (
@@ -312,6 +314,19 @@ class Store:
 
     def remove(self, game_id: str) -> None:
         self.games = [game for game in self.games if game.id != game_id]
+
+    def prune_missing(self, detected_ids: set[str] | None = None) -> list[Game]:
+        """Remove games whose installed files or manifests are no longer present."""
+        kept: list[Game] = []
+        removed: list[Game] = []
+        for game in self.games:
+            if is_installed(game, detected_ids=detected_ids):
+                kept.append(game)
+            else:
+                removed.append(game)
+        if removed:
+            self.games = kept
+        return removed
 
     def hide(self, game_id: str) -> None:
         game = self.get(game_id)

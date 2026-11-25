@@ -38,7 +38,7 @@ from ..downloads import Download, emulator_for, mark_seen
 from ..launcher import LaunchError, ProcessWatcher, SteamWatcher, diagnostic_text, launch_game, steam_app_id, validate
 from ..models import Emulator, Game, now_iso, slugify
 from ..paths import assets_dir, data_dir, executable_file_filter, path_key as _path_key
-from ..relink import missing_parts, relink
+from ..relink import missing_parts, relink, relocate_missing_paths
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
 from ..store import Store
@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         self._updating = False
         self._closing = False
         self._detect_announce = False
+        self._prune_after_detect = False
         style_key = str(self.store.settings.get("style", "souls"))
         set_active(style_key)
         apply_style(style_key)
@@ -262,9 +263,10 @@ class MainWindow(QMainWindow):
         top.addWidget(self.sidebar_toggle)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar en tu biblioteca...")
-        self.search.setFixedWidth(320)
+        self.search.setMinimumWidth(190)
+        self.search.setMaximumWidth(320)
         self.search.textChanged.connect(self._search)
-        top.addWidget(self.search)
+        top.addWidget(self.search, 1)
         top.addStretch(1)
         add_button = QPushButton("＋  Añadir juego")
         add_button.setObjectName("primary")
@@ -276,6 +278,14 @@ class MainWindow(QMainWindow):
         scan_button.setCursor(Qt.PointingHandCursor)
         scan_button.clicked.connect(self._scan_pc_games)
         top.addWidget(scan_button)
+        self.refresh_button = QPushButton("Refrescar rutas")
+        self.refresh_button.setObjectName("ghost")
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.setToolTip(
+            "Actualiza las rutas de tu biblioteca y quita los juegos que ya no existan."
+        )
+        self.refresh_button.clicked.connect(self._refresh_paths)
+        top.addWidget(self.refresh_button)
 
         self.home = HomePage(self.store)
         self.library = LibraryPage(self.store)
@@ -540,43 +550,102 @@ class MainWindow(QMainWindow):
             f"Descarga detectada: {names}{extra}. Búscala en «Buscar juegos».", 6000
         )
 
-    def _detect_and_merge(self, announce: bool = False) -> None:
+    def _start_detect(
+        self,
+        *,
+        announce: bool = False,
+        prune: bool = False,
+        clear_cache: bool = False,
+        busy_message: str = "Ya hay una detección en marcha.",
+        start_message: str = "Volviendo a detectar juegos…",
+    ) -> None:
+        if prune:
+            self._prune_after_detect = True
         if self.detect_worker is not None and self.detect_worker.isRunning():
             if announce:
-                self.toast.show_message("Ya hay una detección en marcha.")
+                self._detect_announce = True
+                self.toast.show_message(start_message if prune else busy_message)
             return
         self._detect_announce = announce
         self.detect_worker = DetectWorker(
             self.store.settings.get("emulator_paths", {}),
             self.store.settings.get("scan_folders", []),
             custom_profiles(self.store.settings.get("custom_emulators", [])),
+            clear_cache=clear_cache,
         )
         self.detect_worker.done.connect(self._on_detect_done)
         self.detect_worker.failed.connect(self._on_detect_failed)
         self.detect_worker.finished.connect(self._clear_detect_worker)
         self.detect_worker.start()
         if announce:
-            self.toast.show_message("Volviendo a detectar juegos…")
+            self.toast.show_message(start_message)
+
+    def _detect_and_merge(self, announce: bool = False) -> None:
+        self._start_detect(announce=announce, prune=False, clear_cache=False)
+
+    def _refresh_paths(self) -> None:
+        self._start_detect(
+            announce=True,
+            prune=True,
+            clear_cache=True,
+            start_message="Refrescando rutas de la biblioteca…",
+        )
 
     def _on_detect_done(self, result) -> None:
+        prune = self._prune_after_detect
+        announce = self._detect_announce
+        self._prune_after_detect = False
+        self._detect_announce = False
+
         self.emulators = result.emulators
         self.store.settings["emulators"] = [emulator.to_dict() for emulator in result.emulators]
         self.store.settings["detection_version"] = DETECTION_VERSION
+
+        relocated = 0
+        removed: list[Game] = []
+        if prune:
+            relocated = relocate_missing_paths(
+                self.store.games,
+                result.emulators,
+                self.store.settings.get("scan_folders", []),
+            )
+
         self.store.merge_detected(result.games)
+        if prune:
+            removed = self.store.prune_missing({game.id for game in result.games})
+
         self.store.save_library()
         self.store.save_settings()
         self._last_detection_log = list(getattr(result, "diagnostics", []))
         self._write_detection_log(self._last_detection_log)
         self._refresh_all()
-        if self._detect_announce:
+
+        if prune:
+            if removed and relocated:
+                self.toast.show_message(
+                    f"Rutas refrescadas: {relocated} actualizada(s) y {len(removed)} juego(s) quitado(s)."
+                )
+            elif len(removed) == 1:
+                self.toast.show_message(f"Rutas refrescadas: se quitó «{removed[0].title}».")
+            elif removed:
+                self.toast.show_message(
+                    f"Rutas refrescadas: {len(removed)} juegos no encontrados quitados."
+                )
+            elif relocated == 1:
+                self.toast.show_message("Rutas refrescadas: 1 ruta actualizada.")
+            elif relocated:
+                self.toast.show_message(f"Rutas refrescadas: {relocated} rutas actualizadas.")
+            else:
+                self.toast.show_message("Rutas refrescadas: todos los juegos siguen en su sitio.")
+        elif announce:
             self.toast.show_message(
                 f"Detección terminada: {len(result.games)} juegos y {len(result.emulators)} perfiles."
             )
-            self._detect_announce = False
         self._notice_downloads()
         QTimer.singleShot(800, self._fetch_missing_covers)
 
     def _on_detect_failed(self, message: str) -> None:
+        self._prune_after_detect = False
         self._detect_announce = False
         self._show_error("No se pudo completar la detección", message)
 
