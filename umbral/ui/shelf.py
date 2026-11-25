@@ -478,22 +478,38 @@ def render_debanded_backdrop(
     return QPixmap.fromImage(qimg)
 
 
+_ALIGN_CENTERING = {
+    "top": (0.5, 0.15),
+    "center": (0.5, 0.45),
+    "bottom": (0.5, 0.80),
+}
+
+
 def render_custom_backdrop(
-    width: int, height: int, left: int, backdrop_path: str
+    width: int,
+    height: int,
+    left: int,
+    backdrop_path: str,
+    dim: float = 0.0,
+    blur: int = 0,
+    align: str = "center",
 ) -> Optional[QPixmap]:
-    """Render a crisp custom backdrop centered in the visible shelf area (to the right of sidebar)."""
+    """Render a custom backdrop centered in the visible shelf area with per-game dim/blur/align."""
     w = max(16, int(width))
     h = max(16, int(height))
     left_px = max(0, min(w - 16, int(left)))
     vis_w = max(16, w - left_px)
+    centering = _ALIGN_CENTERING.get(align, (0.5, 0.45))
     try:
         with Image.open(backdrop_path) as loaded:
             fitted = ImageOps.fit(
                 loaded.convert("RGB"),
                 (vis_w, h),
                 method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.45),
+                centering=centering,
             )
+            if int(blur) > 0:
+                fitted = fitted.filter(ImageFilter.GaussianBlur(radius=min(32, int(blur))))
             vis_arr = np.asarray(fitted, dtype=np.float32)
     except OSError:
         return None
@@ -503,9 +519,10 @@ def render_custom_backdrop(
         arr[:, left_px:, :] = vis_arr
     else:
         arr = vis_arr
+    dim_factor = max(0.25, min(1.0, 1.0 - float(dim)))
     y_norm = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
     bottom_fade = np.where(y_norm > 0.56, np.clip((y_norm - 0.56) / 0.44, 0.0, 1.0), 0.0)
-    shade = (1.0 - 0.72 * (bottom_fade ** 1.35))[:, :, None]
+    shade = (dim_factor * (1.0 - 0.72 * (bottom_fade ** 1.35)))[:, :, None]
     arr = np.clip(arr * shade, 0.0, 255.0).astype(np.uint8)
     qimg = QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
@@ -955,10 +972,16 @@ class ShelfCanvas(QWidget):
             return self._last_backdrop_by_id[key_id]
         cov_key = item.cover_path if item is not None else ""
         custom_path = str(game_backdrop(item.game) or "") if item is not None else ""
+        bg_dim = float(getattr(item.game, "backdrop_dim", 0.0) or 0.0) if item is not None else 0.0
+        bg_blur = int(getattr(item.game, "backdrop_blur", 0) or 0) if item is not None else 0
+        bg_align = str(getattr(item.game, "backdrop_align", "center") or "center") if item is not None else "center"
         cache_key = (
             key_id,
             cov_key,
             custom_path,
+            bg_dim,
+            bg_blur,
+            bg_align,
             self.width(),
             self.height(),
             self._inset_left,
@@ -972,7 +995,15 @@ class ShelfCanvas(QWidget):
             self._last_backdrop_by_id[key_id] = cached
             return cached
         rendered = (
-            render_custom_backdrop(self.width(), self.height(), self._inset_left, custom_path)
+            render_custom_backdrop(
+                self.width(),
+                self.height(),
+                self._inset_left,
+                custom_path,
+                dim=bg_dim,
+                blur=bg_blur,
+                align=bg_align,
+            )
             if custom_path
             else None
         )
