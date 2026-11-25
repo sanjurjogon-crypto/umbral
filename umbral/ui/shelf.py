@@ -422,7 +422,7 @@ def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarra
         return arr
     lower_u8 = np.clip(arr[fy:, :, :], 0.0, 255.0).astype(np.uint8)
     pil_low = Image.fromarray(lower_u8, "RGB")
-    blurred = pil_low.filter(ImageFilter.GaussianBlur(radius=7))
+    blurred = pil_low.filter(ImageFilter.GaussianBlur(radius=4))
     frost_arr = np.asarray(blurred, dtype=np.float32)
 
     y_rel = np.linspace(0.0, 1.0, lower_h, dtype=np.float32)[:, None, None]
@@ -454,6 +454,8 @@ def render_debanded_backdrop(
     pixmap: Optional[QPixmap],
     dominant: QColor,
     halo_enabled: bool,
+    dim: float = 0.0,
+    blur: int = 0,
     floor_y: Optional[float] = None,
 ) -> QPixmap:
     """Render a crisp full-res backdrop with triangular-PDF debanding and subtle film grain."""
@@ -503,6 +505,13 @@ def render_debanded_backdrop(
     vy = (y_norm - 0.46) / 0.58
     vig = 1.0 - 0.42 * np.clip((vx * vx + vy * vy) * 0.55, 0.0, 1.0)
     base *= vig[:, :, None]
+
+    if int(blur) > 0:
+        pil_base = Image.fromarray(np.clip(base, 0.0, 255.0).astype(np.uint8), "RGB")
+        pil_base = pil_base.filter(ImageFilter.GaussianBlur(radius=min(32, int(blur))))
+        base = np.asarray(pil_base, dtype=np.float32)
+    dim_factor = max(0.25, min(1.0, 1.0 - float(dim)))
+    base *= dim_factor
 
     # Triangular-PDF deband dither + subtle monochrome film grain prevents 8-bit color banding rings
     rng = np.random.default_rng(2026)
@@ -1094,6 +1103,8 @@ class ShelfCanvas(QWidget):
                 item.pixmap if item is not None else None,
                 item.dominant if item is not None else fallback,
                 self._halo_enabled,
+                dim=bg_dim,
+                blur=bg_blur,
                 floor_y=horizon_y,
             )
         self._backdrop_cache[cache_key] = rendered
@@ -1417,15 +1428,6 @@ class ShelfCanvas(QWidget):
         bl = QPointF(bl_base.x(), bl_base.y() + hover_gap)
         br = QPointF(br_base.x(), br_base.y() + hover_gap)
 
-        # Soft ambient shadow on the glass beneath the hovering case
-        painter.save()
-        painter.setPen(QPen(QColor(0, 0, 0, int(90 * strength)), 7.0, Qt.SolidLine, Qt.RoundCap))
-        painter.drawLine(
-            QPointF(bl_base.x() + 4.0, bl_base.y() + hover_gap * 0.55),
-            QPointF(br_base.x() - 4.0, br_base.y() + hover_gap * 0.55),
-        )
-        painter.restore()
-
         refl_h = target.height() * 0.56
         l_drop = refl_h + (quad[3].y() - quad[2].y()) * 0.35
         r_drop = refl_h + (quad[2].y() - quad[3].y()) * 0.35
@@ -1526,10 +1528,6 @@ class ShelfCanvas(QWidget):
             painter.setTransform(trans, False)
             self._paint_fade(painter, target, fade)
             painter.restore()
-
-        painter.save()
-        self._paint_stand(painter, target, item, geometry, selected)
-        painter.restore()
 
     def _paint_fade(self, painter: QPainter, target: QRectF, fade: float) -> None:
         shade = QColor(6, 5, 3, int(255 * fade))

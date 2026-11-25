@@ -771,7 +771,7 @@ def test_custom_game_backdrop_renders_crisp_in_shelf(monkeypatch, tmp_path: Path
     assert page.title_box_frame.objectName() == "shelfTitleBox"
     page._populate_backdrop_menu()
     labels = [act.text() for act in page._backdrop_menu.actions() if act.text()]
-    assert "Encuadre" in labels
+    assert "Encuadre" not in labels
     assert "Cambiar fondo..." in labels
     assert "Restaurar por defecto" in labels
     from PySide6.QtWidgets import QSlider
