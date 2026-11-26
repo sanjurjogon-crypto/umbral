@@ -184,11 +184,101 @@ FOREST_STYLE = GameStyle(
     ember_color="#a7f3d0",
 )
 
-STYLES: tuple[GameStyle, ...] = (UMBRAL_STYLE, OBSIDIAN_STYLE, NEON_STYLE, FOREST_STYLE)
+CRIMSON_STYLE = GameStyle(
+    key="crimson",
+    name="Sangre Carmesí",
+    game="Carmesí",
+    blurb="Obsidiana burdeos, serif editorial y rubí.",
+    bg="#0a0608",
+    surface="#140b0e",
+    surface_2="#1c0f14",
+    surface_3="#26141b",
+    border="#4d2230",
+    border_soft="#2d141c",
+    text="#f4e6e6",
+    muted="#be98a0",
+    muted_2="#7e5a63",
+    accent="#e11d48",
+    accent_2="#fda4af",
+    danger="#fb7185",
+    success="#4ade80",
+    info="#f472b6",
+    heading_font="Georgia",
+    body_font="Segoe UI",
+    heading_weight=700,
+    heading_spacing=2.2,
+    uppercase_headings=True,
+    radius=8,
+    border_width=1,
+    sidebar="#0f080b",
+    sidebar_2="#0a0608",
+    canvas="#060305",
+    motif="golddust",
+    backdrop_top="#210c14",
+    backdrop_bottom="#050204",
+    motif_color="#e11d48",
+    ember_color="#fb7185",
+)
+
+AMETHYST_STYLE = GameStyle(
+    key="amethyst",
+    name="Amatista Solar",
+    game="Amatista",
+    blurb="Crepúsculo índigo, amatista y destellos dorados.",
+    bg="#080712",
+    surface="#100e20",
+    surface_2="#16132b",
+    surface_3="#1f1a3a",
+    border="#352b5e",
+    border_soft="#211b3d",
+    text="#ede9fe",
+    muted="#a79fd1",
+    muted_2="#6c6496",
+    accent="#a78bfa",
+    accent_2="#fde68a",
+    danger="#f87171",
+    success="#34d399",
+    info="#93c5fd",
+    heading_font="Trebuchet MS",
+    body_font="Segoe UI",
+    heading_weight=700,
+    heading_spacing=1.8,
+    uppercase_headings=False,
+    radius=8,
+    border_width=1,
+    sidebar="#0c0a1a",
+    sidebar_2="#080712",
+    canvas="#05040d",
+    motif="stardust",
+    backdrop_top="#191336",
+    backdrop_bottom="#04030a",
+    motif_color="#a78bfa",
+    ember_color="#fde68a",
+)
+
+STYLES: tuple[GameStyle, ...] = (
+    UMBRAL_STYLE,
+    OBSIDIAN_STYLE,
+    NEON_STYLE,
+    FOREST_STYLE,
+    CRIMSON_STYLE,
+    AMETHYST_STYLE,
+)
 STYLE_BY_KEY: dict[str, GameStyle] = {style.key: style for style in STYLES}
 DEFAULT_STYLE = UMBRAL_STYLE.key
 
 _active: GameStyle = UMBRAL_STYLE
+_reduced_motion: bool = False
+
+
+def set_reduced_motion(enabled: bool) -> bool:
+    global _reduced_motion
+    _reduced_motion = bool(enabled)
+    return _reduced_motion
+
+
+def is_reduced_motion() -> bool:
+    return _reduced_motion
 
 
 def set_active(key: str | None) -> GameStyle:

@@ -399,8 +399,10 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     from umbral.ui.widgets import StylePreview
 
     app = _app()
-    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest"]
+    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest", "crimson", "amethyst"]
     assert style_for("neon").key == "neon"
+    assert style_for("crimson").heading_font == "Georgia"
+    assert style_for("amethyst").heading_font == "Trebuchet MS"
     set_active("umbral")
 
     store = _store(monkeypatch, tmp_path, [])
@@ -408,7 +410,7 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     page.refresh()
     page.set_section("appearance")
     cards = page.findChildren(StylePreview)
-    assert len(cards) == 4
+    assert len(cards) == 6
     picked: list[str] = []
     page.style_changed.connect(picked.append)
     cards[1].clicked.emit("obsidian")
@@ -443,14 +445,15 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
 
     assert not hasattr(win.library, "details_button")
     assert win._sidebar_width == 238
-    assert win.sidebar_toggle.text() == "«"
+    assert win.sidebar_toggle._icon_name == "chevron_left"
+    assert not win.sidebar_toggle.icon().isNull()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 0
-    assert win.sidebar_toggle.text() == "»"
+    assert win.sidebar_toggle._icon_name == "chevron_right"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 238
-    assert win.sidebar_toggle.text() == "«"
+    assert win.sidebar_toggle._icon_name == "chevron_left"
     assert win.sidebar.isVisible()
 
     from umbral.ui.style import STYLES
@@ -635,8 +638,10 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     from umbral.ui.widgets import StylePreview
 
     app = _app()
-    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest"]
+    assert [s.key for s in STYLES] == ["umbral", "obsidian", "neon", "forest", "crimson", "amethyst"]
     assert style_for("neon").key == "neon"
+    assert style_for("crimson").heading_font == "Georgia"
+    assert style_for("amethyst").heading_font == "Trebuchet MS"
     set_active("umbral")
 
     store = _store(monkeypatch, tmp_path, [])
@@ -644,7 +649,7 @@ def test_styles_catalog_and_appearance_tab_switch(monkeypatch, tmp_path: Path) -
     page.refresh()
     page.set_section("appearance")
     cards = page.findChildren(StylePreview)
-    assert len(cards) == 4
+    assert len(cards) == 6
     picked: list[str] = []
     page.style_changed.connect(picked.append)
     cards[1].clicked.emit("obsidian")
@@ -679,14 +684,15 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
 
     assert not hasattr(win.library, "details_button")
     assert win._sidebar_width == 238
-    assert win.sidebar_toggle.text() == "«"
+    assert win.sidebar_toggle._icon_name == "chevron_left"
+    assert not win.sidebar_toggle.icon().isNull()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 0
-    assert win.sidebar_toggle.text() == "»"
+    assert win.sidebar_toggle._icon_name == "chevron_right"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
     assert win._sidebar_width == 238
-    assert win.sidebar_toggle.text() == "«"
+    assert win.sidebar_toggle._icon_name == "chevron_left"
     assert win.sidebar.isVisible()
 
     from umbral.ui.style import STYLES
@@ -948,5 +954,64 @@ def test_refresh_paths_button_updates_moved_and_prunes_uninstalled_games(
     assert win.store.games[0].executable == str(moved_exe)
     assert win.store.games[0].working_dir == str(moved_dir)
     assert win.store.settings["hidden_games"] == []
+    win.close()
+    app.processEvents()
+
+
+def test_ui_polish_buttons_icons_search_clear_and_reduced_motion(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+    from umbral.ui.icons import vector_pixmap
+    from umbral.ui.style import is_reduced_motion, set_reduced_motion
+    from umbral.ui.widgets import UmbralButton
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    app = _app()
+    set_reduced_motion(False)
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+
+    assert isinstance(win.add_button, UmbralButton)
+    assert isinstance(win.scan_button, UmbralButton)
+    assert isinstance(win.refresh_button, UmbralButton)
+    assert not win.add_button.icon().isNull()
+    assert not win.scan_button.icon().isNull()
+    assert not win.refresh_button.icon().isNull()
+
+    # Vector icons render cleanly
+    for icon_name in ("plus", "search", "refresh", "play", "filter", "image", "close", "spinner"):
+        px = vector_pixmap(icon_name, "#ffffff", size=16)
+        assert not px.isNull()
+
+    # Loading state toggles text & disabled state cleanly
+    win.refresh_button.set_loading(True, "Refrescando…")
+    assert win.refresh_button.text() == "Refrescando…"
+    assert not win.refresh_button.isEnabled()
+    win.refresh_button.set_loading(False)
+    assert win.refresh_button.text() == "Refrescar rutas"
+    assert win.refresh_button.isEnabled()
+
+    # Search clear button visibility tracks text
+    assert not win._search_clear_action.isVisible()
+    win.search.setText("zelda")
+    assert win._search_clear_action.isVisible()
+    win._search_clear_action.trigger()
+    assert win.search.text() == ""
+    assert not win._search_clear_action.isVisible()
+
+    # Reduce animations setting persists & toggles global reduced motion
+    win.settings_page.refresh()
+    win.settings_page.reduce_anim_check.setChecked(True)
+    assert win.store.settings["reduce_animations"] is True
+    assert is_reduced_motion() is True
+    win.settings_page.reduce_anim_check.setChecked(False)
+    assert is_reduced_motion() is False
+
     win.close()
     app.processEvents()

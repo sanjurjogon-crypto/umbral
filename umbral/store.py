@@ -30,6 +30,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "library_view": "shelf",
     "hide_demos": False,
     "shelf_halo": True,
+    "reduce_animations": False,
 }
 
 

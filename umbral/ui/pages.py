@@ -48,6 +48,7 @@ from .widgets import (
     HeroBanner,
     SectionHeader,
     StatTile,
+    UmbralButton,
     apply_download_progress,
 )
 
@@ -277,10 +278,11 @@ class LibraryPage(QWidget):
         top_row.addWidget(self.title_box_frame)
         top_row.addStretch(1)
 
-        self.filters_button = QPushButton("Filtros  ▾")
+        self.filters_button = UmbralButton("Filtros  ▾", icon_name="filter", icon_size=14)
         self.filters_button.setObjectName("filterBtn")
         self.filters_button.setCursor(Qt.PointingHandCursor)
         self.filters_button.setFocusPolicy(Qt.NoFocus)
+        self.filters_button.refresh_icon()
         self._filters_menu = self._build_filters_menu()
         self.filters_button.setMenu(self._filters_menu)
         top_row.addWidget(self.filters_button, 0, Qt.AlignVCenter)
@@ -339,9 +341,10 @@ class LibraryPage(QWidget):
         self.info_actions = QHBoxLayout()
         self.info_actions.setSpacing(10)
         self.info_actions.setAlignment(Qt.AlignHCenter)
-        self.play_button = QPushButton("Jugar ahora")
+        self.play_button = UmbralButton("Jugar ahora", icon_name="play", icon_size=14)
         self.play_button.setObjectName("primary")
         self.play_button.setCursor(Qt.PointingHandCursor)
+        self.play_button.refresh_icon()
         self.play_button.clicked.connect(self._play_current)
         self.info_actions.addWidget(self.play_button)
         info_body.addLayout(self.info_title_row)
@@ -355,10 +358,11 @@ class LibraryPage(QWidget):
         bottom_body.setSpacing(0)
         bottom_body.addWidget(self.info)
 
-        self.backdrop_button = QPushButton("Fondo  ▾", self)
+        self.backdrop_button = UmbralButton("Fondo  ▾", icon_name="image", icon_size=14, parent=self)
         self.backdrop_button.setObjectName("filterBtn")
         self.backdrop_button.setCursor(Qt.PointingHandCursor)
         self.backdrop_button.setFocusPolicy(Qt.NoFocus)
+        self.backdrop_button.refresh_icon()
         self._backdrop_menu = QMenu(self)
         self._backdrop_menu.aboutToShow.connect(self._populate_backdrop_menu)
         self.backdrop_button.setMenu(self._backdrop_menu)
@@ -961,9 +965,10 @@ class HealthPage(QWidget):
         title.setObjectName("h2")
         header.addWidget(title)
         header.addStretch(1)
-        rescan = QPushButton("Volver a detectar")
+        rescan = UmbralButton("Volver a detectar", icon_name="refresh", icon_size=14)
         rescan.setObjectName("ghost")
         rescan.setCursor(Qt.PointingHandCursor)
+        rescan.refresh_icon()
         rescan.clicked.connect(self.rescan_requested)
         header.addWidget(rescan)
         self.body.addLayout(header)
@@ -1090,6 +1095,7 @@ class SettingsPage(QWidget):
     unhide_game_requested = Signal(str)
     unhide_path_requested = Signal(str)
     halo_changed = Signal(bool)
+    reduce_animations_changed = Signal(bool)
     check_updates = Signal()
     install_update = Signal()
     later_update = Signal()
@@ -1413,6 +1419,13 @@ class SettingsPage(QWidget):
         halo_check.toggled.connect(self._toggle_halo)
         self.halo_check = halo_check
         layout.addWidget(halo_check)
+
+        layout.addWidget(SectionHeader("Animaciones"))
+        reduce_anim_check = QCheckBox("Reducir animaciones (transiciones instantáneas)")
+        reduce_anim_check.setChecked(bool(self.store.settings.get("reduce_animations", False)))
+        reduce_anim_check.toggled.connect(self._toggle_reduce_animations)
+        self.reduce_anim_check = reduce_anim_check
+        layout.addWidget(reduce_anim_check)
         layout.addStretch(1)
         return container
 
@@ -1470,9 +1483,10 @@ class SettingsPage(QWidget):
         open_data.setObjectName("ghost")
         open_data.setCursor(Qt.PointingHandCursor)
         open_data.clicked.connect(self.open_data)
-        rescan = QPushButton("Volver a detectar")
+        rescan = UmbralButton("Volver a detectar", icon_name="refresh", icon_size=14)
         rescan.setObjectName("ghost")
         rescan.setCursor(Qt.PointingHandCursor)
+        rescan.refresh_icon()
         rescan.clicked.connect(self.rescan_requested)
         export = QPushButton("Exportar diagnóstico")
         export.setObjectName("ghost")
@@ -1644,6 +1658,11 @@ class SettingsPage(QWidget):
         self.store.settings["shelf_halo"] = bool(checked)
         self.store.save_settings()
         self.halo_changed.emit(bool(checked))
+
+    def _toggle_reduce_animations(self, checked: bool) -> None:
+        self.store.settings["reduce_animations"] = bool(checked)
+        self.store.save_settings()
+        self.reduce_animations_changed.emit(bool(checked))
 
     def _add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Selecciona una carpeta de juegos")

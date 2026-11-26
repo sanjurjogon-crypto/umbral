@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, QUrl, QVariantAnimation
-from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -51,12 +51,13 @@ from .dialogs import (
     GameDetailDialog,
     GameScanDialog,
 )
+from .icons import vector_icon
 from .pages import HealthPage, HomePage, LibraryPage, SettingsPage, StatsPage, clear_layout
 from .shelf import apply_style
-from .style import active, is_dark, set_active
+from .style import active, is_dark, is_reduced_motion, set_active, set_reduced_motion
 from .theme import qss
 from .update_dialog import CheckWorker, DownloadWorker
-from .widgets import Backdrop, StartupOverlay, Toast, UpdateBanner
+from .widgets import Backdrop, StartupOverlay, Toast, UmbralButton, UpdateBanner
 
 
 def _now_iso() -> str:
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         self._prune_after_detect = False
         style_key = str(self.store.settings.get("style", "souls"))
         set_active(style_key)
+        set_reduced_motion(bool(self.store.settings.get("reduce_animations", False)))
         apply_style(style_key)
         self.setWindowTitle("Umbral")
         self.setMinimumSize(1040, 660)
@@ -253,32 +255,39 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout(topbar)
         top.setContentsMargins(24, 18, 32, 10)
         top.setSpacing(12)
-        self.sidebar_toggle = QPushButton("«")
+        self.sidebar_toggle = UmbralButton("", icon_name="chevron_left", icon_size=16)
         self.sidebar_toggle.setObjectName("sidebarToggle")
-        self.sidebar_toggle.setFixedSize(36, 34)
+        self.sidebar_toggle.setFixedSize(36, 36)
         self.sidebar_toggle.setFocusPolicy(Qt.NoFocus)
         self.sidebar_toggle.setCursor(Qt.PointingHandCursor)
         self.sidebar_toggle.setToolTip("Ocultar barra lateral")
         self.sidebar_toggle.clicked.connect(self._toggle_sidebar)
         top.addWidget(self.sidebar_toggle)
         self.search = QLineEdit()
+        self.search.setObjectName("searchInput")
         self.search.setPlaceholderText("Buscar en tu biblioteca...")
         self.search.setMinimumWidth(190)
         self.search.setMaximumWidth(320)
+        self._search_icon_action = QAction(vector_icon("search", active().muted, 14), "", self.search)
+        self.search.addAction(self._search_icon_action, QLineEdit.LeadingPosition)
+        self._search_clear_action = QAction(vector_icon("close", active().muted, 13), "Limpiar", self.search)
+        self._search_clear_action.triggered.connect(self.search.clear)
+        self._search_clear_action.setVisible(False)
+        self.search.addAction(self._search_clear_action, QLineEdit.TrailingPosition)
         self.search.textChanged.connect(self._search)
         top.addWidget(self.search, 1)
         top.addStretch(1)
-        add_button = QPushButton("＋  Añadir juego")
-        add_button.setObjectName("primary")
-        add_button.setCursor(Qt.PointingHandCursor)
-        add_button.clicked.connect(self._add_game)
-        top.addWidget(add_button)
-        scan_button = QPushButton("Buscar juegos")
-        scan_button.setObjectName("ghost")
-        scan_button.setCursor(Qt.PointingHandCursor)
-        scan_button.clicked.connect(self._scan_pc_games)
-        top.addWidget(scan_button)
-        self.refresh_button = QPushButton("Refrescar rutas")
+        self.add_button = UmbralButton("Añadir juego", icon_name="plus", icon_size=14)
+        self.add_button.setObjectName("primary")
+        self.add_button.setCursor(Qt.PointingHandCursor)
+        self.add_button.clicked.connect(self._add_game)
+        top.addWidget(self.add_button)
+        self.scan_button = UmbralButton("Buscar juegos", icon_name="search", icon_size=14)
+        self.scan_button.setObjectName("ghost")
+        self.scan_button.setCursor(Qt.PointingHandCursor)
+        self.scan_button.clicked.connect(self._scan_pc_games)
+        top.addWidget(self.scan_button)
+        self.refresh_button = UmbralButton("Refrescar rutas", icon_name="refresh", icon_size=14)
         self.refresh_button.setObjectName("ghost")
         self.refresh_button.setCursor(Qt.PointingHandCursor)
         self.refresh_button.setToolTip(
@@ -312,6 +321,7 @@ class MainWindow(QMainWindow):
         self.settings_page.accent_changed.connect(self._set_accent)
         self.settings_page.style_changed.connect(self._set_style)
         self.settings_page.halo_changed.connect(self._set_halo)
+        self.settings_page.reduce_animations_changed.connect(self._set_reduced_motion)
         self.settings_page.open_data.connect(self._open_data)
         self.settings_page.export_diagnostics.connect(self._export_diagnostics)
         self.settings_page.export_library.connect(self._export_library)
@@ -392,17 +402,17 @@ class MainWindow(QMainWindow):
 
     def _sync_sidebar_toggle(self) -> None:
         if self._sidebar_collapsed:
-            self.sidebar_toggle.setText("»")
+            self.sidebar_toggle.set_icon_name("chevron_right")
             self.sidebar_toggle.setToolTip("Mostrar barra lateral")
         else:
-            self.sidebar_toggle.setText("«")
+            self.sidebar_toggle.set_icon_name("chevron_left")
             self.sidebar_toggle.setToolTip("Ocultar barra lateral")
 
     def _toggle_sidebar(self) -> None:
         self._sidebar_collapsed = not self._sidebar_collapsed
         self._sync_sidebar_toggle()
         target = 0 if self._sidebar_collapsed else self._sidebar_expanded_width
-        if os.environ.get("QT_QPA_PLATFORM", "").lower() == "offscreen":
+        if is_reduced_motion() or os.environ.get("QT_QPA_PLATFORM", "").lower() == "offscreen":
             self._apply_sidebar_width(target)
             self._on_sidebar_anim_finished()
             return
@@ -445,6 +455,13 @@ class MainWindow(QMainWindow):
             accent = str(self.store.settings.get("accent") or "").strip() or style.accent
             sheet = qss(accent, style.key) + extra_qss(style)
             app.setStyleSheet(sheet)
+        current_style = active()
+        if hasattr(self, "_search_icon_action"):
+            self._search_icon_action.setIcon(vector_icon("search", current_style.muted, 14))
+        if hasattr(self, "_search_clear_action"):
+            self._search_clear_action.setIcon(vector_icon("close", current_style.muted, 13))
+        for button in self.findChildren(UmbralButton):
+            button.refresh_icon()
 
     def _bootstrap(self) -> None:
         if self._closing:
@@ -584,6 +601,8 @@ class MainWindow(QMainWindow):
         self._start_detect(announce=announce, prune=False, clear_cache=False)
 
     def _refresh_paths(self) -> None:
+        if hasattr(self, "refresh_button"):
+            self.refresh_button.set_loading(True, "Refrescando…")
         self._start_detect(
             announce=True,
             prune=True,
@@ -596,6 +615,8 @@ class MainWindow(QMainWindow):
         announce = self._detect_announce
         self._prune_after_detect = False
         self._detect_announce = False
+        if hasattr(self, "refresh_button"):
+            self.refresh_button.set_loading(False)
 
         self.emulators = result.emulators
         self.store.settings["emulators"] = [emulator.to_dict() for emulator in result.emulators]
@@ -647,6 +668,8 @@ class MainWindow(QMainWindow):
     def _on_detect_failed(self, message: str) -> None:
         self._prune_after_detect = False
         self._detect_announce = False
+        if hasattr(self, "refresh_button"):
+            self.refresh_button.set_loading(False)
         self._show_error("No se pudo completar la detección", message)
 
     def _clear_detect_worker(self) -> None:
@@ -730,7 +753,7 @@ class MainWindow(QMainWindow):
         indicator.lower()
         indicator.show()
         anim.stop()
-        if not animate or indicator.geometry().height() <= 0:
+        if not animate or is_reduced_motion() or indicator.geometry().height() <= 0:
             indicator.setGeometry(dest)
             return
         anim.setStartValue(indicator.geometry())
@@ -858,16 +881,17 @@ class MainWindow(QMainWindow):
             target_page = self.stack.currentWidget()
             if (
                 target_page is not None
+                and not is_reduced_motion()
                 and os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen"
             ):
                 from PySide6.QtWidgets import QGraphicsOpacityEffect
 
                 effect = QGraphicsOpacityEffect(target_page)
-                effect.setOpacity(0.0)
+                effect.setOpacity(0.15)
                 target_page.setGraphicsEffect(effect)
                 anim = QPropertyAnimation(effect, b"opacity", target_page)
-                anim.setDuration(175)
-                anim.setStartValue(0.0)
+                anim.setDuration(165)
+                anim.setStartValue(0.15)
                 anim.setEndValue(1.0)
                 anim.setEasingCurve(QEasingCurve.OutCubic)
                 anim.finished.connect(lambda w=target_page: w.setGraphicsEffect(None))
@@ -885,6 +909,8 @@ class MainWindow(QMainWindow):
         self.search.selectAll()
 
     def _search(self, text: str) -> None:
+        if hasattr(self, "_search_clear_action"):
+            self._search_clear_action.setVisible(bool(text))
         if not text.strip():
             self.library.set_query("")
             self._rebuild_systems()
@@ -1265,6 +1291,8 @@ class MainWindow(QMainWindow):
         self.scan_worker.results.connect(self._on_scan_results)
         self.scan_worker.failed.connect(self._on_scan_failed)
         self.scan_worker.finished.connect(self._clear_scan_worker)
+        if hasattr(self, "scan_button"):
+            self.scan_button.set_loading(True, "Buscando…")
         self.scan_worker.start()
         self.toast.show_message("Buscando juegos en tus carpetas…")
 
@@ -1272,9 +1300,13 @@ class MainWindow(QMainWindow):
         self.toast.show_message(text, 2600)
 
     def _on_scan_failed(self, message: str) -> None:
+        if hasattr(self, "scan_button"):
+            self.scan_button.set_loading(False)
         self._show_error("La búsqueda no terminó", message)
 
     def _clear_scan_worker(self) -> None:
+        if hasattr(self, "scan_button"):
+            self.scan_button.set_loading(False)
         if self.scan_worker is not None:
             self.scan_worker.deleteLater()
             self.scan_worker = None
@@ -1456,6 +1488,12 @@ class MainWindow(QMainWindow):
 
     def _set_halo(self, enabled: bool) -> None:
         self.library.canvas.set_halo_enabled(enabled)
+
+    def _set_reduced_motion(self, enabled: bool) -> None:
+        set_reduced_motion(enabled)
+        self.toast.show_message(
+            "Animaciones reducidas activadas." if enabled else "Animaciones completas activadas."
+        )
 
     def _add_scan_folder(self) -> None:
         self.settings_page._add_folder()
