@@ -1238,6 +1238,7 @@ def test_new_console_templates_and_back_synopsis_scroll() -> None:
 def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -> None:
     from umbral.synopsis import (
         _clean_search_title,
+        _extract_wiki_plot_or_gameplay,
         cached_synopsis,
         fetch_synopsis,
         needs_synopsis,
@@ -1246,7 +1247,7 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
 
     monkeypatch.setattr("umbral.synopsis.data_dir", lambda: tmp_path)
 
-    # Console / port boilerplate must be detected so all games fetch synopses
+    # Console / port / title-only boilerplate must be detected so all games fetch synopses
     rom_game = Game(
         id="n64_oot",
         title="The Legend of Zelda - Ocarina of Time (USA) (Rev 2)",
@@ -1261,9 +1262,26 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
         system_key="ports",
         description="Port nativo para PC.",
     )
+    indie_title_only = Game(
+        id="indie_1",
+        title="AlternateWatch",
+        system="PC",
+        system_key="pc",
+        description="Alternate Watch",
+    )
     assert needs_synopsis(rom_game) is True
     assert needs_synopsis(port_game) is True
+    assert needs_synopsis(indie_title_only) is True
     assert _clean_search_title(rom_game.title) == "The Legend of Zelda: Ocarina of Time"
+    assert _clean_search_title(indie_title_only.title) == "Alternate Watch"
+
+    # Wikipedia extractor must prefer plot/gameplay over development intro
+    wiki_sample = (
+        "Ocarina of Time es un videojuego desarrollado por Nintendo EAD y publicado en 1998.\n\n"
+        "== Desarrollo ==\nEl proyecto comenzó en 1995.\n\n"
+        "== Argumento ==\nLink parte de su hogar en el bosque Kokiri para detener a Ganondorf."
+    )
+    assert "Link parte de su hogar" in _extract_wiki_plot_or_gameplay(wiki_sample, "es")
 
     # Fetched synopses are persisted in synopses.json and reused without network calls
     calls = {"wiki": 0}
@@ -1273,6 +1291,7 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
         return "Aventura épica en Hyrule para Nintendo 64." if lang == "es" else ""
 
     monkeypatch.setattr("umbral.synopsis._steam_synopsis", lambda _g: "")
+    monkeypatch.setattr("umbral.synopsis._gamedb_synopsis", lambda _g: "")
     monkeypatch.setattr("umbral.synopsis._wikipedia_synopsis", fake_wiki)
 
     first = fetch_synopsis(rom_game)
