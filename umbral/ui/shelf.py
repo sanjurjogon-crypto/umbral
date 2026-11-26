@@ -56,7 +56,7 @@ from .cases import (
     paint_console_case,
     paint_console_spine,
 )
-from .style import active as active_style
+from .style import active as active_style, is_reduced_motion
 
 CASE_W = 222.0
 CASE_H = 300.0
@@ -803,9 +803,12 @@ class ShelfCanvas(QWidget):
     def _sync(self) -> None:
         self._anim.stop()
         target = float(self.index)
-        self._anim.setStartValue(self._float)
-        self._anim.setEndValue(target)
-        self._anim.start()
+        if is_reduced_motion():
+            self._float = target
+        else:
+            self._anim.setStartValue(self._float)
+            self._anim.setEndValue(target)
+            self._anim.start()
         self.update()
 
     def _start_backdrop_transition(
@@ -817,6 +820,10 @@ class ShelfCanvas(QWidget):
         self._prev_backdrop_item = previous
         self._active_backdrop_id = cur_id
         self._bg_anim.stop()
+        if is_reduced_motion():
+            self._backdrop_mix = 1.0
+            self.update()
+            return
         self._backdrop_mix = 0.0
         self._bg_anim.setStartValue(0.0)
         self._bg_anim.setEndValue(1.0)
@@ -907,9 +914,13 @@ class ShelfCanvas(QWidget):
             self._hover_index = position
             lift = 0.0 if position < 0 else 1.0
             self._hover_anim.stop()
-            self._hover_anim.setStartValue(self._hover_lift)
-            self._hover_anim.setEndValue(lift)
-            self._hover_anim.start()
+            if is_reduced_motion():
+                self._hover_lift = lift
+                self.update()
+            else:
+                self._hover_anim.setStartValue(self._hover_lift)
+                self._hover_anim.setEndValue(lift)
+                self._hover_anim.start()
         if position == self.index and position >= 0:
             center_x, center_y, cover_w, cover_h, _gap = self._layout()
             item = self.items[position]
@@ -931,9 +942,13 @@ class ShelfCanvas(QWidget):
     def leaveEvent(self, event) -> None:  # noqa: N802 - API de Qt
         self._hover_index = -1
         self._hover_anim.stop()
-        self._hover_anim.setStartValue(self._hover_lift)
-        self._hover_anim.setEndValue(0.0)
-        self._hover_anim.start()
+        if is_reduced_motion():
+            self._hover_lift = 0.0
+            self.update()
+        else:
+            self._hover_anim.setStartValue(self._hover_lift)
+            self._hover_anim.setEndValue(0.0)
+            self._hover_anim.start()
         self._tilt_target_x = 0.0
         self._tilt_target_y = 0.0
         if not self._tilt_timer.isActive() and (

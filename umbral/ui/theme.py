@@ -52,6 +52,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     border_accent = _rgba(accent, 0.55)
     glow = _rgba(accent, 0.35)
     hover_bg = _rgba(style.text, 0.05)
+    topbar_bg = _rgba(style.surface_2, 0.72)
+    glass_surface = _rgba(style.surface_2, 0.82)
+    tile_hover_bg = _mix(style.surface_2, style.surface_3, 0.5)
     scroll = _mix(style.border, style.bg, 0.45)
     input_bg = _mix(style.bg, style.surface, 0.6)
     radius = style.radius
@@ -143,8 +146,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         border-right: __THIN__px solid __BORDER__;
     }
     QFrame#topbar {
-        background: transparent;
+        background: __TOPBAR_BG__;
         border: none;
+        border-bottom: __THIN__px solid __BORDER_SOFT__;
     }
     QScrollArea#sidebarScroll {
         background: transparent;
@@ -166,6 +170,10 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 __SURFACE_2__, stop:1 __SURFACE__);
         border: __THIN__px solid __BORDER__;
         border-radius: __RADIUS__px;
+    }
+    QFrame#tile:hover, QFrame#health:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 __TILE_HOVER_BG__, stop:1 __SURFACE__);
+        border: __THIN__px solid __BORDER_ACCENT__;
     }
     QFrame#card[hovered="true"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 __SURFACE_3__, stop:1 __SURFACE_2__);
@@ -198,8 +206,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         font-family: "__HEADING__";
         font-size: 12px;
         font-weight: __WEIGHT__;
-        letter-spacing: 2px;
-        padding: 10px 22px;
+        letter-spacing: 1.8px;
+        min-height: 20px;
+        padding: 8px 18px;
         border-radius: __RADIUS__px;
         text-align: center;
         __TRANSFORM__
@@ -214,11 +223,12 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     QPushButton#ghost {
         border: __THIN__px solid __BORDER__;
         background: __SURFACE_2__;
-        padding: 9px 18px;
+        min-height: 20px;
+        padding: 8px 16px;
         color: __TEXT__;
         font-family: "__HEADING__";
         font-size: 12px;
-        letter-spacing: 1.5px;
+        letter-spacing: 1.4px;
         text-align: center;
         border-radius: __RADIUS__px;
         __TRANSFORM__
@@ -226,7 +236,11 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     QPushButton#ghost:hover {
         background: __SURFACE_3__;
         border-color: __ACCENT__;
-        color: __ACCENT__;
+        color: __ACCENT_2__;
+    }
+    QPushButton#ghost:disabled {
+        color: __MUTED__;
+        border-color: __BORDER_SOFT__;
     }
     QPushButton#danger {
         border: __THIN__px solid __DANGER__;
@@ -323,10 +337,8 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         background: __SURFACE_2__;
         border: __THIN__px solid __BORDER__;
         border-radius: __RADIUS__px;
-        padding: 0px 0px 2px 0px;
+        padding: 0px;
         color: __TEXT__;
-        font-size: 18px;
-        font-weight: 600;
         text-align: center;
     }
     QPushButton#sidebarToggle:hover {
@@ -494,7 +506,7 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         background: transparent;
     }
     QFrame#shelfTitleBox {
-        background: __SURFACE_2__;
+        background: __GLASS_SURFACE__;
         border: __THIN__px solid __BORDER__;
         border-radius: __RADIUS__px;
     }
@@ -617,6 +629,9 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         "__OPAQUE_PRIMARY__": opaque_primary,
         "__OPAQUE_PRIMARY_HOVER__": opaque_primary_hover,
         "__HOVER_BG__": hover_bg,
+        "__TOPBAR_BG__": topbar_bg,
+        "__GLASS_SURFACE__": glass_surface,
+        "__TILE_HOVER_BG__": tile_hover_bg,
         "__SCROLL__": scroll,
         "__INPUT_BG__": input_bg,
         "__SIDEBAR__": style.sidebar,

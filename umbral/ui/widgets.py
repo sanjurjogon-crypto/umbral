@@ -29,7 +29,8 @@ from PySide6.QtGui import (
     QRadialGradient,
 )
 
-from .style import active as active_style
+from .icons import vector_icon
+from .style import active as active_style, is_reduced_motion
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -591,9 +592,13 @@ class GameCard(QFrame):
         self.style().polish(self)
         self.play_button.setVisible(hovered)
         self._animation.stop()
-        self._animation.setStartValue(self._shadow.blurRadius())
-        self._animation.setEndValue(36 if hovered else 18)
-        self._animation.start()
+        target_blur = 36 if hovered else 18
+        if is_reduced_motion():
+            self._shadow.setBlurRadius(target_blur)
+        else:
+            self._animation.setStartValue(self._shadow.blurRadius())
+            self._animation.setEndValue(target_blur)
+            self._animation.start()
         self._shadow.setColor(QColor(0, 0, 0, 160) if hovered else QColor(0, 0, 0, 130))
 
     def enterEvent(self, event) -> None:
@@ -1218,8 +1223,12 @@ class Toast(QLabel):
         self._effect = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self._effect)
         self._animation = QPropertyAnimation(self._effect, b"opacity", self)
-        self._animation.setDuration(220)
+        self._animation.setDuration(200)
+        self._animation.setEasingCurve(QEasingCurve.OutCubic)
         self._animation.finished.connect(self._on_animation_finished)
+        self._slide_anim = QPropertyAnimation(self, b"pos", self)
+        self._slide_anim.setDuration(200)
+        self._slide_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._fade_out)
@@ -1227,10 +1236,28 @@ class Toast(QLabel):
     def show_message(self, text: str, milliseconds: int = 3400) -> None:
         self.setText(text)
         self.adjustSize()
-        self.reposition()
-        self._effect.setOpacity(1.0)
+        self._animation.stop()
+        self._slide_anim.stop()
+        parent = self.parentWidget()
+        target = (
+            QPoint(parent.width() - self.width() - 28, parent.height() - self.height() - 28)
+            if parent
+            else QPoint(0, 0)
+        )
         self.show()
         self.raise_()
+        if is_reduced_motion():
+            self.move(target)
+            self._effect.setOpacity(1.0)
+        else:
+            self.move(target.x(), target.y() + 12)
+            self._effect.setOpacity(0.0)
+            self._slide_anim.setStartValue(self.pos())
+            self._slide_anim.setEndValue(target)
+            self._slide_anim.start()
+            self._animation.setStartValue(0.0)
+            self._animation.setEndValue(1.0)
+            self._animation.start()
         self._timer.start(milliseconds)
 
     def reposition(self) -> None:
@@ -1239,14 +1266,190 @@ class Toast(QLabel):
             self.move(parent.width() - self.width() - 28, parent.height() - self.height() - 28)
 
     def _fade_out(self) -> None:
+        if is_reduced_motion():
+            self._effect.setOpacity(0.0)
+            self.hide()
+            return
         self._animation.stop()
-        self._animation.setStartValue(1.0)
+        self._animation.setStartValue(self._effect.opacity())
         self._animation.setEndValue(0.0)
         self._animation.start()
 
     def _on_animation_finished(self) -> None:
         if self._effect.opacity() <= 0.01:
             self.hide()
+
+
+class UmbralButton(QPushButton):
+    """QPushButton with vector icon tinting, smooth hover/press sheen, and loading state."""
+
+    def __init__(
+        self,
+        text: str = "",
+        icon_name: str = "",
+        icon_size: int = 15,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self._base_text = text
+        self._icon_name = icon_name
+        self._icon_size = icon_size
+        self._hovered = False
+        self._pressed = False
+        self._hover_progress = 0.0
+        self._press_progress = 0.0
+        self._loading = False
+        self._spin_angle = 0.0
+
+        self.setAttribute(Qt.WA_Hover, True)
+        if icon_name:
+            self.setIconSize(QSize(icon_size, icon_size))
+        self._hover_anim = QPropertyAnimation(self, b"hover_progress", self)
+        self._hover_anim.setDuration(140)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._press_anim = QPropertyAnimation(self, b"press_progress", self)
+        self._press_anim.setDuration(90)
+        self._press_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._spin_timer = QTimer(self)
+        self._spin_timer.setInterval(40)
+        self._spin_timer.timeout.connect(self._advance_spinner)
+        self.refresh_icon()
+
+    def _get_hover_progress(self) -> float:
+        return self._hover_progress
+
+    def _set_hover_progress(self, value: float) -> None:
+        self._hover_progress = float(value)
+        self.update()
+
+    hover_progress = property(_get_hover_progress, _set_hover_progress)  # type: ignore[assignment]
+
+    def _get_press_progress(self) -> float:
+        return self._press_progress
+
+    def _set_press_progress(self, value: float) -> None:
+        self._press_progress = float(value)
+        self.update()
+
+    press_progress = property(_get_press_progress, _set_press_progress)  # type: ignore[assignment]
+
+    def set_icon_name(self, icon_name: str) -> None:
+        self._icon_name = icon_name
+        if icon_name:
+            self.setIconSize(QSize(self._icon_size, self._icon_size))
+        self.refresh_icon()
+
+    def refresh_icon(self) -> None:
+        style = active_style()
+        name = "spinner" if self._loading else self._icon_name
+        if not name:
+            self.setIcon(vector_icon("", style.text, self._icon_size))
+            return
+        if self.objectName() == "primary":
+            color = style.accent_2
+        elif self._hovered and not self._loading:
+            color = style.accent_2
+        elif self._loading:
+            color = style.accent
+        else:
+            color = style.text
+        angle = self._spin_angle if self._loading else 0.0
+        self.setIcon(vector_icon(name, color, size=self._icon_size, angle=angle))
+
+    def set_loading(self, loading: bool, label: str = "") -> None:
+        loading = bool(loading)
+        if loading == self._loading:
+            if loading and label:
+                self.setText(label)
+            return
+        self._loading = loading
+        if loading:
+            self._base_text = self.text()
+            if label:
+                self.setText(label)
+            self.setEnabled(False)
+            self.setIconSize(QSize(self._icon_size, self._icon_size))
+            if not is_reduced_motion():
+                self._spin_timer.start()
+        else:
+            self._spin_timer.stop()
+            self._spin_angle = 0.0
+            self.setText(self._base_text)
+            self.setEnabled(True)
+        self.refresh_icon()
+
+    def _advance_spinner(self) -> None:
+        self._spin_angle = (self._spin_angle + 24.0) % 360.0
+        self.refresh_icon()
+
+    def _animate_hover(self, target: float) -> None:
+        self._hover_anim.stop()
+        if is_reduced_motion():
+            self._hover_progress = target
+            self.update()
+            return
+        self._hover_anim.setStartValue(self._hover_progress)
+        self._hover_anim.setEndValue(target)
+        self._hover_anim.start()
+
+    def _animate_press(self, target: float) -> None:
+        self._press_anim.stop()
+        if is_reduced_motion():
+            self._press_progress = target
+            self.update()
+            return
+        self._press_anim.setStartValue(self._press_progress)
+        self._press_anim.setEndValue(target)
+        self._press_anim.start()
+
+    def enterEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        self._hovered = True
+        self.refresh_icon()
+        self._animate_hover(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        self._hovered = False
+        self._pressed = False
+        self.refresh_icon()
+        self._animate_hover(0.0)
+        self._animate_press(0.0)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self._pressed = True
+            self._animate_press(1.0)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        self._pressed = False
+        self._animate_press(0.0)
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        super().paintEvent(event)
+        if self._hover_progress <= 0.01 and self._press_progress <= 0.01:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        style = active_style()
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        radius = float(max(4, style.radius))
+        clip = QPainterPath()
+        clip.addRoundedRect(rect, radius, radius)
+        painter.setClipPath(clip)
+        if self._hover_progress > 0.01 and self.isEnabled():
+            sheen = QColor(style.accent_2)
+            sheen.setAlpha(int(24 * self._hover_progress))
+            top_grad = QLinearGradient(0, rect.top(), 0, rect.bottom())
+            top_grad.setColorAt(0.0, sheen)
+            top_grad.setColorAt(0.65, QColor(0, 0, 0, 0))
+            painter.fillRect(rect, QBrush(top_grad))
+        if self._press_progress > 0.01:
+            shade = QColor(0, 0, 0, int(45 * self._press_progress))
+            painter.fillRect(rect, shade)
+        painter.end()
 
 
 class StylePreview(QFrame):
