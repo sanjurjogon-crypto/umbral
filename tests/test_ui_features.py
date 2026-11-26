@@ -1390,3 +1390,30 @@ def test_quick_favorite_and_state_buttons(monkeypatch, tmp_path: Path) -> None:
 
     page.deleteLater()
     app.processEvents()
+
+
+def test_top_bar_quick_state_pills(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import LibraryPage
+
+    app = _app()
+    games = [
+        Game(id="u1", title="Alpha", system="PC", system_key="pc"),
+        Game(id="p1", title="Beta", system="PC", system_key="pc", progress="playing"),
+        Game(id="f1", title="Gamma", system="PC", system_key="pc", progress="finished"),
+    ]
+    page = LibraryPage(_store(monkeypatch, tmp_path, games))
+    page.resize(1200, 720)
+    page.refresh(reset=True)
+    assert len(page._visible_games()) == 3
+
+    page._state_pill_buttons["playing"].click()
+    assert [g.id for g in page._visible_games()] == ["p1"]
+    assert page._state_pill_buttons["playing"].property("active") is True
+
+    page._state_pill_buttons["finished"].click()
+    assert [g.id for g in page._visible_games()] == ["f1"]
+
+    page._state_pill_buttons[""].click()
+    assert len(page._visible_games()) == 3
+    page.deleteLater()
+    app.processEvents()
