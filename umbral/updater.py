@@ -171,22 +171,62 @@ def _is_trusted_github_url(url: str) -> bool:
     )
 
 
+def _web_latest_info(timeout: float = 8.0) -> Optional[UpdateInfo]:
+    """Fallback when api.github.com hits unauthenticated rate limits (403/429)."""
+    if os.name != "nt":
+        return None
+    request = Request(
+        f"https://github.com/{REPO}/releases/latest",
+        headers={"User-Agent": USER_AGENT},
+    )
+    try:
+        with urlopen(request, timeout=timeout, context=ssl_context()) as response:
+            final_url = response.geturl()
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return None
+    if "/releases/tag/" not in final_url:
+        return None
+    tag = final_url.rstrip("/").rsplit("/", 1)[-1].strip()
+    version = tag.lstrip("vV")
+    if not version:
+        return None
+    asset_url = f"https://github.com/{REPO}/releases/download/{tag}/{WINDOWS_ASSET_NAME}"
+    sha_url = f"{asset_url}.sha256"
+    return UpdateInfo(
+        version=version,
+        tag=tag,
+        notes="",
+        asset_url=asset_url,
+        asset_name=WINDOWS_ASSET_NAME,
+        size=0,
+        digest="",
+        sha_url=sha_url,
+        page_url=final_url,
+        published_at="",
+    )
+
+
 def check_for_update(current: str = __version__, timeout: float = 8.0) -> Optional[UpdateInfo]:
+    info: Optional[UpdateInfo] = None
     try:
         payload = _request_json(API_LATEST, timeout=timeout)
     except HTTPError as exc:
         if exc.code == 404:
             return None
         if exc.code in (403, 429):
-            raise UpdateError("GitHub ha limitado las comprobaciones. Inténtalo dentro de un rato.") from exc
-        raise UpdateError(f"GitHub respondió con un error {exc.code}.") from exc
+            info = _web_latest_info(timeout=timeout)
+            if info is None:
+                raise UpdateError("GitHub ha limitado las comprobaciones. Inténtalo dentro de un rato.") from exc
+        else:
+            raise UpdateError(f"GitHub respondió con un error {exc.code}.") from exc
     except (URLError, TimeoutError, OSError) as exc:
         raise UpdateError("No se pudo conectar con GitHub.") from exc
     except (ValueError, UnicodeDecodeError) as exc:
         raise UpdateError("GitHub devolvió una respuesta que no se pudo leer.") from exc
-    if payload.get("draft") or payload.get("prerelease"):
-        return None
-    info = _info_from_payload(payload)
+    else:
+        if payload.get("draft") or payload.get("prerelease"):
+            return None
+        info = _info_from_payload(payload)
     if info is None or not is_newer(info.version, current):
         return None
     if not _is_trusted_github_url(info.asset_url):
