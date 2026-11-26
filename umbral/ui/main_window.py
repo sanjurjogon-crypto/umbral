@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
         changed_ids = set()
         for game_id, text in changes:
             target = self.store.get(game_id)
-            if target is not None and text:
+            if target is not None and target.description != text:
                 target.description = text
                 changed_ids.add(game_id)
         if not changed_ids:

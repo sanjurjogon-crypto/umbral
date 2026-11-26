@@ -25,9 +25,9 @@ from .models import Game
 from .net import ssl_context
 from .paths import data_dir
 
-_WIKI_USER_AGENT = "UmbralLauncher/8.54 (https://github.com/sanjurjogon-crypto/umbral)"
+_WIKI_USER_AGENT = "UmbralLauncher/8.56 (https://github.com/sanjurjogon-crypto/umbral)"
 _CACHE_LOCK = threading.Lock()
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 _BOILERPLATE_PREFIXES = (
     "juego de steam instalado en ",
@@ -42,6 +42,7 @@ _BOILERPLATE_SUBSTRINGS = (
     "port nativo para pc",
     "recreación nativa",
     "emulador propio",
+    "third person bp game template",
 )
 
 
@@ -158,9 +159,12 @@ def _steam_synopsis(game: Game) -> str:
         if isinstance(items, list) and items:
             first = items[0]
             if isinstance(first, dict) and first.get("id"):
-                hit_name = re.sub(r"[^a-z0-9]+", " ", str(first.get("name") or "").lower()).strip()
-                want_name = re.sub(r"[^a-z0-9]+", " ", clean_title.lower()).strip()
-                if want_name and (want_name in hit_name or hit_name in want_name):
+                hit_comp = _compact(str(first.get("name") or ""))
+                want_comp = _compact(clean_title)
+                if want_comp and (
+                    hit_comp == want_comp
+                    or hit_comp.removeprefix("the") == want_comp.removeprefix("the")
+                ):
                     app_id = str(first["id"])
     if not app_id:
         return ""
@@ -184,6 +188,11 @@ _DEV_LEAD_PATTERNS = (
     "desarrollado por",
     "publicado por",
     "distribuido por",
+    "fue anunciado",
+    "anunciado en",
+    "publicado en",
+    "lanzado en",
+    "se lanzó",
     "is a video game",
     "is an action",
     "is a role-playing",
@@ -191,6 +200,15 @@ _DEV_LEAD_PATTERNS = (
     "developed by",
     "published by",
 )
+
+
+def _wiki_title_matches(game_title: str, wiki_title: str) -> bool:
+    want = _compact(_clean_search_title(game_title))
+    clean_wiki = re.sub(r"\s*\([^)]*\)\s*$", "", wiki_title or "")
+    got = _compact(_clean_search_title(clean_wiki))
+    if not want or not got:
+        return False
+    return want == got or want.removeprefix("the") == got.removeprefix("the")
 
 
 def _strip_dev_sentences(text: str) -> str:
@@ -253,8 +271,8 @@ def _gamedb_synopsis(game: Game) -> str:
             continue
         if comp == target:
             candidates.append((100, str(gid)))
-        elif target in comp:
-            candidates.append((60 - min(30, abs(len(comp) - len(target))), str(gid)))
+        elif comp.removeprefix("the") == target.removeprefix("the"):
+            candidates.append((90, str(gid)))
     candidates.sort(reverse=True)
 
     wanted = set(PLATFORM_IDS.get((game.system_key or "").lower(), ()))
@@ -295,9 +313,9 @@ def _wikipedia_synopsis(title: str, lang: str = "es") -> str:
             continue
 
         hits = data.get("query", {}).get("search", []) if isinstance(data, dict) else []
-        for hit in hits[:2]:
+        for hit in hits[:3]:
             page_title = str(hit.get("title") or "").strip()
-            if not page_title:
+            if not page_title or not _wiki_title_matches(title, page_title):
                 continue
             extract_url = (
                 f"https://{lang}.wikipedia.org/w/api.php?action=query&prop=extracts"
@@ -362,7 +380,7 @@ class SynopsisWorker(QThread):
                 text = fetch_synopsis(game)
             except Exception:  # noqa: BLE001
                 text = ""
-            if text:
+            if text or (game.description or "").strip():
                 batch.append((game.id, text))
                 # Emit early for the first game and every 3 games thereafter so synopses persist incrementally
                 if idx == 0 or len(batch) >= 3:

@@ -1615,7 +1615,7 @@ class ShelfCanvas(QWidget):
                 syn_font = QFont(style.body_font or UI_FONT)
                 syn_font.setPixelSize(max(9, int(win_rect.height() * 0.064)))
                 buf.setFont(syn_font)
-                synopsis = (game.description or "").strip() or "Buscando sinopsis del juego…"
+                synopsis = (game.description or "").strip()
                 syn_fm = QFontMetrics(syn_font)
                 syn_text_w = max(20.0, syn_rect.width() - 8.0)
                 full_syn = syn_fm.boundingRect(
@@ -1751,7 +1751,7 @@ class ShelfCanvas(QWidget):
                 body_font.setPixelSize(max(8, int(float(base_w) * 0.045)))
                 buf.setFont(body_font)
                 buf.setPen(QColor("#ded8c8"))
-                synopsis = (game.description or "").strip() or "Sin descripción disponible. Puedes editarla en la ficha del juego."
+                synopsis = (game.description or "").strip()
                 syn_inner = desc_rect.adjusted(8.0, 8.0, -8.0, -8.0)
                 full_fb = QFontMetrics(body_font).boundingRect(
                     QRect(0, 0, int(max(20.0, syn_inner.width() - 6.0)), 4000),
