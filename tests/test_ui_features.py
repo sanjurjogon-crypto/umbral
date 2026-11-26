@@ -1233,3 +1233,58 @@ def test_new_console_templates_and_back_synopsis_scroll() -> None:
     assert canvas._back_scroll > 0.0
     canvas.deleteLater()
     app.processEvents()
+
+
+def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -> None:
+    from umbral.synopsis import (
+        _clean_search_title,
+        cached_synopsis,
+        fetch_synopsis,
+        needs_synopsis,
+        store_cached_synopsis,
+    )
+
+    monkeypatch.setattr("umbral.synopsis.data_dir", lambda: tmp_path)
+
+    # Console / port boilerplate must be detected so all games fetch synopses
+    rom_game = Game(
+        id="n64_oot",
+        title="The Legend of Zelda - Ocarina of Time (USA) (Rev 2)",
+        system="Nintendo 64",
+        system_key="n64",
+        description="Juego de Nintendo 64 lanzado con RMG.",
+    )
+    port_game = Game(
+        id="port_1",
+        title="Dusklight",
+        system="Ports",
+        system_key="ports",
+        description="Port nativo para PC.",
+    )
+    assert needs_synopsis(rom_game) is True
+    assert needs_synopsis(port_game) is True
+    assert _clean_search_title(rom_game.title) == "The Legend of Zelda: Ocarina of Time"
+
+    # Fetched synopses are persisted in synopses.json and reused without network calls
+    calls = {"wiki": 0}
+
+    def fake_wiki(title: str, lang: str = "es") -> str:
+        calls["wiki"] += 1
+        return "Aventura épica en Hyrule para Nintendo 64." if lang == "es" else ""
+
+    monkeypatch.setattr("umbral.synopsis._steam_synopsis", lambda _g: "")
+    monkeypatch.setattr("umbral.synopsis._wikipedia_synopsis", fake_wiki)
+
+    first = fetch_synopsis(rom_game)
+    assert first == "Aventura épica en Hyrule para Nintendo 64."
+    assert calls["wiki"] == 1
+    assert (tmp_path / "synopses.json").is_file()
+    assert cached_synopsis(rom_game) == first
+
+    # Second call hits local cache directly (no network call)
+    second = fetch_synopsis(rom_game)
+    assert second == first
+    assert calls["wiki"] == 1
+
+    store_cached_synopsis(port_game, "Port nativo de acción.")
+    assert cached_synopsis(port_game) == "Port nativo de acción."
