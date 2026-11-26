@@ -25,9 +25,9 @@ from .models import Game
 from .net import ssl_context
 from .paths import data_dir
 
-_WIKI_USER_AGENT = "UmbralLauncher/8.56 (https://github.com/sanjurjogon-crypto/umbral)"
+_WIKI_USER_AGENT = "UmbralLauncher/8.57 (https://github.com/sanjurjogon-crypto/umbral)"
 _CACHE_LOCK = threading.Lock()
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 _BOILERPLATE_PREFIXES = (
     "juego de steam instalado en ",
@@ -43,6 +43,11 @@ _BOILERPLATE_SUBSTRINGS = (
     "recreación nativa",
     "emulador propio",
     "third person bp game template",
+    "arranca desde tu propia copia",
+    "se ejecuta con tu emulador",
+    "usa tu propia copia",
+    "vuelto a imaginar para",
+    "reconstruido para pc",
 )
 
 
@@ -55,7 +60,7 @@ def needs_synopsis(game: Game) -> bool:
         return True
     if any(low.startswith(prefix) for prefix in _BOILERPLATE_PREFIXES):
         return True
-    if any(part in low for part in _BOILERPLATE_SUBSTRINGS) and len(desc) < 160:
+    if any(part in low for part in _BOILERPLATE_SUBSTRINGS) and len(desc) < 260:
         return True
     if any(pat in low for pat in _DEV_LEAD_PATTERNS):
         return True
@@ -188,17 +193,23 @@ _DEV_LEAD_PATTERNS = (
     "desarrollado por",
     "publicado por",
     "distribuido por",
+    "comenzó a distribuir",
+    "versión física",
+    "fue lanzado",
+    "se lanzó",
+    "salió a la venta",
     "fue anunciado",
     "anunciado en",
     "publicado en",
     "lanzado en",
-    "se lanzó",
     "is a video game",
     "is an action",
     "is a role-playing",
     "is a survival",
     "developed by",
     "published by",
+    "distributed by",
+    "released for",
 )
 
 
