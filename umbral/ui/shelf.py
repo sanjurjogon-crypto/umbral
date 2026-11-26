@@ -1437,8 +1437,10 @@ class ShelfCanvas(QWidget):
             target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
         )
 
-        # Case hovers slightly above the glass tabletop, so offset the reflection downward
-        hover_gap = max(7.0, target.height() * 0.042)
+        max_depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
+        bottom_h = max(3.5, max_depth * 0.44)
+        # Case hovers slightly above the glass tabletop, so offset the reflection downward below bottom cap
+        hover_gap = max(5.0, target.height() * 0.025) + bottom_h
         bl_base = QPointF(target.center().x() + quad[3].x(), target.center().y() + quad[3].y())
         br_base = QPointF(target.center().x() + quad[2].x(), target.center().y() + quad[2].y())
         bl = QPointF(bl_base.x(), bl_base.y() + hover_gap)
@@ -1447,12 +1449,11 @@ class ShelfCanvas(QWidget):
         refl_h = target.height() * 0.56
         l_drop = refl_h + (quad[3].y() - quad[2].y()) * 0.35
         r_drop = refl_h + (quad[2].y() - quad[3].y()) * 0.35
-        flare = target.width() * 0.025
         refl_quad = [
             bl,
             br,
-            QPointF(br.x() + flare, br.y() + r_drop),
-            QPointF(bl.x() - flare, bl.y() + l_drop),
+            QPointF(br.x(), br.y() + r_drop),
+            QPointF(bl.x(), bl.y() + l_drop),
         ]
         refl_rect = QRectF(target.left(), target.bottom() + hover_gap, target.width(), refl_h)
         source = [
@@ -1470,8 +1471,7 @@ class ShelfCanvas(QWidget):
         painter.save()
         painter.setTransform(trans, False)
         painter.setOpacity((0.52 if selected else 0.42) * strength)
-        # Mirror both left & right 3D spines continuously into floor
-        max_depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
+        # Mirror bottom face and both left & right 3D spines continuously into floor
         left_depth = max_depth * (0.28 + 0.72 * max(0.0, turn))
         right_depth = max_depth * (0.28 + 0.72 * max(0.0, -turn))
         spine_grad = QLinearGradient(0, refl_rect.top(), 0, refl_rect.bottom())
@@ -1481,23 +1481,36 @@ class ShelfCanvas(QWidget):
         spine_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.NoPen)
 
+        bottom_refl = QRectF(refl_rect.left(), refl_rect.top(), refl_rect.width(), bottom_h)
+        bottom_refl_grad = QLinearGradient(0, bottom_refl.top(), 0, bottom_refl.bottom())
+        bottom_refl_grad.setColorAt(0.0, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 200))
+        bottom_refl_grad.setColorAt(1.0, QColor(spine_base.red(), spine_base.green(), spine_base.blue(), 145))
+        painter.fillRect(bottom_refl, QBrush(bottom_refl_grad))
+
+        y_spine_top = refl_rect.top() + bottom_h * 0.85
         left_spine = QPainterPath()
-        left_spine.moveTo(refl_rect.left(), refl_rect.top())
-        left_spine.lineTo(refl_rect.left() - left_depth, refl_rect.top() - left_depth * 0.32)
+        left_spine.moveTo(refl_rect.left(), y_spine_top)
+        left_spine.lineTo(refl_rect.left() - left_depth, y_spine_top - left_depth * 0.32)
         left_spine.lineTo(refl_rect.left() - left_depth, refl_rect.bottom())
         left_spine.lineTo(refl_rect.left(), refl_rect.bottom())
         left_spine.closeSubpath()
         painter.fillPath(left_spine, QBrush(spine_grad))
 
         right_spine = QPainterPath()
-        right_spine.moveTo(refl_rect.right(), refl_rect.top())
-        right_spine.lineTo(refl_rect.right() + right_depth, refl_rect.top() - right_depth * 0.32)
+        right_spine.moveTo(refl_rect.right(), y_spine_top)
+        right_spine.lineTo(refl_rect.right() + right_depth, y_spine_top - right_depth * 0.32)
         right_spine.lineTo(refl_rect.right() + right_depth, refl_rect.bottom())
         right_spine.lineTo(refl_rect.right(), refl_rect.bottom())
         right_spine.closeSubpath()
         painter.fillPath(right_spine, QBrush(spine_grad))
 
-        painter.drawPixmap(refl_rect, refl_pix, QRectF(refl_pix.rect()))
+        cover_refl = QRectF(
+            refl_rect.left(),
+            refl_rect.top() + bottom_h,
+            refl_rect.width(),
+            max(1.0, refl_rect.height() - bottom_h),
+        )
+        painter.drawPixmap(cover_refl, refl_pix, QRectF(refl_pix.rect()))
         painter.restore()
 
     def _paint_case(
