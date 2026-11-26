@@ -502,6 +502,16 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
         font-size: 12px;
         letter-spacing: 1px;
     }
+    QFrame#gamepadBar {
+        background: __GLASS_SURFACE__;
+        border: __THIN__px solid __BORDER__;
+        border-radius: __RADIUS__px;
+    }
+    QLabel#gamepadHint {
+        color: __MUTED__;
+        font-size: 11px;
+        letter-spacing: 0.8px;
+    }
     QWidget#shelfHeader {
         background: transparent;
     }

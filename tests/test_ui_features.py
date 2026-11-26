@@ -1015,3 +1015,99 @@ def test_ui_polish_buttons_icons_search_clear_and_reduced_motion(
 
     win.close()
     app.processEvents()
+
+
+def test_collections_tags_advanced_filters_flip_manual_and_fullscreen(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import umbral.paths as paths_mod
+    import umbral.ui.main_window as mw_mod
+
+    monkeypatch.setattr(store_module, "library_file", lambda: tmp_path / "library.json")
+    monkeypatch.setattr(store_module, "settings_file", lambda: tmp_path / "settings.json")
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw_mod, "data_dir", lambda: tmp_path)
+
+    manual_pdf = tmp_path / "manual.pdf"
+    manual_pdf.write_bytes(b"%PDF-1.4\n")
+    back_img = tmp_path / "back.png"
+    back_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+
+    app = _app()
+    win = mw_mod.MainWindow()
+    win.store.settings["update_last_check"] = "2099-01-01T00:00:00+00:00"
+
+    g1 = Game(
+        id="z1",
+        title="Zelda: Twilight Princess",
+        system="Ports",
+        system_key="ports",
+        emulator="Dusklight",
+        genre="Acción, Aventura",
+        year=2006,
+        description="Aventura épica en Hyrule.",
+        collections=["Saga Zelda", "Pendientes"],
+        tags=["favorito", "3D"],
+        manual_path=str(manual_pdf),
+    )
+    g2 = Game(
+        id="h1",
+        title="Hades",
+        system="PC",
+        system_key="pc",
+        genre="Roguelike, Acción",
+        year=2020,
+        collections=["Indies"],
+        tags=["co-op", "rapido"],
+        back_cover=str(back_img),
+    )
+    win.store.games = [g1, g2]
+    win._refresh_all()
+
+    # Collections & tags metadata
+    assert ("Saga Zelda", 1) in win.store.collections()
+    assert win.store.all_tags() == ["3D", "co-op", "favorito", "rapido"]
+    assert win.store.all_genres() == ["Acción", "Aventura", "Roguelike"]
+
+    # Combined filters on LibraryPage
+    win.library.set_collection_filter("Saga Zelda")
+    assert [g.id for g in win.library._visible_games()] == ["z1"]
+    win.library.clear_advanced_filters()
+    win.library._set_tag_filter("co-op")
+    assert [g.id for g in win.library._visible_games()] == ["h1"]
+    win.library._set_genre_filter("Aventura")
+    assert win.library._visible_games() == []
+    win.library.clear_advanced_filters()
+    assert len(win.library._visible_games()) == 2
+
+    # 3D box flip + back cover rendering + manual button
+    win.library.refresh(reset=True)
+    # Alphabetical order selects "Hades" (index 0); step(1) selects "Zelda" (has manual_path)
+    win.library.canvas.step(1)
+    assert win.library.canvas.current_game().id == "z1"
+    assert win.library.canvas.is_flipped() is False
+    win.library.canvas.toggle_flip()
+    assert win.library.canvas.is_flipped() is True
+    back_pix = win.library.canvas._back_pixmap_for(win.library.canvas._current_item(), 200, 280)
+    assert not back_pix.isNull()
+    assert not win.library.manual_button.isHidden()
+
+    # Fullscreen couch mode & gamepad actions
+    win.toggle_fullscreen_mode()
+    assert win._fullscreen_mode is True
+    assert not win.topbar.isVisible()
+    assert not win.sidebar.isVisible()
+    assert not win._gamepad_bar.isHidden()
+
+    win._gamepad_favorite()
+    assert g1.favorite is True
+    win._gamepad_left()
+    assert win.library.canvas.index == 0
+    win._gamepad_cycle_system(1)
+    assert win.library.current_filter() != ""
+    win._gamepad_back()
+    assert win._fullscreen_mode is False
+    assert not win.topbar.isHidden()
+
+    win.close()
+    app.processEvents()

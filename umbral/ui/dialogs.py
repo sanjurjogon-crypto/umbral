@@ -113,6 +113,17 @@ class GameDetailDialog(QDialog):
         description.setWordWrap(True)
         right.addWidget(description)
 
+        if game.collections or game.tags:
+            meta_parts: list[str] = []
+            if game.collections:
+                meta_parts.append("Colecciones: " + ", ".join(game.collections))
+            if game.tags:
+                meta_parts.append("Etiquetas: " + ", ".join(game.tags))
+            tags_lbl = QLabel("   ·   ".join(meta_parts))
+            tags_lbl.setObjectName("muted")
+            tags_lbl.setWordWrap(True)
+            right.addWidget(tags_lbl)
+
         right.addSpacing(8)
         stats = QHBoxLayout()
         stats.setSpacing(30)
@@ -177,6 +188,13 @@ class GameDetailDialog(QDialog):
         folder.setCursor(Qt.PointingHandCursor)
         self._fit_button(folder)
         folder.clicked.connect(self._open_folder)
+        manual_btn = None
+        if game.manual_path and Path(game.manual_path).is_file():
+            manual_btn = QPushButton("Manual (PDF)")
+            manual_btn.setObjectName("ghost")
+            manual_btn.setCursor(Qt.PointingHandCursor)
+            self._fit_button(manual_btn)
+            manual_btn.clicked.connect(self._open_manual)
         remove = QPushButton("Quitar de Umbral")
         remove.setObjectName("ghost")
         remove.setCursor(Qt.PointingHandCursor)
@@ -189,6 +207,8 @@ class GameDetailDialog(QDialog):
         close.clicked.connect(self.reject)
 
         secondary_row.addWidget(folder)
+        if manual_btn is not None:
+            secondary_row.addWidget(manual_btn)
         secondary_row.addWidget(remove)
         secondary_row.addStretch(1)
         secondary_row.addWidget(close)
@@ -289,6 +309,17 @@ class GameDetailDialog(QDialog):
             return
         self.delete_requested.emit(self.game)
         self.accept()
+
+    def _open_manual(self) -> None:
+        if not self.game.manual_path or not Path(self.game.manual_path).is_file():
+            return
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(self.game.manual_path)
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(self.game.manual_path))
+        except OSError:
+            pass
 
     def _open_folder(self) -> None:
         candidates: list[str] = []
@@ -405,6 +436,14 @@ class AddGameDialog(QDialog):
             self.accent_combo.addItem(name, color)
         self.cover_edit = QLineEdit()
         self.cover_edit.setPlaceholderText("Opcional · deja vacío para buscarla automáticamente")
+        self.back_cover_edit = QLineEdit()
+        self.back_cover_edit.setPlaceholderText("Opcional · imagen para la contracaratula 3D")
+        self.manual_edit = QLineEdit()
+        self.manual_edit.setPlaceholderText("Opcional · archivo PDF del manual")
+        self.collections_edit = QLineEdit()
+        self.collections_edit.setPlaceholderText("Separadas por comas, ej: Pendientes, Saga Zelda")
+        self.tags_edit = QLineEdit()
+        self.tags_edit.setPlaceholderText("Separadas por comas, ej: co-op, indie, favorito")
         self.progress_combo = QComboBox()
         self.progress_combo.addItem("Automático", "")
         self.progress_combo.addItem("En curso", "playing")
@@ -423,9 +462,13 @@ class AddGameDialog(QDialog):
         self._row(grid, 5, "Descripción", self.description_edit)
         self._row(grid, 6, "Color", self.accent_combo)
         self._row(grid, 7, "Carátula", self._file_row(self.cover_edit, "image"))
-        self._row(grid, 8, "Estado", self.progress_combo)
-        self._row(grid, 9, "Tiempo jugado", self.playtime_spin)
-        self._row(grid, 10, "Notas", self.notes_edit)
+        self._row(grid, 8, "Contracaratula", self._file_row(self.back_cover_edit, "image"))
+        self._row(grid, 9, "Manual (PDF)", self._file_row(self.manual_edit, "pdf"))
+        self._row(grid, 10, "Colecciones", self.collections_edit)
+        self._row(grid, 11, "Etiquetas", self.tags_edit)
+        self._row(grid, 12, "Estado", self.progress_combo)
+        self._row(grid, 13, "Tiempo jugado", self.playtime_spin)
+        self._row(grid, 14, "Notas", self.notes_edit)
         self.advanced.hide()
         body.addWidget(self.advanced)
 
@@ -470,6 +513,13 @@ class AddGameDialog(QDialog):
                 lambda: self._browse_file(
                     line_edit,
                     "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp);;Todos los archivos (*)",
+                )
+            )
+        elif mode == "pdf":
+            browse.clicked.connect(
+                lambda: self._browse_file(
+                    line_edit,
+                    "Documentos PDF (*.pdf);;Todos los archivos (*)",
                 )
             )
         else:
@@ -659,6 +709,10 @@ class AddGameDialog(QDialog):
         accent_index = self.accent_combo.findData(game.accent)
         self.accent_combo.setCurrentIndex(accent_index if accent_index >= 0 else 0)
         self.cover_edit.setText(game.cover)
+        self.back_cover_edit.setText(game.back_cover)
+        self.manual_edit.setText(game.manual_path)
+        self.collections_edit.setText(", ".join(game.collections))
+        self.tags_edit.setText(", ".join(game.tags))
         progress_index = self.progress_combo.findData(game.progress)
         self.progress_combo.setCurrentIndex(progress_index if progress_index >= 0 else 0)
         self.playtime_spin.setValue(self._initial_minutes)
@@ -670,6 +724,10 @@ class AddGameDialog(QDialog):
             or game.year
             or game.description
             or game.cover
+            or game.back_cover
+            or game.manual_path
+            or game.collections
+            or game.tags
             or game.progress
             or game.notes
             or game.playtime_seconds
@@ -748,6 +806,22 @@ class AddGameDialog(QDialog):
                 self, "Carátula no encontrada", f"No existe la imagen indicada:\n{cover}"
             )
             return
+        back_cover = self.back_cover_edit.text().strip()
+        if back_cover and not Path(back_cover).is_file():
+            QMessageBox.warning(
+                self, "Contracaratula no encontrada", f"No existe la imagen indicada:\n{back_cover}"
+            )
+            return
+        manual_path = self.manual_edit.text().strip()
+        if manual_path and not Path(manual_path).is_file():
+            QMessageBox.warning(
+                self, "Manual no encontrado", f"No existe el archivo indicado:\n{manual_path}"
+            )
+            return
+        collections = [
+            item.strip() for item in self.collections_edit.text().split(",") if item.strip()
+        ]
+        tags = [item.strip() for item in self.tags_edit.text().split(",") if item.strip()]
         progress = str(self.progress_combo.currentData() or "")
         minutes = int(self.playtime_spin.value())
         notes = self.notes_edit.toPlainText().strip()
@@ -766,6 +840,10 @@ class AddGameDialog(QDialog):
             game.description = description
             game.accent = accent
             game.cover = cover
+            game.back_cover = back_cover
+            game.manual_path = manual_path
+            game.collections = list(dict.fromkeys(collections))
+            game.tags = list(dict.fromkeys(tags))
             game.progress = progress
             game.notes = notes
             if minutes != self._initial_minutes:
@@ -786,6 +864,10 @@ class AddGameDialog(QDialog):
                 description=description,
                 accent=accent,
                 cover=cover,
+                back_cover=back_cover,
+                manual_path=manual_path,
+                collections=list(dict.fromkeys(collections)),
+                tags=list(dict.fromkeys(tags)),
                 progress=progress,
                 playtime_seconds=minutes * 60,
                 source="manual",

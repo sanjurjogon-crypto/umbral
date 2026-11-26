@@ -31,6 +31,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hide_demos": False,
     "shelf_halo": True,
     "reduce_animations": False,
+    "custom_collections": [],
 }
 
 
@@ -496,6 +497,46 @@ class Store:
             ((key, label, count) for key, (label, count) in counts.items()),
             key=lambda item: (-item[2], item[1]),
         )
+
+    def collections(self) -> list[tuple[str, int]]:
+        counts: dict[str, int] = {}
+        for name in self.settings.get("custom_collections", []):
+            clean = str(name).strip()
+            if clean:
+                counts.setdefault(clean, 0)
+        for game in self.games:
+            for name in game.collections:
+                clean = str(name).strip()
+                if clean:
+                    counts[clean] = counts.get(clean, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+
+    def add_collection(self, name: str) -> str:
+        clean = str(name).strip()
+        if not clean:
+            return ""
+        custom = self.settings.setdefault("custom_collections", [])
+        if clean not in custom:
+            custom.append(clean)
+            self.save_settings()
+        return clean
+
+    def all_tags(self) -> list[str]:
+        tags = {str(tag).strip() for game in self.games for tag in game.tags if str(tag).strip()}
+        return sorted(tags, key=str.lower)
+
+    def all_genres(self) -> list[str]:
+        import re
+
+        genres: set[str] = set()
+        for game in self.games:
+            if not game.genre:
+                continue
+            for part in re.split(r"[,/]", game.genre):
+                clean = part.strip()
+                if clean:
+                    genres.add(clean)
+        return sorted(genres, key=str.lower)
 
     def stats(self) -> dict[str, Any]:
         total_seconds = sum(game.playtime_seconds for game in self.games)

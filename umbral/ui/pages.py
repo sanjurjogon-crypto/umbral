@@ -177,6 +177,10 @@ class HomePage(QWidget):
         favorites = [game for game in pool if game.favorite][:8]
         if favorites:
             self._add_row("Favoritos", favorites)
+        for col_name, _count in self.store.collections():
+            col_games = [game for game in games if col_name in game.collections][:8]
+            if col_games:
+                self._add_row(col_name, col_games)
         added = sorted(pool, key=lambda game: game.added_at, reverse=True)[:8]
         if added:
             self._add_row("Añadidos recientes", added)
@@ -243,6 +247,9 @@ class LibraryPage(QWidget):
         self._favorites_only = False
         self._favorites_filter = ""
         self._state_filter = ""
+        self._collection_filter = ""
+        self._tag_filter = ""
+        self._genre_filter = ""
         self._inset_left = 0
         self._inset_top = 0
         self._hide_demos = bool(store.settings.get("hide_demos", False))
@@ -295,6 +302,7 @@ class LibraryPage(QWidget):
         self.canvas.details_requested.connect(self.details_requested)
         self.canvas.context_requested.connect(self.context_requested)
         self.canvas.selection_changed.connect(self._on_selection)
+        self.canvas.flipped_changed.connect(self._on_flipped_changed)
 
         self.grid_scroll = QScrollArea(self)
         self.grid_scroll.setWidgetResizable(True)
@@ -347,6 +355,20 @@ class LibraryPage(QWidget):
         self.play_button.refresh_icon()
         self.play_button.clicked.connect(self._play_current)
         self.info_actions.addWidget(self.play_button)
+        self.flip_button = UmbralButton("Girar caja", icon_name="flip", icon_size=14)
+        self.flip_button.setObjectName("ghost")
+        self.flip_button.setCursor(Qt.PointingHandCursor)
+        self.flip_button.setToolTip("Ver contracaratula (tecla F)")
+        self.flip_button.refresh_icon()
+        self.flip_button.clicked.connect(self.canvas.toggle_flip)
+        self.info_actions.addWidget(self.flip_button)
+        self.manual_button = UmbralButton("Manual (PDF)", icon_name="book", icon_size=14)
+        self.manual_button.setObjectName("ghost")
+        self.manual_button.setCursor(Qt.PointingHandCursor)
+        self.manual_button.refresh_icon()
+        self.manual_button.clicked.connect(self._open_current_manual)
+        self.manual_button.hide()
+        self.info_actions.addWidget(self.manual_button)
         info_body.addLayout(self.info_title_row)
         info_body.addWidget(self.info_meta)
         info_body.addSpacing(4)
@@ -536,11 +558,95 @@ class LibraryPage(QWidget):
             self._state_actions[key] = act
 
         menu.addSeparator()
+        self._collection_menu = menu.addMenu("Colección")
+        self._tag_menu = menu.addMenu("Etiqueta")
+        self._genre_menu = menu.addMenu("Género")
+        menu.aboutToShow.connect(self._populate_dynamic_filters)
+
+        menu.addSeparator()
         self.hide_demos_action = QAction("Ocultar demos", menu, checkable=True)
         self.hide_demos_action.setChecked(self._hide_demos)
         self.hide_demos_action.toggled.connect(self._demos_toggled)
         menu.addAction(self.hide_demos_action)
+        self.clear_filters_action = QAction("Limpiar filtros", menu)
+        self.clear_filters_action.triggered.connect(self.clear_advanced_filters)
+        menu.addAction(self.clear_filters_action)
         return menu
+
+    def _populate_dynamic_filters(self) -> None:
+        self._collection_menu.clear()
+        all_col = QAction("Todas", self._collection_menu, checkable=True)
+        all_col.setChecked(not self._collection_filter)
+        all_col.triggered.connect(lambda _c: self.set_collection_filter(""))
+        self._collection_menu.addAction(all_col)
+        for name, count in self.store.collections():
+            act = QAction(f"{name} ({count})", self._collection_menu, checkable=True)
+            act.setChecked(self._collection_filter == name)
+            act.triggered.connect(lambda _c, v=name: self.set_collection_filter(v))
+            self._collection_menu.addAction(act)
+
+        self._tag_menu.clear()
+        all_tag = QAction("Todas", self._tag_menu, checkable=True)
+        all_tag.setChecked(not self._tag_filter)
+        all_tag.triggered.connect(lambda _c: self._set_tag_filter(""))
+        self._tag_menu.addAction(all_tag)
+        for tag in self.store.all_tags():
+            act = QAction(tag, self._tag_menu, checkable=True)
+            act.setChecked(self._tag_filter == tag)
+            act.triggered.connect(lambda _c, v=tag: self._set_tag_filter(v))
+            self._tag_menu.addAction(act)
+
+        self._genre_menu.clear()
+        all_genre = QAction("Todos", self._genre_menu, checkable=True)
+        all_genre.setChecked(not self._genre_filter)
+        all_genre.triggered.connect(lambda _c: self._set_genre_filter(""))
+        self._genre_menu.addAction(all_genre)
+        for genre in self.store.all_genres():
+            act = QAction(genre, self._genre_menu, checkable=True)
+            act.setChecked(self._genre_filter.lower() == genre.lower())
+            act.triggered.connect(lambda _c, v=genre: self._set_genre_filter(v))
+            self._genre_menu.addAction(act)
+
+        if hasattr(self, "clear_filters_action"):
+            has_any = bool(
+                self._state_filter
+                or self._hide_demos
+                or self._collection_filter
+                or self._tag_filter
+                or self._genre_filter
+            )
+            self.clear_filters_action.setEnabled(has_any)
+
+    def set_collection_filter(self, name: str) -> None:
+        self._collection_filter = str(name or "")
+        self._sync_filters_ui()
+        self.refresh(reset=True)
+
+    def current_collection_filter(self) -> str:
+        return self._collection_filter
+
+    def _set_tag_filter(self, tag: str) -> None:
+        self._tag_filter = str(tag or "")
+        self._sync_filters_ui()
+        self.refresh(reset=True)
+
+    def _set_genre_filter(self, genre: str) -> None:
+        self._genre_filter = str(genre or "")
+        self._sync_filters_ui()
+        self.refresh(reset=True)
+
+    def clear_advanced_filters(self) -> None:
+        self._state_filter = ""
+        self._collection_filter = ""
+        self._tag_filter = ""
+        self._genre_filter = ""
+        self._hide_demos = False
+        self.store.settings["hide_demos"] = False
+        self.store.save_settings()
+        if hasattr(self, "hide_demos_action"):
+            self.hide_demos_action.setChecked(False)
+        self._sync_filters_ui()
+        self.refresh(reset=True)
 
     def _set_sort_key(self, key: str) -> None:
         if not key:
@@ -597,7 +703,13 @@ class LibraryPage(QWidget):
             for key, act in self._state_actions.items():
                 act.setChecked(self._state_filter == key)
         if hasattr(self, "filters_button"):
-            active_badge = bool(self._state_filter or self._hide_demos)
+            active_badge = bool(
+                self._state_filter
+                or self._hide_demos
+                or self._collection_filter
+                or self._tag_filter
+                or self._genre_filter
+            )
             self.filters_button.setText("Filtros •  ▾" if active_badge else "Filtros  ▾")
 
     def _add_slider_action(
@@ -708,6 +820,17 @@ class LibraryPage(QWidget):
             games = [game for game in games if game.system_key == active_filter]
         if self._state_filter:
             games = [game for game in games if game.state == self._state_filter]
+        if self._collection_filter:
+            games = [game for game in games if self._collection_filter in game.collections]
+        if self._tag_filter:
+            games = [game for game in games if self._tag_filter in game.tags]
+        if self._genre_filter:
+            wanted_genre = self._genre_filter.lower()
+            games = [
+                game
+                for game in games
+                if wanted_genre in [part.strip().lower() for part in re.split(r"[,/]", game.genre)]
+            ]
         if self._hide_demos:
             games = [game for game in games if not _is_demo_game(game)]
         query = self._query.strip().lower()
@@ -721,6 +844,8 @@ class LibraryPage(QWidget):
                 or query in game.system.lower()
                 or query in game.emulator.lower()
                 or query in game.notes.lower()
+                or any(query in tag.lower() for tag in game.tags)
+                or any(query in col.lower() for col in game.collections)
                 or (game.year is not None and query in str(game.year))
             ]
         games = sorted(games, key=lambda game: game.title.lower())
@@ -777,7 +902,31 @@ class LibraryPage(QWidget):
         if game.playtime_seconds:
             bits.append(game.playtime_text)
         self.info_meta.setText("     ·     ".join(bits))
+        has_manual = bool(game.manual_path and Path(game.manual_path).is_file())
+        if hasattr(self, "manual_button"):
+            self.manual_button.setVisible(has_manual and self._view_mode == "shelf")
+        if hasattr(self, "flip_button"):
+            self.flip_button.setVisible(self._view_mode == "shelf")
+        self._on_flipped_changed(self.canvas.is_flipped())
         self._layout_overlays()
+
+    def _on_flipped_changed(self, flipped: bool) -> None:
+        if hasattr(self, "flip_button"):
+            self.flip_button.setText("Ver frontal" if flipped else "Girar caja")
+
+    def _open_current_manual(self) -> None:
+        game = self.canvas.current_game()
+        if game is None or not game.manual_path or not Path(game.manual_path).is_file():
+            return
+        import os
+
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(game.manual_path)
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(game.manual_path))
+        except OSError:
+            pass
 
     def _play_current(self) -> None:
         game = self.canvas.current_game()

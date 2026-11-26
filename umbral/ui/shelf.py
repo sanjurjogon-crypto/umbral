@@ -594,6 +594,8 @@ class ShelfItem:
     dominant: QColor
     front_cache: Optional[QPixmap] = None
     front_cache_key: tuple = ()
+    back_cache: Optional[QPixmap] = None
+    back_cache_key: tuple = ()
     refl_cache: Optional[QPixmap] = None
     refl_cache_key: tuple = ()
 
@@ -603,6 +605,7 @@ class ShelfCanvas(QWidget):
     details_requested = Signal(object)
     selection_changed = Signal(object)
     context_requested = Signal(object, object)
+    flipped_changed = Signal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -649,6 +652,12 @@ class ShelfCanvas(QWidget):
         self._bg_anim = QPropertyAnimation(self, b"backdrop_mix", self)
         self._bg_anim.setDuration(360)
         self._bg_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._flip_angle = 0.0
+        self._flip_target = 0.0
+        self._flip_anim = QPropertyAnimation(self, b"flip_angle", self)
+        self._flip_anim.setDuration(320)
+        self._flip_anim.setEasingCurve(QEasingCurve.InOutCubic)
 
         self._tilt_timer = QTimer(self)
         self._tilt_timer.setInterval(16)
@@ -801,6 +810,7 @@ class ShelfCanvas(QWidget):
         return None
 
     def _sync(self) -> None:
+        self._reset_flip()
         self._anim.stop()
         target = float(self.index)
         if is_reduced_motion():
@@ -894,6 +904,11 @@ class ShelfCanvas(QWidget):
             game = self.current_game()
             if game is not None:
                 self.activated.emit(game)
+            event.accept()
+            return
+        if key == Qt.Key_F and event.modifiers() == Qt.NoModifier:
+            if self.items:
+                self.toggle_flip()
             event.accept()
             return
         if key in (Qt.Key_I, Qt.Key_Up):
@@ -1368,6 +1383,212 @@ class ShelfCanvas(QWidget):
         item.front_cache_key = key
         return pix
 
+    def _get_flip_angle(self) -> float:
+        return self._flip_angle
+
+    def _set_flip_angle(self, value: float) -> None:
+        self._flip_angle = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    flip_angle = Property(float, _get_flip_angle, _set_flip_angle)
+
+    def is_flipped(self) -> bool:
+        return self._flip_target >= 0.5
+
+    def _reset_flip(self) -> None:
+        self._flip_anim.stop()
+        was_flipped = self._flip_target >= 0.5 or self._flip_angle != 0.0
+        self._flip_target = 0.0
+        self._flip_angle = 0.0
+        if was_flipped:
+            self.flipped_changed.emit(False)
+
+    def toggle_flip(self) -> None:
+        if not self.items:
+            return
+        target = 0.0 if self._flip_target >= 0.5 else 1.0
+        self._flip_target = target
+        self._flip_anim.stop()
+        if is_reduced_motion():
+            self._flip_angle = target
+            self.update()
+        else:
+            self._flip_anim.setStartValue(self._flip_angle)
+            self._flip_anim.setEndValue(target)
+            self._flip_anim.start()
+        self.flipped_changed.emit(target >= 0.5)
+
+    def _back_pixmap_for(
+        self, item: ShelfItem, base_w: int, base_h: int
+    ) -> QPixmap:
+        """Render either a custom back-cover image or a console-styled back cover with synopsis and stats."""
+        style = active_style()
+        profile = item.profile
+        game = item.game
+        back_path = (game.back_cover or "").strip()
+        key = (
+            base_w,
+            base_h,
+            profile.key,
+            back_path,
+            game.title,
+            game.description,
+            game.genre,
+            game.year,
+            game.playtime_seconds,
+            game.sessions,
+            game.state,
+            tuple(game.tags),
+            tuple(game.collections),
+            style.key,
+        )
+        if item.back_cache is not None and item.back_cache_key == key:
+            return item.back_cache
+
+        pix = QPixmap(base_w, base_h)
+        pix.fill(Qt.transparent)
+        buf = QPainter(pix)
+        buf.setRenderHint(QPainter.Antialiasing, True)
+        buf.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        frame = QRectF(0, 0, float(base_w), float(base_h))
+        radius = profile.radius
+        outer = QPainterPath()
+        outer.addRoundedRect(frame, radius, radius)
+        buf.setClipPath(outer)
+
+        base_col = QColor(profile.header_bg or profile.spine_color)
+        spine_col = QColor(profile.spine_color)
+        bg_grad = QLinearGradient(0, 0, 0, float(base_h))
+        bg_grad.setColorAt(0.0, base_col.lighter(115))
+        bg_grad.setColorAt(0.55, spine_col.darker(145))
+        bg_grad.setColorAt(1.0, base_col.darker(175))
+        buf.fillRect(frame, QBrush(bg_grad))
+
+        # Custom back cover image if provided
+        custom_pix = QPixmap(back_path) if back_path and Path(back_path).is_file() else QPixmap()
+        if not custom_pix.isNull():
+            scaled = custom_pix.scaled(
+                pix.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            )
+            sx = max(0, (scaled.width() - pix.width()) // 2)
+            sy = max(0, (scaled.height() - pix.height()) // 2)
+            buf.drawPixmap(0, 0, scaled.copy(sx, sy, pix.width(), pix.height()))
+        else:
+            # Soft watermark artwork banner at top
+            if item.pixmap is not None and not item.pixmap.isNull():
+                banner_h = float(base_h) * 0.30
+                buf.save()
+                buf.setOpacity(0.24)
+                scaled_art = item.pixmap.scaled(
+                    base_w, int(banner_h), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                )
+                buf.drawPixmap(0, 0, scaled_art)
+                buf.restore()
+                fade_banner = QLinearGradient(0, banner_h * 0.3, 0, banner_h)
+                fade_banner.setColorAt(0.0, QColor(0, 0, 0, 0))
+                fade_banner.setColorAt(1.0, spine_col.darker(145))
+                buf.fillRect(QRectF(0, 0, float(base_w), banner_h), QBrush(fade_banner))
+
+            # Top console band
+            band_h = max(20.0, float(base_h) * 0.09)
+            buf.fillRect(QRectF(0, 0, float(base_w), band_h), QColor(profile.header_bg))
+            accent_col = QColor(profile.header_accent)
+            buf.fillRect(QRectF(0, band_h - 1.5, float(base_w), 1.5), accent_col)
+            band_font = QFont(style.heading_font or UI_FONT)
+            band_font.setPixelSize(max(8, int(band_h * 0.46)))
+            band_font.setWeight(QFont.DemiBold)
+            buf.setFont(band_font)
+            buf.setPen(QColor(profile.header_text))
+            pad = max(10.0, float(base_w) * 0.065)
+            buf.drawText(
+                QRectF(pad, 0, float(base_w) - pad * 2, band_h),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                (profile.band_label or game.system).upper(),
+            )
+
+            # Title & meta
+            y = band_h + pad * 0.9
+            title_font = QFont(style.heading_font or UI_FONT)
+            title_font.setPixelSize(max(11, int(float(base_w) * 0.072)))
+            title_font.setWeight(QFont.Bold)
+            buf.setFont(title_font)
+            buf.setPen(QColor("#f5f0e4"))
+            title_rect = QRectF(pad, y, float(base_w) - pad * 2, float(base_h) * 0.14)
+            buf.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, game.title)
+            y += float(base_h) * 0.12
+
+            meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
+            if meta_bits:
+                meta_font = QFont(style.body_font or UI_FONT)
+                meta_font.setPixelSize(max(8, int(float(base_w) * 0.044)))
+                buf.setFont(meta_font)
+                buf.setPen(accent_col)
+                buf.drawText(
+                    QRectF(pad, y, float(base_w) - pad * 2, 18.0),
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    " · ".join(meta_bits),
+                )
+                y += 22.0
+
+            # Synopsis card
+            desc_h = float(base_h) * 0.42
+            desc_rect = QRectF(pad, y, float(base_w) - pad * 2, desc_h)
+            panel = QColor(0, 0, 0, 75)
+            buf.setPen(QPen(QColor(255, 255, 255, 28), 0.9))
+            buf.setBrush(panel)
+            buf.drawRoundedRect(desc_rect, 6.0, 6.0)
+            body_font = QFont(style.body_font or UI_FONT)
+            body_font.setPixelSize(max(8, int(float(base_w) * 0.045)))
+            buf.setFont(body_font)
+            buf.setPen(QColor("#ded8c8"))
+            synopsis = (game.description or "").strip() or "Sin descripción disponible. Puedes editarla en la ficha del juego."
+            buf.drawText(
+                desc_rect.adjusted(8.0, 8.0, -8.0, -8.0),
+                Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                synopsis,
+            )
+
+            # Footer stats + barcode accent
+            foot_y = float(base_h) - pad - 34.0
+            foot_font = QFont(style.body_font or UI_FONT)
+            foot_font.setPixelSize(max(8, int(float(base_w) * 0.042)))
+            buf.setFont(foot_font)
+            buf.setPen(QColor("#b8b2a2"))
+            state_lbl = {"finished": "Terminado", "playing": "En curso"}.get(game.state, "Sin jugar")
+            buf.drawText(
+                QRectF(pad, foot_y, float(base_w) - pad * 2 - 44.0, 16.0),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"{state_lbl} · {game.playtime_text}",
+            )
+            if game.tags or game.collections:
+                extra_txt = ", ".join([*game.collections, *game.tags][:4])
+                buf.setPen(accent_col)
+                buf.drawText(
+                    QRectF(pad, foot_y + 16.0, float(base_w) - pad * 2 - 44.0, 16.0),
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    extra_txt,
+                )
+            # Small physical barcode box on bottom right
+            bc_rect = QRectF(float(base_w) - pad - 38.0, foot_y + 2.0, 38.0, 26.0)
+            buf.setPen(Qt.NoPen)
+            buf.setBrush(QColor(245, 245, 245, 215))
+            buf.drawRoundedRect(bc_rect, 2.0, 2.0)
+            buf.setBrush(QColor(20, 20, 20))
+            for bx in range(4, 34, 3):
+                bar_w = 1.8 if bx % 2 == 0 else 1.0
+                buf.drawRect(QRectF(bc_rect.left() + bx, bc_rect.top() + 4.0, bar_w, 18.0))
+
+        # Case plastic rim & sheen
+        buf.setPen(QPen(QColor(255, 255, 255, 58), 1.2))
+        buf.setBrush(Qt.NoBrush)
+        buf.drawRoundedRect(frame.adjusted(0.6, 0.6, -0.6, -0.6), radius, radius)
+        buf.end()
+
+        item.back_cache = pix
+        item.back_cache_key = key
+        return pix
+
     def _refl_pixmap_for(
         self, item: ShelfItem, base_w: int, base_h: int
     ) -> QPixmap:
@@ -1525,13 +1746,22 @@ class ShelfCanvas(QWidget):
         selected: bool,
     ) -> None:
         target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
+        flip = self._flip_angle if selected else 0.0
+        cos_scale = max(0.06, abs(math.cos(flip * math.pi)))
         turn = float(geometry.get("turn", 0.0))
+        if flip > 0.005:
+            turn = max(-1.0, min(1.0, turn + math.sin(flip * math.pi) * 0.85))
         tilt_amount = (1.0 - geometry["focus"]) * 0.85 + 0.12
         hover_x = self._tilt_x * geometry["focus"] if selected else 0.0
         hover_y = self._tilt_y * geometry["focus"] if selected else 0.0
 
         quad = _perspective_quad(
-            target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
+            target.width() * cos_scale,
+            target.height(),
+            tilt_amount,
+            turn,
+            hover_x=hover_x,
+            hover_y=hover_y,
         )
         absolute = [
             QPointF(target.center().x() + point.x(), target.center().y() + point.y())
@@ -1548,7 +1778,16 @@ class ShelfCanvas(QWidget):
         painter.save()
         painter.setTransform(trans, False)
         self._paint_spine(painter, target, item, turn)
-        self._paint_front(painter, target, item, selected, geometry["focus"], cover_w, cover_h)
+        self._paint_front(
+            painter,
+            target,
+            item,
+            selected,
+            geometry["focus"],
+            cover_w,
+            cover_h,
+            show_back=(flip >= 0.5),
+        )
         painter.restore()
 
         fade = min(0.74, geometry["dim"] * 0.92)
@@ -1579,6 +1818,7 @@ class ShelfCanvas(QWidget):
         focus: float,
         cover_w: float,
         cover_h: float,
+        show_back: bool = False,
     ) -> None:
         frame = QRectF(target)
         width = frame.width()
@@ -1587,7 +1827,11 @@ class ShelfCanvas(QWidget):
 
         base_w = max(48, int(round(cover_w * profile.w_scale)))
         base_h = max(48, int(round(cover_h * profile.h_scale)))
-        front = self._front_pixmap_for(item, base_w, base_h)
+        front = (
+            self._back_pixmap_for(item, base_w, base_h)
+            if show_back
+            else self._front_pixmap_for(item, base_w, base_h)
+        )
 
         painter.save()
         outer = QPainterPath()

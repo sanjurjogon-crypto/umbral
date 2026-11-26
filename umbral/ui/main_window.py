@@ -51,6 +51,7 @@ from .dialogs import (
     GameDetailDialog,
     GameScanDialog,
 )
+from .gamepad import GamepadWatcher
 from .icons import vector_icon
 from .pages import HealthPage, HomePage, LibraryPage, SettingsPage, StatsPage, clear_layout
 from .shelf import apply_style
@@ -81,6 +82,8 @@ class MainWindow(QMainWindow):
         self._closing = False
         self._detect_announce = False
         self._prune_after_detect = False
+        self._fullscreen_mode = False
+        self._pre_fullscreen_collapsed = False
         style_key = str(self.store.settings.get("style", "souls"))
         set_active(style_key)
         set_reduced_motion(bool(self.store.settings.get("reduce_animations", False)))
@@ -222,6 +225,34 @@ class MainWindow(QMainWindow):
         systems_layout.addWidget(self._systems_container)
         side.addWidget(self.systems_section)
 
+        side.addSpacing(12)
+        self.collections_section = QWidget()
+        collections_layout = QVBoxLayout(self.collections_section)
+        collections_layout.setContentsMargins(0, 0, 0, 0)
+        collections_layout.setSpacing(1)
+        col_header = QHBoxLayout()
+        col_header.setContentsMargins(0, 0, 0, 0)
+        collections_label = QLabel("COLECCIONES")
+        collections_label.setObjectName("tiny")
+        collections_label.setStyleSheet("font-weight: 700;")
+        col_header.addWidget(collections_label)
+        col_header.addStretch(1)
+        new_col_btn = QPushButton("＋")
+        new_col_btn.setObjectName("icon")
+        new_col_btn.setFixedSize(22, 22)
+        new_col_btn.setFocusPolicy(Qt.NoFocus)
+        new_col_btn.setCursor(Qt.PointingHandCursor)
+        new_col_btn.setToolTip("Crear colección")
+        new_col_btn.clicked.connect(self._create_collection_prompt)
+        col_header.addWidget(new_col_btn)
+        collections_layout.addLayout(col_header)
+        self.collections_box = QVBoxLayout()
+        self.collections_box.setContentsMargins(0, 0, 0, 0)
+        self.collections_box.setSpacing(1)
+        self._collection_buttons: dict[str, QPushButton] = {}
+        collections_layout.addLayout(self.collections_box)
+        side.addWidget(self.collections_section)
+
         side.addStretch(1)
         divider = QFrame()
         divider.setObjectName("divider")
@@ -295,6 +326,14 @@ class MainWindow(QMainWindow):
         )
         self.refresh_button.clicked.connect(self._refresh_paths)
         top.addWidget(self.refresh_button)
+        self.fullscreen_button = UmbralButton("", icon_name="fullscreen", icon_size=15)
+        self.fullscreen_button.setObjectName("sidebarToggle")
+        self.fullscreen_button.setFixedSize(36, 36)
+        self.fullscreen_button.setFocusPolicy(Qt.NoFocus)
+        self.fullscreen_button.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_button.setToolTip("Modo Pantalla Completa / Mando (F11)")
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen_mode)
+        top.addWidget(self.fullscreen_button)
 
         self.home = HomePage(self.store)
         self.library = LibraryPage(self.store)
@@ -361,6 +400,43 @@ class MainWindow(QMainWindow):
         search_shortcut.activated.connect(self._focus_search)
         rescan_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
         rescan_shortcut.activated.connect(self._rescan)
+        fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        fullscreen_shortcut.activated.connect(self.toggle_fullscreen_mode)
+        esc_shortcut = QShortcut(QKeySequence("Escape"), self)
+        esc_shortcut.activated.connect(self._exit_fullscreen_if_active)
+
+        self._gamepad_bar = QFrame(root)
+        self._gamepad_bar.setObjectName("gamepadBar")
+        gp_row = QHBoxLayout(self._gamepad_bar)
+        gp_row.setContentsMargins(16, 6, 12, 6)
+        gp_row.setSpacing(14)
+        gp_hint = QLabel(
+            "A Jugar   ·   X Girar caja   ·   Y Favorito   ·   LB / RB Sistema   ·   I Ficha   ·   Start / F11 Salir"
+        )
+        gp_hint.setObjectName("gamepadHint")
+        gp_row.addWidget(gp_hint)
+        gp_exit = QPushButton("Salir (F11)")
+        gp_exit.setObjectName("icon")
+        gp_exit.setCursor(Qt.PointingHandCursor)
+        gp_exit.clicked.connect(self.toggle_fullscreen_mode)
+        gp_row.addWidget(gp_exit)
+        self._gamepad_bar.hide()
+
+        self.gamepad = GamepadWatcher(self)
+        self.gamepad.navigate_left.connect(self._gamepad_left)
+        self.gamepad.navigate_right.connect(self._gamepad_right)
+        self.gamepad.navigate_up.connect(self._gamepad_up)
+        self.gamepad.navigate_down.connect(self._gamepad_down)
+        self.gamepad.confirm.connect(self._gamepad_confirm)
+        self.gamepad.back.connect(self._gamepad_back)
+        self.gamepad.flip_requested.connect(self._gamepad_flip)
+        self.gamepad.favorite_requested.connect(self._gamepad_favorite)
+        self.gamepad.prev_system.connect(lambda: self._gamepad_cycle_system(-1))
+        self.gamepad.next_system.connect(lambda: self._gamepad_cycle_system(1))
+        self.gamepad.fullscreen_requested.connect(self.toggle_fullscreen_mode)
+        self.gamepad.connected_changed.connect(self._on_gamepad_connected)
+        if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
+            self.gamepad.start()
 
     def _layout_chrome(self) -> None:
         if not hasattr(self, "stack"):
@@ -370,13 +446,25 @@ class MainWindow(QMainWindow):
         height = root.height() if root is not None and root.height() > 0 else self.height()
         self.stack.setGeometry(0, 0, width, height)
         sidebar_x = self._sidebar_width - self._sidebar_expanded_width
-        self.sidebar.setVisible(self._sidebar_width > 0)
+        self.sidebar.setVisible((not self._fullscreen_mode) and self._sidebar_width > 0)
         self.sidebar.setGeometry(sidebar_x, 0, self._sidebar_expanded_width, height)
+        self.topbar.setVisible(not self._fullscreen_mode)
         self.topbar.setGeometry(
             self._sidebar_width, 0, max(0, width - self._sidebar_width), self._topbar_height
         )
         self.sidebar.raise_()
         self.topbar.raise_()
+        if hasattr(self, "_gamepad_bar") and self._gamepad_bar.isVisible():
+            self._gamepad_bar.adjustSize()
+            bar_w = min(width - 40, self._gamepad_bar.sizeHint().width())
+            bar_h = self._gamepad_bar.sizeHint().height()
+            self._gamepad_bar.setGeometry(
+                max(20, (width - bar_w) // 2),
+                max(10, height - bar_h - 14),
+                bar_w,
+                bar_h,
+            )
+            self._gamepad_bar.raise_()
         if hasattr(self, "toast") and self.toast.isVisible():
             self.toast.raise_()
         if hasattr(self, "update_banner") and self.update_banner.isVisible():
@@ -838,6 +926,63 @@ class MainWindow(QMainWindow):
             self._sync_sys_indicator(animate=animate_sys)
         else:
             self._sys_indicator.hide()
+        self._rebuild_collections(filterable and key in ("library", "favorites"))
+
+    def _rebuild_collections(self, visible: bool = True) -> None:
+        if not hasattr(self, "collections_section"):
+            return
+        self.collections_section.setVisible(visible)
+        if not visible:
+            return
+        clear_layout(self.collections_box)
+        self._collection_buttons = {}
+        cols = self.store.collections()
+        active_col = self.library.current_collection_filter()
+        if not cols:
+            empty = QLabel("Sin colecciones")
+            empty.setObjectName("tiny")
+            self.collections_box.addWidget(empty)
+            return
+        all_btn = QPushButton("Todas")
+        all_btn.setObjectName("system")
+        all_btn.setCheckable(True)
+        all_btn.setChecked(not active_col)
+        all_btn.setFocusPolicy(Qt.NoFocus)
+        all_btn.setCursor(Qt.PointingHandCursor)
+        all_btn.clicked.connect(lambda _c=False: self._filter_collection(""))
+        self.collections_box.addWidget(all_btn)
+        self._collection_buttons[""] = all_btn
+        for name, count in cols:
+            btn = QPushButton(f"{name}   {count}")
+            btn.setObjectName("system")
+            btn.setCheckable(True)
+            btn.setChecked(active_col == name)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _c=False, v=name: self._filter_collection(v))
+            self.collections_box.addWidget(btn)
+            self._collection_buttons[name] = btn
+
+    def _filter_collection(self, name: str) -> None:
+        if self._current_page_key not in ("library", "favorites"):
+            self._navigate("library")
+        self.library.set_collection_filter(name)
+        for col_name, btn in self._collection_buttons.items():
+            btn.setChecked(col_name == name)
+
+    def _create_collection_prompt(self, game: Optional[Game] = None) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(self, "Nueva colección", "Nombre de la colección:")
+        clean = name.strip() if ok else ""
+        if not clean:
+            return
+        self.store.add_collection(clean)
+        if game is not None and clean not in game.collections:
+            game.collections.append(clean)
+            self.store.save_library()
+        self._refresh_all()
+        self.toast.show_message(f"Colección «{clean}» creada.")
 
     def _filter_system(self, key: str) -> None:
         page = self.pages.get(self._current_page_key, self.library)
@@ -1144,9 +1289,24 @@ class MainWindow(QMainWindow):
             "Desmarcar terminado" if game.progress == "finished" else "Marcar terminado"
         )
         edit_action = menu.addAction("Editar ficha")
+        col_menu = menu.addMenu("Colecciones")
+        col_actions: dict[QAction, str] = {}
+        for col_name, _count in self.store.collections():
+            act = col_menu.addAction(col_name)
+            act.setCheckable(True)
+            act.setChecked(col_name in game.collections)
+            col_actions[act] = col_name
+        if col_actions:
+            col_menu.addSeparator()
+        new_col_action = col_menu.addAction("Nueva colección…")
         backdrop_action = menu.addAction("Buscar fondo en internet...")
         restore_bg_action = (
             menu.addAction("Restaurar fondo por defecto") if game.backdrop else None
+        )
+        manual_action = (
+            menu.addAction("Abrir manual (PDF)")
+            if game.manual_path and Path(game.manual_path).is_file()
+            else None
         )
         folder_action = menu.addAction("Abrir carpeta")
         menu.addSeparator()
@@ -1167,6 +1327,15 @@ class MainWindow(QMainWindow):
             self._save_and_refresh()
         elif chosen is edit_action:
             self._edit_game(game)
+        elif chosen in col_actions:
+            col_name = col_actions[chosen]
+            if col_name in game.collections:
+                game.collections = [c for c in game.collections if c != col_name]
+            else:
+                game.collections.append(col_name)
+            self._save_and_refresh()
+        elif chosen is new_col_action:
+            self._create_collection_prompt(game)
         elif chosen is backdrop_action:
             self._pick_game_backdrop(game)
         elif restore_bg_action is not None and chosen is restore_bg_action:
@@ -1174,6 +1343,8 @@ class MainWindow(QMainWindow):
             self.library.canvas._backdrop_cache.clear()
             self._save_and_refresh()
             self.toast.show_message("Fondo restaurado.")
+        elif manual_action is not None and chosen is manual_action:
+            self._open_path(Path(game.manual_path))
         elif chosen is folder_action:
             self._open_game_folder(game)
         elif chosen is remove_action:
@@ -1766,8 +1937,98 @@ class MainWindow(QMainWindow):
             )
         )
 
+    def _exit_fullscreen_if_active(self) -> None:
+        if self._fullscreen_mode:
+            self.toggle_fullscreen_mode()
+
+    def toggle_fullscreen_mode(self) -> None:
+        self._fullscreen_mode = not self._fullscreen_mode
+        if self._fullscreen_mode:
+            self._pre_fullscreen_collapsed = self._sidebar_collapsed
+            self._sidebar_collapsed = True
+            self._sidebar_width = 0
+            self._topbar_height = 0
+            if self._current_page_key not in ("library", "favorites"):
+                self._navigate("library")
+            self.library.set_chrome_insets(0, 0)
+            self._gamepad_bar.show()
+            if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
+                self.showFullScreen()
+            self.library.focus_canvas()
+        else:
+            self._gamepad_bar.hide()
+            self._topbar_height = 84
+            self._sidebar_collapsed = self._pre_fullscreen_collapsed
+            self._sidebar_width = 0 if self._sidebar_collapsed else self._sidebar_expanded_width
+            self._sync_sidebar_toggle()
+            for padded_page in (self.home, self.stats, self.health, self.settings_page):
+                padded_page.setContentsMargins(self._sidebar_width, self._topbar_height, 0, 0)
+            self.library.set_chrome_insets(self._sidebar_width, self._topbar_height)
+            if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
+                self.showNormal()
+        self._layout_chrome()
+
+    def _on_gamepad_connected(self, connected: bool) -> None:
+        if connected:
+            self.toast.show_message("Mando conectado: navega con cruceta/stick y pulsa A para jugar.", 3600)
+
+    def _gamepad_left(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            self.library.canvas.step(-1)
+
+    def _gamepad_right(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            self.library.canvas.step(1)
+
+    def _gamepad_up(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            game = self.library.canvas.current_game()
+            if game is not None:
+                self._details(game)
+
+    def _gamepad_down(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            self.library.canvas.toggle_flip()
+
+    def _gamepad_confirm(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            game = self.library.canvas.current_game()
+            if game is not None:
+                self._play(game)
+
+    def _gamepad_back(self) -> None:
+        if self._fullscreen_mode:
+            self.toggle_fullscreen_mode()
+        elif self._current_page_key != "library":
+            self._navigate("library")
+
+    def _gamepad_flip(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            self.library.canvas.toggle_flip()
+
+    def _gamepad_favorite(self) -> None:
+        if self._current_page_key in ("library", "favorites"):
+            game = self.library.canvas.current_game()
+            if game is not None:
+                game.favorite = not game.favorite
+                self._save_and_refresh()
+                self.toast.show_message(
+                    f"«{game.title}» añadido a favoritos." if game.favorite else f"«{game.title}» quitado de favoritos."
+                )
+
+    def _gamepad_cycle_system(self, delta: int) -> None:
+        keys = [""] + [key for key, _lbl, _cnt in self.store.systems()]
+        if not keys:
+            return
+        current = self.library.current_filter()
+        idx = keys.index(current) if current in keys else 0
+        next_key = keys[(idx + delta) % len(keys)]
+        self._filter_system(next_key)
+
     def closeEvent(self, event) -> None:
         self._closing = True
+        if hasattr(self, "gamepad"):
+            self.gamepad.stop()
         if hasattr(self, "backdrop"):
             self.backdrop.stop()
         for watcher in list(self.watchers):
