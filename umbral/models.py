@@ -47,12 +47,24 @@ class Game:
     source: str = "auto"
     notes: str = ""
     emulator_locked: bool = False
+    collections: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    back_cover: str = ""
+    manual_path: str = ""
 
     def __post_init__(self) -> None:
         if not self.added_at:
             self.added_at = now_iso()
         if isinstance(self.arguments, str):
             self.arguments = [self.arguments]
+        if isinstance(self.collections, str):
+            self.collections = [item.strip() for item in self.collections.split(",") if item.strip()]
+        else:
+            self.collections = list(dict.fromkeys(str(item).strip() for item in self.collections if str(item).strip()))
+        if isinstance(self.tags, str):
+            self.tags = [item.strip() for item in self.tags.split(",") if item.strip()]
+        else:
+            self.tags = list(dict.fromkeys(str(item).strip() for item in self.tags if str(item).strip()))
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Game":

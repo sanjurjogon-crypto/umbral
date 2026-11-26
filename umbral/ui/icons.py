@@ -82,6 +82,37 @@ def vector_pixmap(
     elif name == "close":
         painter.drawLine(QPointF(4.0, 4.0), QPointF(12.0, 12.0))
         painter.drawLine(QPointF(12.0, 4.0), QPointF(4.0, 12.0))
+    elif name == "flip":
+        arc1 = QPainterPath()
+        arc1.arcMoveTo(QRectF(2.2, 4.0, 11.6, 8.0), 25)
+        arc1.arcTo(QRectF(2.2, 4.0, 11.6, 8.0), 25, 140)
+        painter.drawPath(arc1)
+        arc2 = QPainterPath()
+        arc2.arcMoveTo(QRectF(2.2, 4.0, 11.6, 8.0), 205)
+        arc2.arcTo(QRectF(2.2, 4.0, 11.6, 8.0), 205, 140)
+        painter.drawPath(arc2)
+        painter.drawLine(QPointF(12.6, 5.2), QPointF(13.6, 3.3))
+        painter.drawLine(QPointF(12.6, 5.2), QPointF(10.6, 5.0))
+    elif name == "book":
+        painter.drawRoundedRect(QRectF(2.6, 2.5, 10.8, 11.0), 1.4, 1.4)
+        painter.drawLine(QPointF(5.2, 2.5), QPointF(5.2, 13.5))
+        painter.drawLine(QPointF(7.2, 6.0), QPointF(11.2, 6.0))
+        painter.drawLine(QPointF(7.2, 8.8), QPointF(10.4, 8.8))
+    elif name == "fullscreen":
+        painter.drawLine(QPointF(2.5, 5.8), QPointF(2.5, 2.5))
+        painter.drawLine(QPointF(2.5, 2.5), QPointF(5.8, 2.5))
+        painter.drawLine(QPointF(10.2, 2.5), QPointF(13.5, 2.5))
+        painter.drawLine(QPointF(13.5, 2.5), QPointF(13.5, 5.8))
+        painter.drawLine(QPointF(13.5, 10.2), QPointF(13.5, 13.5))
+        painter.drawLine(QPointF(13.5, 13.5), QPointF(10.2, 13.5))
+        painter.drawLine(QPointF(5.8, 13.5), QPointF(2.5, 13.5))
+        painter.drawLine(QPointF(2.5, 13.5), QPointF(2.5, 10.2))
+    elif name == "gamepad":
+        painter.drawRoundedRect(QRectF(2.0, 4.5, 12.0, 7.2), 3.2, 3.2)
+        painter.drawLine(QPointF(5.2, 6.8), QPointF(5.2, 9.4))
+        painter.drawLine(QPointF(3.9, 8.1), QPointF(6.5, 8.1))
+        painter.drawEllipse(QPointF(10.8, 7.3), 0.7, 0.7)
+        painter.drawEllipse(QPointF(12.2, 8.7), 0.7, 0.7)
     elif name == "spinner":
         for i in range(8):
             alpha = int(60 + (i / 7.0) * 195)
