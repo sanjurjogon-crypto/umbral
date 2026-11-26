@@ -1033,8 +1033,11 @@ class LibraryPage(QWidget):
             pass
 
     def _play_current(self) -> None:
+        from .sfx import play_ui_sound
+
         game = self.canvas.current_game()
         if game is not None:
+            play_ui_sound("launch")
             self.play_requested.emit(game)
 
     def _details_current(self) -> None:
@@ -1674,6 +1677,12 @@ class SettingsPage(QWidget):
         self.halo_check = halo_check
         layout.addWidget(halo_check)
 
+        sounds_check = QCheckBox("Sonidos sutiles en la estantería (navegación, giro y lanzamiento)")
+        sounds_check.setChecked(bool(self.store.settings.get("ui_sounds", True)))
+        sounds_check.toggled.connect(self._toggle_ui_sounds)
+        self.sounds_check = sounds_check
+        layout.addWidget(sounds_check)
+
         layout.addWidget(SectionHeader("Animaciones"))
         reduce_anim_check = QCheckBox("Reducir animaciones (transiciones instantáneas)")
         reduce_anim_check.setChecked(bool(self.store.settings.get("reduce_animations", False)))
@@ -1912,6 +1921,13 @@ class SettingsPage(QWidget):
         self.store.settings["shelf_halo"] = bool(checked)
         self.store.save_settings()
         self.halo_changed.emit(bool(checked))
+
+    def _toggle_ui_sounds(self, checked: bool) -> None:
+        from .sfx import set_sounds_enabled
+
+        self.store.settings["ui_sounds"] = bool(checked)
+        self.store.save_settings()
+        set_sounds_enabled(bool(checked))
 
     def _toggle_reduce_animations(self, checked: bool) -> None:
         self.store.settings["reduce_animations"] = bool(checked)

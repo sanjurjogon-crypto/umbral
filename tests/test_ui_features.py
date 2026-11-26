@@ -1343,3 +1343,21 @@ def test_quick_jump_bar_and_corporate_synopsis_filter(monkeypatch, tmp_path: Pat
     assert page.canvas.index != 2
     page.deleteLater()
     app.processEvents()
+
+
+def test_ui_sfx_synthesis_and_toggle() -> None:
+    from umbral.ui.sfx import _build_sound, is_sounds_enabled, play_ui_sound, set_sounds_enabled
+
+    for kind in ("step", "flip", "launch"):
+        wav = _build_sound(kind)
+        assert wav.startswith(b"RIFF")
+        assert len(wav) > 200
+    prev = is_sounds_enabled()
+    try:
+        set_sounds_enabled(False)
+        assert is_sounds_enabled() is False
+        play_ui_sound("step")
+        set_sounds_enabled(True)
+        assert is_sounds_enabled() is True
+    finally:
+        set_sounds_enabled(prev)

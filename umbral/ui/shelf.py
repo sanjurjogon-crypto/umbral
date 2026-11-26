@@ -58,6 +58,7 @@ from .cases import (
     paint_console_case,
     paint_console_spine,
 )
+from .sfx import play_ui_sound
 from .style import active as active_style, is_reduced_motion
 
 CASE_W = 222.0
@@ -868,6 +869,7 @@ class ShelfCanvas(QWidget):
             self._back_scroll = 0.0
             self._back_max_scroll = 0.0
             self._start_backdrop_transition(previous_item, current_item)
+            play_ui_sound("step")
         self._sync()
         self._emit_selection()
 
@@ -1482,6 +1484,7 @@ class ShelfCanvas(QWidget):
             self._back_scroll = 0.0
             self._back_max_scroll = 0.0
             self.set_back_zoom(False)
+        play_ui_sound("flip")
         self._flip_anim.stop()
         if is_reduced_motion():
             self._flip_angle = target
