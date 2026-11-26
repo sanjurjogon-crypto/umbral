@@ -25,9 +25,9 @@ from .models import Game
 from .net import ssl_context
 from .paths import data_dir
 
-_WIKI_USER_AGENT = "UmbralLauncher/8.57 (https://github.com/sanjurjogon-crypto/umbral)"
+_WIKI_USER_AGENT = "UmbralLauncher/8.58 (https://github.com/sanjurjogon-crypto/umbral)"
 _CACHE_LOCK = threading.Lock()
-_CACHE_VERSION = 4
+_CACHE_VERSION = 5
 
 _BOILERPLATE_PREFIXES = (
     "juego de steam instalado en ",
@@ -202,6 +202,10 @@ _DEV_LEAD_PATTERNS = (
     "anunciado en",
     "publicado en",
     "lanzado en",
+    "se hizo cargo",
+    "interactive entertainment",
+    "psyonix",
+    "cronología de los juegos",
     "is a video game",
     "is an action",
     "is a role-playing",
