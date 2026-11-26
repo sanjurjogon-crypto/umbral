@@ -42,6 +42,7 @@ from ..relink import missing_parts, relink, relocate_missing_paths
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
 from ..store import Store
+from ..synopsis import SynopsisWorker, needs_synopsis
 from ..profiles import EmulatorProfile, all_profiles, custom_profiles
 from ..updater import UpdateError, UpdateInfo, apply_update, backup_data, is_newer
 from .dialogs import (
@@ -74,6 +75,7 @@ class MainWindow(QMainWindow):
         self.scan_worker: Optional[ScanWorker] = None
         self.detect_worker: Optional[DetectWorker] = None
         self.cover_worker: Optional[CoverWorker] = None
+        self.synopsis_worker: Optional[SynopsisWorker] = None
         self.update_worker: Optional[CheckWorker] = None
         self.download_worker: Optional[DownloadWorker] = None
         self.update_info = None
@@ -572,6 +574,7 @@ class MainWindow(QMainWindow):
     def _fetch_missing_covers(self) -> None:
         if self._closing:
             return
+        self._fetch_missing_synopses()
         if self.cover_worker is not None and self.cover_worker.isRunning():
             return
         pending = [game for game in self.store.games if cover_needs_refresh(game)]
@@ -582,6 +585,42 @@ class MainWindow(QMainWindow):
         self.cover_worker.finished_with.connect(self._on_covers_done)
         self.cover_worker.finished.connect(self._clear_cover_worker)
         self.cover_worker.start()
+
+    def _fetch_missing_synopses(self) -> None:
+        if self._closing:
+            return
+        if self.synopsis_worker is not None and self.synopsis_worker.isRunning():
+            return
+        pending = [game for game in self.store.games if needs_synopsis(game)]
+        if not pending:
+            return
+        self.synopsis_worker = SynopsisWorker(pending)
+        self.synopsis_worker.updated.connect(self._on_synopses_done)
+        self.synopsis_worker.finished.connect(self._clear_synopsis_worker)
+        self.synopsis_worker.start()
+
+    def _on_synopses_done(self, changes: list) -> None:
+        if not changes:
+            return
+        changed_ids = set()
+        for game_id, text in changes:
+            target = self.store.get(game_id)
+            if target is not None and text:
+                target.description = text
+                changed_ids.add(game_id)
+        if not changed_ids:
+            return
+        self.store.save_library()
+        for item in self.library.canvas.items:
+            if item.game.id in changed_ids:
+                item.back_cache = None
+                item.back_cache_key = ()
+        self.library.canvas.update()
+
+    def _clear_synopsis_worker(self) -> None:
+        if self.synopsis_worker is not None:
+            self.synopsis_worker.deleteLater()
+            self.synopsis_worker = None
 
     def _refresh_covers(self) -> None:
         if self.cover_worker is not None and self.cover_worker.isRunning():
@@ -1932,6 +1971,7 @@ class MainWindow(QMainWindow):
                 self.detect_worker,
                 self.scan_worker,
                 self.cover_worker,
+                self.synopsis_worker,
                 self.update_worker,
                 self.download_worker,
             )
@@ -2066,4 +2106,7 @@ class MainWindow(QMainWindow):
         if self.cover_worker is not None and self.cover_worker.isRunning():
             self.cover_worker.cancel()
             self.cover_worker.wait(cover_wait)
+        if self.synopsis_worker is not None and self.synopsis_worker.isRunning():
+            self.synopsis_worker.cancel()
+            self.synopsis_worker.wait(cover_wait)
         super().closeEvent(event)

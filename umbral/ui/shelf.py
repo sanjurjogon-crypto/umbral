@@ -53,6 +53,7 @@ from .cases import (
     _emulator_key,
     case_profile,
     is_pc_case,
+    load_back_overlay,
     paint_console_case,
     paint_console_spine,
 )
@@ -659,6 +660,12 @@ class ShelfCanvas(QWidget):
         self._flip_anim.setDuration(320)
         self._flip_anim.setEasingCurve(QEasingCurve.InOutCubic)
 
+        self._back_zoom = 0.0
+        self._back_zoom_target = 0.0
+        self._back_zoom_anim = QPropertyAnimation(self, b"back_zoom", self)
+        self._back_zoom_anim.setDuration(250)
+        self._back_zoom_anim.setEasingCurve(QEasingCurve.OutCubic)
+
         self._tilt_timer = QTimer(self)
         self._tilt_timer.setInterval(16)
         self._tilt_timer.timeout.connect(self._step_tilt)
@@ -906,6 +913,10 @@ class ShelfCanvas(QWidget):
                 self.activated.emit(game)
             event.accept()
             return
+        if key == Qt.Key_Escape and self.is_back_zoomed():
+            self.set_back_zoom(False)
+            event.accept()
+            return
         if key == Qt.Key_F and event.modifiers() == Qt.NoModifier:
             if self.items:
                 self.toggle_flip()
@@ -980,6 +991,10 @@ class ShelfCanvas(QWidget):
         if position < 0:
             return
         if position == self.index:
+            if self.is_flipped():
+                self.toggle_back_zoom()
+                event.accept()
+                return
             game = self.current_game()
             if game is not None:
                 self.activated.emit(game)
@@ -1395,11 +1410,41 @@ class ShelfCanvas(QWidget):
     def is_flipped(self) -> bool:
         return self._flip_target >= 0.5
 
+    def _get_back_zoom(self) -> float:
+        return self._back_zoom
+
+    def _set_back_zoom(self, value: float) -> None:
+        self._back_zoom = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    back_zoom = Property(float, _get_back_zoom, _set_back_zoom)
+
+    def is_back_zoomed(self) -> bool:
+        return self._back_zoom_target >= 0.5
+
+    def set_back_zoom(self, zoomed: bool) -> None:
+        target = 1.0 if (zoomed and self.is_flipped()) else 0.0
+        self._back_zoom_target = target
+        self._back_zoom_anim.stop()
+        if is_reduced_motion():
+            self._back_zoom = target
+            self.update()
+        else:
+            self._back_zoom_anim.setStartValue(self._back_zoom)
+            self._back_zoom_anim.setEndValue(target)
+            self._back_zoom_anim.start()
+
+    def toggle_back_zoom(self) -> None:
+        self.set_back_zoom(not self.is_back_zoomed())
+
     def _reset_flip(self) -> None:
         self._flip_anim.stop()
+        self._back_zoom_anim.stop()
         was_flipped = self._flip_target >= 0.5 or self._flip_angle != 0.0
         self._flip_target = 0.0
         self._flip_angle = 0.0
+        self._back_zoom_target = 0.0
+        self._back_zoom = 0.0
         if was_flipped:
             self.flipped_changed.emit(False)
 
@@ -1408,6 +1453,8 @@ class ShelfCanvas(QWidget):
             return
         target = 0.0 if self._flip_target >= 0.5 else 1.0
         self._flip_target = target
+        if target < 0.5:
+            self.set_back_zoom(False)
         self._flip_anim.stop()
         if is_reduced_motion():
             self._flip_angle = target
@@ -1475,109 +1522,221 @@ class ShelfCanvas(QWidget):
             sy = max(0, (scaled.height() - pix.height()) // 2)
             buf.drawPixmap(0, 0, scaled.copy(sx, sy, pix.width(), pix.height()))
         else:
-            # Soft watermark artwork banner at top
-            if item.pixmap is not None and not item.pixmap.isNull():
-                banner_h = float(base_h) * 0.30
+            back_tmpl = load_back_overlay(profile.key)
+            if back_tmpl is not None:
+                tmpl_pix, win_norm = back_tmpl
+                win_rect = QRectF(
+                    frame.left() + win_norm.x() * frame.width(),
+                    frame.top() + win_norm.y() * frame.height(),
+                    win_norm.width() * frame.width(),
+                    win_norm.height() * frame.height(),
+                )
+                # Fill the cutout window with a rich, dark, game-matched background (never white)
                 buf.save()
-                buf.setOpacity(0.24)
-                scaled_art = item.pixmap.scaled(
-                    base_w, int(banner_h), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                buf.setClipRect(win_rect)
+                win_bg = QLinearGradient(win_rect.topLeft(), win_rect.bottomRight())
+                win_bg.setColorAt(0.0, QColor(profile.header_bg or "#0e1118").darker(135))
+                win_bg.setColorAt(0.5, QColor("#0a0c12"))
+                win_bg.setColorAt(1.0, QColor(profile.spine_color or "#111622").darker(175))
+                buf.fillRect(win_rect, QBrush(win_bg))
+
+                art_source = None
+                bd_path = game_backdrop(game)
+                if bd_path is not None:
+                    bd_pix = QPixmap(str(bd_path))
+                    if not bd_pix.isNull():
+                        art_source = bd_pix
+                if art_source is None and item.pixmap is not None and not item.pixmap.isNull():
+                    art_source = item.pixmap
+                if art_source is not None:
+                    scaled_art = art_source.scaled(
+                        int(max(1, win_rect.width())),
+                        int(max(1, win_rect.height())),
+                        Qt.KeepAspectRatioByExpanding,
+                        Qt.SmoothTransformation,
+                    )
+                    sx = max(0, int((scaled_art.width() - win_rect.width()) // 2))
+                    sy = max(0, int((scaled_art.height() - win_rect.height()) // 2))
+                    buf.setOpacity(0.32)
+                    buf.drawPixmap(
+                        win_rect.topLeft(),
+                        scaled_art.copy(sx, sy, int(win_rect.width()), int(win_rect.height())),
+                    )
+                    buf.setOpacity(1.0)
+                    scrim = QLinearGradient(0, win_rect.top(), 0, win_rect.bottom())
+                    scrim.setColorAt(0.0, QColor(6, 8, 12, 165))
+                    scrim.setColorAt(0.5, QColor(6, 8, 12, 190))
+                    scrim.setColorAt(1.0, QColor(6, 8, 12, 215))
+                    buf.fillRect(win_rect, QBrush(scrim))
+
+                accent_col = QColor(profile.header_accent or "#f59e0b")
+                pad = max(10.0, win_rect.width() * 0.065)
+                inner_w = max(40.0, win_rect.width() - pad * 2.0)
+                cur_y = win_rect.top() + pad * 0.75
+
+                title_font = QFont(style.heading_font or UI_FONT)
+                title_font.setPixelSize(max(11, int(win_rect.height() * 0.095)))
+                title_font.setWeight(QFont.Bold)
+                buf.setFont(title_font)
+                buf.setPen(QColor("#ffffff"))
+                title_h = max(20.0, win_rect.height() * 0.16)
+                buf.drawText(
+                    QRectF(win_rect.left() + pad, cur_y, inner_w, title_h),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    game.title,
                 )
-                buf.drawPixmap(0, 0, scaled_art)
+                cur_y += title_h * 0.85
+
+                meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
+                if meta_bits:
+                    meta_font = QFont(style.body_font or UI_FONT)
+                    meta_font.setPixelSize(max(8, int(win_rect.height() * 0.055)))
+                    meta_font.setWeight(QFont.DemiBold)
+                    buf.setFont(meta_font)
+                    buf.setPen(accent_col)
+                    buf.drawText(
+                        QRectF(win_rect.left() + pad, cur_y, inner_w, 18.0),
+                        Qt.AlignLeft | Qt.AlignVCenter,
+                        " · ".join(meta_bits),
+                    )
+                    cur_y += 20.0
+
+                foot_h = max(18.0, win_rect.height() * 0.11)
+                syn_h = max(36.0, win_rect.bottom() - pad * 0.6 - foot_h - cur_y)
+                syn_rect = QRectF(win_rect.left() + pad, cur_y, inner_w, syn_h)
+                syn_font = QFont(style.body_font or UI_FONT)
+                syn_font.setPixelSize(max(9, int(win_rect.height() * 0.064)))
+                buf.setFont(syn_font)
+                synopsis = (game.description or "").strip() or "Buscando sinopsis del juego…"
+                buf.setPen(QColor(0, 0, 0, 210))
+                buf.drawText(
+                    syn_rect.translated(1.0, 1.0),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    synopsis,
+                )
+                buf.setPen(QColor("#f5f3ed"))
+                buf.drawText(
+                    syn_rect,
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    synopsis,
+                )
+
+                state_lbl = {"finished": "Terminado", "playing": "En curso"}.get(game.state, "Sin jugar")
+                foot_font = QFont(style.body_font or UI_FONT)
+                foot_font.setPixelSize(max(8, int(win_rect.height() * 0.052)))
+                buf.setFont(foot_font)
+                buf.setPen(QColor("#cbd5e1"))
+                buf.drawText(
+                    QRectF(win_rect.left() + pad, win_rect.bottom() - pad * 0.5 - foot_h, inner_w, foot_h),
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    f"{state_lbl} · {game.playtime_text}",
+                )
                 buf.restore()
-                fade_banner = QLinearGradient(0, banner_h * 0.3, 0, banner_h)
-                fade_banner.setColorAt(0.0, QColor(0, 0, 0, 0))
-                fade_banner.setColorAt(1.0, spine_col.darker(145))
-                buf.fillRect(QRectF(0, 0, float(base_w), banner_h), QBrush(fade_banner))
+                buf.drawPixmap(frame, tmpl_pix, QRectF(tmpl_pix.rect()))
+            else:
+                # Fallback generated console back cover when no PNG template exists
+                if item.pixmap is not None and not item.pixmap.isNull():
+                    banner_h = float(base_h) * 0.30
+                    buf.save()
+                    buf.setOpacity(0.24)
+                    scaled_art = item.pixmap.scaled(
+                        base_w, int(banner_h), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                    )
+                    buf.drawPixmap(0, 0, scaled_art)
+                    buf.restore()
+                    fade_banner = QLinearGradient(0, banner_h * 0.3, 0, banner_h)
+                    fade_banner.setColorAt(0.0, QColor(0, 0, 0, 0))
+                    fade_banner.setColorAt(1.0, spine_col.darker(145))
+                    buf.fillRect(QRectF(0, 0, float(base_w), banner_h), QBrush(fade_banner))
 
-            # Top console band
-            band_h = max(20.0, float(base_h) * 0.09)
-            buf.fillRect(QRectF(0, 0, float(base_w), band_h), QColor(profile.header_bg))
-            accent_col = QColor(profile.header_accent)
-            buf.fillRect(QRectF(0, band_h - 1.5, float(base_w), 1.5), accent_col)
-            band_font = QFont(style.heading_font or UI_FONT)
-            band_font.setPixelSize(max(8, int(band_h * 0.46)))
-            band_font.setWeight(QFont.DemiBold)
-            buf.setFont(band_font)
-            buf.setPen(QColor(profile.header_text))
-            pad = max(10.0, float(base_w) * 0.065)
-            buf.drawText(
-                QRectF(pad, 0, float(base_w) - pad * 2, band_h),
-                Qt.AlignLeft | Qt.AlignVCenter,
-                (profile.band_label or game.system).upper(),
-            )
-
-            # Title & meta
-            y = band_h + pad * 0.9
-            title_font = QFont(style.heading_font or UI_FONT)
-            title_font.setPixelSize(max(11, int(float(base_w) * 0.072)))
-            title_font.setWeight(QFont.Bold)
-            buf.setFont(title_font)
-            buf.setPen(QColor("#f5f0e4"))
-            title_rect = QRectF(pad, y, float(base_w) - pad * 2, float(base_h) * 0.14)
-            buf.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, game.title)
-            y += float(base_h) * 0.12
-
-            meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
-            if meta_bits:
-                meta_font = QFont(style.body_font or UI_FONT)
-                meta_font.setPixelSize(max(8, int(float(base_w) * 0.044)))
-                buf.setFont(meta_font)
-                buf.setPen(accent_col)
+                # Top console band
+                band_h = max(20.0, float(base_h) * 0.09)
+                buf.fillRect(QRectF(0, 0, float(base_w), band_h), QColor(profile.header_bg))
+                accent_col = QColor(profile.header_accent)
+                buf.fillRect(QRectF(0, band_h - 1.5, float(base_w), 1.5), accent_col)
+                band_font = QFont(style.heading_font or UI_FONT)
+                band_font.setPixelSize(max(8, int(band_h * 0.46)))
+                band_font.setWeight(QFont.DemiBold)
+                buf.setFont(band_font)
+                buf.setPen(QColor(profile.header_text))
+                pad = max(10.0, float(base_w) * 0.065)
                 buf.drawText(
-                    QRectF(pad, y, float(base_w) - pad * 2, 18.0),
+                    QRectF(pad, 0, float(base_w) - pad * 2, band_h),
                     Qt.AlignLeft | Qt.AlignVCenter,
-                    " · ".join(meta_bits),
+                    (profile.band_label or game.system).upper(),
                 )
-                y += 22.0
 
-            # Synopsis card
-            desc_h = float(base_h) * 0.42
-            desc_rect = QRectF(pad, y, float(base_w) - pad * 2, desc_h)
-            panel = QColor(0, 0, 0, 75)
-            buf.setPen(QPen(QColor(255, 255, 255, 28), 0.9))
-            buf.setBrush(panel)
-            buf.drawRoundedRect(desc_rect, 6.0, 6.0)
-            body_font = QFont(style.body_font or UI_FONT)
-            body_font.setPixelSize(max(8, int(float(base_w) * 0.045)))
-            buf.setFont(body_font)
-            buf.setPen(QColor("#ded8c8"))
-            synopsis = (game.description or "").strip() or "Sin descripción disponible. Puedes editarla en la ficha del juego."
-            buf.drawText(
-                desc_rect.adjusted(8.0, 8.0, -8.0, -8.0),
-                Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
-                synopsis,
-            )
+                # Title & meta
+                y = band_h + pad * 0.9
+                title_font = QFont(style.heading_font or UI_FONT)
+                title_font.setPixelSize(max(11, int(float(base_w) * 0.072)))
+                title_font.setWeight(QFont.Bold)
+                buf.setFont(title_font)
+                buf.setPen(QColor("#f5f0e4"))
+                title_rect = QRectF(pad, y, float(base_w) - pad * 2, float(base_h) * 0.14)
+                buf.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, game.title)
+                y += float(base_h) * 0.12
 
-            # Footer stats + barcode accent
-            foot_y = float(base_h) - pad - 34.0
-            foot_font = QFont(style.body_font or UI_FONT)
-            foot_font.setPixelSize(max(8, int(float(base_w) * 0.042)))
-            buf.setFont(foot_font)
-            buf.setPen(QColor("#b8b2a2"))
-            state_lbl = {"finished": "Terminado", "playing": "En curso"}.get(game.state, "Sin jugar")
-            buf.drawText(
-                QRectF(pad, foot_y, float(base_w) - pad * 2 - 44.0, 16.0),
-                Qt.AlignLeft | Qt.AlignVCenter,
-                f"{state_lbl} · {game.playtime_text}",
-            )
-            if game.tags or game.collections:
-                extra_txt = ", ".join([*game.collections, *game.tags][:4])
-                buf.setPen(accent_col)
+                meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
+                if meta_bits:
+                    meta_font = QFont(style.body_font or UI_FONT)
+                    meta_font.setPixelSize(max(8, int(float(base_w) * 0.044)))
+                    buf.setFont(meta_font)
+                    buf.setPen(accent_col)
+                    buf.drawText(
+                        QRectF(pad, y, float(base_w) - pad * 2, 18.0),
+                        Qt.AlignLeft | Qt.AlignVCenter,
+                        " · ".join(meta_bits),
+                    )
+                    y += 22.0
+
+                # Synopsis card
+                desc_h = float(base_h) * 0.42
+                desc_rect = QRectF(pad, y, float(base_w) - pad * 2, desc_h)
+                panel = QColor(0, 0, 0, 75)
+                buf.setPen(QPen(QColor(255, 255, 255, 28), 0.9))
+                buf.setBrush(panel)
+                buf.drawRoundedRect(desc_rect, 6.0, 6.0)
+                body_font = QFont(style.body_font or UI_FONT)
+                body_font.setPixelSize(max(8, int(float(base_w) * 0.045)))
+                buf.setFont(body_font)
+                buf.setPen(QColor("#ded8c8"))
+                synopsis = (game.description or "").strip() or "Sin descripción disponible. Puedes editarla en la ficha del juego."
                 buf.drawText(
-                    QRectF(pad, foot_y + 16.0, float(base_w) - pad * 2 - 44.0, 16.0),
-                    Qt.AlignLeft | Qt.AlignVCenter,
-                    extra_txt,
+                    desc_rect.adjusted(8.0, 8.0, -8.0, -8.0),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    synopsis,
                 )
-            # Small physical barcode box on bottom right
-            bc_rect = QRectF(float(base_w) - pad - 38.0, foot_y + 2.0, 38.0, 26.0)
-            buf.setPen(Qt.NoPen)
-            buf.setBrush(QColor(245, 245, 245, 215))
-            buf.drawRoundedRect(bc_rect, 2.0, 2.0)
-            buf.setBrush(QColor(20, 20, 20))
-            for bx in range(4, 34, 3):
-                bar_w = 1.8 if bx % 2 == 0 else 1.0
-                buf.drawRect(QRectF(bc_rect.left() + bx, bc_rect.top() + 4.0, bar_w, 18.0))
+
+                # Footer stats + barcode accent
+                foot_y = float(base_h) - pad - 34.0
+                foot_font = QFont(style.body_font or UI_FONT)
+                foot_font.setPixelSize(max(8, int(float(base_w) * 0.042)))
+                buf.setFont(foot_font)
+                buf.setPen(QColor("#b8b2a2"))
+                state_lbl = {"finished": "Terminado", "playing": "En curso"}.get(game.state, "Sin jugar")
+                buf.drawText(
+                    QRectF(pad, foot_y, float(base_w) - pad * 2 - 44.0, 16.0),
+                    Qt.AlignLeft | Qt.AlignVCenter,
+                    f"{state_lbl} · {game.playtime_text}",
+                )
+                if game.tags or game.collections:
+                    extra_txt = ", ".join([*game.collections, *game.tags][:4])
+                    buf.setPen(accent_col)
+                    buf.drawText(
+                        QRectF(pad, foot_y + 16.0, float(base_w) - pad * 2 - 44.0, 16.0),
+                        Qt.AlignLeft | Qt.AlignVCenter,
+                        extra_txt,
+                    )
+                # Small physical barcode box on bottom right
+                bc_rect = QRectF(float(base_w) - pad - 38.0, foot_y + 2.0, 38.0, 26.0)
+                buf.setPen(Qt.NoPen)
+                buf.setBrush(QColor(245, 245, 245, 215))
+                buf.drawRoundedRect(bc_rect, 2.0, 2.0)
+                buf.setBrush(QColor(20, 20, 20))
+                for bx in range(4, 34, 3):
+                    bar_w = 1.8 if bx % 2 == 0 else 1.0
+                    buf.drawRect(QRectF(bc_rect.left() + bx, bc_rect.top() + 4.0, bar_w, 18.0))
 
         # Case plastic rim & sheen
         buf.setPen(QPen(QColor(255, 255, 255, 58), 1.2))
@@ -1654,6 +1813,21 @@ class ShelfCanvas(QWidget):
         tilt_amount = (1.0 - focus) * 0.85 + 0.12
         hover_x = self._tilt_x * focus if selected else 0.0
         hover_y = self._tilt_y * focus if selected else 0.0
+        # Compute zoom-adjusted center & scale for close-up back cover reading
+        zoom = self._back_zoom if selected else 0.0
+        if zoom > 0.005:
+            scale_boost = 1.0 + 0.44 * zoom
+            target = QRectF(
+                target.center().x() - (target.width() * scale_boost) / 2.0,
+                target.center().y() - (target.height() * scale_boost) / 2.0 - cover_h * 0.04 * zoom,
+                target.width() * scale_boost,
+                target.height() * scale_boost,
+            )
+            turn = turn * (1.0 - zoom)
+            tilt_amount = tilt_amount * (1.0 - zoom)
+            hover_x = hover_x * (1.0 - zoom)
+            hover_y = hover_y * (1.0 - zoom)
+
         quad = _perspective_quad(
             target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
         )
@@ -1754,6 +1928,21 @@ class ShelfCanvas(QWidget):
         tilt_amount = (1.0 - geometry["focus"]) * 0.85 + 0.12
         hover_x = self._tilt_x * geometry["focus"] if selected else 0.0
         hover_y = self._tilt_y * geometry["focus"] if selected else 0.0
+
+        # Compute zoom-adjusted center & scale for close-up back cover reading
+        zoom = self._back_zoom if selected else 0.0
+        if zoom > 0.005:
+            scale_boost = 1.0 + 0.44 * zoom
+            target = QRectF(
+                target.center().x() - (target.width() * scale_boost) / 2.0,
+                target.center().y() - (target.height() * scale_boost) / 2.0 - cover_h * 0.04 * zoom,
+                target.width() * scale_boost,
+                target.height() * scale_boost,
+            )
+            turn = turn * (1.0 - zoom)
+            tilt_amount = tilt_amount * (1.0 - zoom)
+            hover_x = hover_x * (1.0 - zoom)
+            hover_y = hover_y * (1.0 - zoom)
 
         quad = _perspective_quad(
             target.width() * cos_scale,
