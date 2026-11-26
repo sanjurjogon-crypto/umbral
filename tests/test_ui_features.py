@@ -1173,3 +1173,63 @@ def test_back_templates_zoom_synopsis_and_backdrop_dialog_safe_close(
     assert canvas.is_back_zoomed() is False
     canvas.deleteLater()
     app.processEvents()
+
+
+def test_new_console_templates_and_back_synopsis_scroll() -> None:
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from umbral.ui.cases import load_back_overlay, load_case_overlay, load_spine_texture
+    from umbral.ui.shelf import ShelfCanvas
+
+    app = _app()
+    new_keys = (
+        "ps3", "amiga", "arcade", "atari2600", "c64", "dreamcast", "nds",
+        "gba", "genesis", "msx", "retroarch", "n64", "nes", "ps1", "ps2",
+        "switch", "wii", "wiiu", "psp", "xbox", "xbox360",
+    )
+    for key in new_keys:
+        front = load_case_overlay(key)
+        assert front is not None and not front[0].isNull(), f"Missing front overlay for {key}"
+        back = load_back_overlay(key)
+        assert back is not None and not back[0].isNull(), f"Missing back overlay for {key}"
+        spine = load_spine_texture(key)
+        assert spine is not None and not spine.isNull(), f"Missing spine texture for {key}"
+
+    long_desc = " ".join(["Esta es una sinopsis larga de prueba para verificar el scroll vertical."] * 14)
+    g1 = Game(
+        id="ds1",
+        title="DARK SOULS™: REMASTERED",
+        system="Steam",
+        system_key="steam",
+        source="steam",
+        description=long_desc,
+    )
+    g2 = Game(id="ds2", title="Portal 2", system="Steam", system_key="steam", source="steam")
+    canvas = ShelfCanvas()
+    canvas.resize(1200, 720)
+    canvas.set_games([g1, g2])
+    canvas.toggle_flip()
+    assert canvas.is_flipped() is True
+
+    item = canvas._current_item()
+    assert item is not None
+    back_pix = canvas._back_pixmap_for(item, 220, 310)
+    assert not back_pix.isNull()
+    assert canvas._back_max_scroll > 0.0
+
+    # Wheel down scrolls synopsis inside the back cover without changing selected game
+    wheel_down = QWheelEvent(
+        QPointF(600, 360),
+        QPointF(600, 360),
+        QPoint(0, -120),
+        QPoint(0, -120),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
+    canvas.wheelEvent(wheel_down)
+    assert canvas.index == 0
+    assert canvas._back_scroll > 0.0
+    canvas.deleteLater()
+    app.processEvents()

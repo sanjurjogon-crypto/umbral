@@ -41,7 +41,7 @@ def needs_synopsis(game: Game) -> bool:
     return False
 
 
-def _clean_text(raw: str, max_chars: int = 380) -> str:
+def _clean_text(raw: str, max_chars: int = 260) -> str:
     text = re.sub(r"<[^>]+>", " ", html.unescape(raw or ""))
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= max_chars:

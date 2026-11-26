@@ -14,6 +14,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QSize,
     Qt,
@@ -656,6 +657,8 @@ class ShelfCanvas(QWidget):
 
         self._flip_angle = 0.0
         self._flip_target = 0.0
+        self._back_scroll = 0.0
+        self._back_max_scroll = 0.0
         self._flip_anim = QPropertyAnimation(self, b"flip_angle", self)
         self._flip_anim.setDuration(320)
         self._flip_anim.setEasingCurve(QEasingCurve.InOutCubic)
@@ -861,6 +864,8 @@ class ShelfCanvas(QWidget):
         self.index = new_index
         current_item = self._current_item()
         if new_index != old_index:
+            self._back_scroll = 0.0
+            self._back_max_scroll = 0.0
             self._start_backdrop_transition(previous_item, current_item)
         self._sync()
         self._emit_selection()
@@ -876,6 +881,20 @@ class ShelfCanvas(QWidget):
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - API de Qt
         if not self.items:
+            return
+        if self.is_flipped() and self._back_max_scroll > 0.0:
+            dy = event.angleDelta().y()
+            if dy != 0:
+                step_px = 26.0
+                self._back_scroll = max(
+                    0.0,
+                    min(
+                        self._back_max_scroll,
+                        self._back_scroll + (-step_px if dy > 0 else step_px),
+                    ),
+                )
+                self.update()
+            event.accept()
             return
         delta = -1 if event.angleDelta().y() > 0 else 1
         self.step(delta)
@@ -1445,6 +1464,8 @@ class ShelfCanvas(QWidget):
         self._flip_angle = 0.0
         self._back_zoom_target = 0.0
         self._back_zoom = 0.0
+        self._back_scroll = 0.0
+        self._back_max_scroll = 0.0
         if was_flipped:
             self.flipped_changed.emit(False)
 
@@ -1454,6 +1475,8 @@ class ShelfCanvas(QWidget):
         target = 0.0 if self._flip_target >= 0.5 else 1.0
         self._flip_target = target
         if target < 0.5:
+            self._back_scroll = 0.0
+            self._back_max_scroll = 0.0
             self.set_back_zoom(False)
         self._flip_anim.stop()
         if is_reduced_motion():
@@ -1473,6 +1496,8 @@ class ShelfCanvas(QWidget):
         profile = item.profile
         game = item.game
         back_path = (game.back_cover or "").strip()
+        is_current = item is self._current_item()
+        scroll_px = int(round(self._back_scroll)) if is_current else 0
         key = (
             base_w,
             base_h,
@@ -1488,6 +1513,7 @@ class ShelfCanvas(QWidget):
             tuple(game.tags),
             tuple(game.collections),
             style.key,
+            scroll_px,
         )
         if item.back_cache is not None and item.back_cache_key == key:
             return item.back_cache
@@ -1531,43 +1557,19 @@ class ShelfCanvas(QWidget):
                     win_norm.width() * frame.width(),
                     win_norm.height() * frame.height(),
                 )
-                # Fill the cutout window with a rich, dark, game-matched background (never white)
+                # Fill the cutout window with a 100% opaque dark background so cover art never bleeds behind text
                 buf.save()
                 buf.setClipRect(win_rect)
+                top_bg = QColor(profile.header_bg or "#0e1118").darker(150)
+                top_bg.setAlpha(255)
+                mid_bg = QColor(9, 11, 16, 255)
+                bot_bg = QColor(profile.spine_color or "#111622").darker(185)
+                bot_bg.setAlpha(255)
                 win_bg = QLinearGradient(win_rect.topLeft(), win_rect.bottomRight())
-                win_bg.setColorAt(0.0, QColor(profile.header_bg or "#0e1118").darker(135))
-                win_bg.setColorAt(0.5, QColor("#0a0c12"))
-                win_bg.setColorAt(1.0, QColor(profile.spine_color or "#111622").darker(175))
+                win_bg.setColorAt(0.0, top_bg)
+                win_bg.setColorAt(0.5, mid_bg)
+                win_bg.setColorAt(1.0, bot_bg)
                 buf.fillRect(win_rect, QBrush(win_bg))
-
-                art_source = None
-                bd_path = game_backdrop(game)
-                if bd_path is not None:
-                    bd_pix = QPixmap(str(bd_path))
-                    if not bd_pix.isNull():
-                        art_source = bd_pix
-                if art_source is None and item.pixmap is not None and not item.pixmap.isNull():
-                    art_source = item.pixmap
-                if art_source is not None:
-                    scaled_art = art_source.scaled(
-                        int(max(1, win_rect.width())),
-                        int(max(1, win_rect.height())),
-                        Qt.KeepAspectRatioByExpanding,
-                        Qt.SmoothTransformation,
-                    )
-                    sx = max(0, int((scaled_art.width() - win_rect.width()) // 2))
-                    sy = max(0, int((scaled_art.height() - win_rect.height()) // 2))
-                    buf.setOpacity(0.32)
-                    buf.drawPixmap(
-                        win_rect.topLeft(),
-                        scaled_art.copy(sx, sy, int(win_rect.width()), int(win_rect.height())),
-                    )
-                    buf.setOpacity(1.0)
-                    scrim = QLinearGradient(0, win_rect.top(), 0, win_rect.bottom())
-                    scrim.setColorAt(0.0, QColor(6, 8, 12, 165))
-                    scrim.setColorAt(0.5, QColor(6, 8, 12, 190))
-                    scrim.setColorAt(1.0, QColor(6, 8, 12, 215))
-                    buf.fillRect(win_rect, QBrush(scrim))
 
                 accent_col = QColor(profile.header_accent or "#f59e0b")
                 pad = max(10.0, win_rect.width() * 0.065)
@@ -1579,13 +1581,19 @@ class ShelfCanvas(QWidget):
                 title_font.setWeight(QFont.Bold)
                 buf.setFont(title_font)
                 buf.setPen(QColor("#ffffff"))
-                title_h = max(20.0, win_rect.height() * 0.16)
+                title_fm = QFontMetrics(title_font)
+                title_bounds = title_fm.boundingRect(
+                    QRect(0, 0, int(inner_w), int(max(24.0, win_rect.height() * 0.40))),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    game.title,
+                )
+                title_h = max(18.0, float(title_bounds.height()) + 2.0)
                 buf.drawText(
                     QRectF(win_rect.left() + pad, cur_y, inner_w, title_h),
                     Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
                     game.title,
                 )
-                cur_y += title_h * 0.85
+                cur_y += title_h + 4.0
 
                 meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
                 if meta_bits:
@@ -1595,31 +1603,65 @@ class ShelfCanvas(QWidget):
                     buf.setFont(meta_font)
                     buf.setPen(accent_col)
                     buf.drawText(
-                        QRectF(win_rect.left() + pad, cur_y, inner_w, 18.0),
+                        QRectF(win_rect.left() + pad, cur_y, inner_w, 16.0),
                         Qt.AlignLeft | Qt.AlignVCenter,
                         " · ".join(meta_bits),
                     )
-                    cur_y += 20.0
+                    cur_y += 18.0
 
                 foot_h = max(18.0, win_rect.height() * 0.11)
-                syn_h = max(36.0, win_rect.bottom() - pad * 0.6 - foot_h - cur_y)
+                syn_h = max(32.0, win_rect.bottom() - pad * 0.6 - foot_h - cur_y)
                 syn_rect = QRectF(win_rect.left() + pad, cur_y, inner_w, syn_h)
                 syn_font = QFont(style.body_font or UI_FONT)
                 syn_font.setPixelSize(max(9, int(win_rect.height() * 0.064)))
                 buf.setFont(syn_font)
                 synopsis = (game.description or "").strip() or "Buscando sinopsis del juego…"
+                syn_fm = QFontMetrics(syn_font)
+                syn_text_w = max(20.0, syn_rect.width() - 8.0)
+                full_syn = syn_fm.boundingRect(
+                    QRect(0, 0, int(syn_text_w), 4000),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    synopsis,
+                )
+                max_scroll = max(0.0, float(full_syn.height()) - syn_rect.height() + 4.0)
+                if is_current:
+                    self._back_max_scroll = max_scroll
+                    if self._back_scroll > max_scroll:
+                        self._back_scroll = max_scroll
+                scroll_y = min(float(scroll_px), max_scroll)
+                text_draw_w = syn_text_w if max_scroll > 1.0 else syn_rect.width()
+                draw_rect = QRectF(
+                    syn_rect.left(),
+                    syn_rect.top() - scroll_y,
+                    text_draw_w,
+                    max(syn_rect.height(), float(full_syn.height()) + 6.0),
+                )
+                buf.save()
+                buf.setClipRect(syn_rect)
                 buf.setPen(QColor(0, 0, 0, 210))
                 buf.drawText(
-                    syn_rect.translated(1.0, 1.0),
+                    draw_rect.translated(1.0, 1.0),
                     Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
                     synopsis,
                 )
                 buf.setPen(QColor("#f5f3ed"))
                 buf.drawText(
-                    syn_rect,
+                    draw_rect,
                     Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
                     synopsis,
                 )
+                buf.restore()
+                if max_scroll > 1.0:
+                    track_x = syn_rect.right() - 3.0
+                    track_h = syn_rect.height()
+                    buf.setPen(Qt.NoPen)
+                    buf.setBrush(QColor(255, 255, 255, 28))
+                    buf.drawRoundedRect(QRectF(track_x, syn_rect.top(), 2.5, track_h), 1.25, 1.25)
+                    thumb_ratio = min(1.0, track_h / max(track_h + 1.0, float(full_syn.height())))
+                    thumb_h = max(14.0, track_h * thumb_ratio)
+                    thumb_y = syn_rect.top() + (track_h - thumb_h) * (scroll_y / max_scroll)
+                    buf.setBrush(QColor(accent_col.red(), accent_col.green(), accent_col.blue(), 190))
+                    buf.drawRoundedRect(QRectF(track_x, thumb_y, 2.5, thumb_h), 1.25, 1.25)
 
                 state_lbl = {"finished": "Terminado", "playing": "En curso"}.get(game.state, "Sin jugar")
                 foot_font = QFont(style.body_font or UI_FONT)
@@ -1673,9 +1715,16 @@ class ShelfCanvas(QWidget):
                 title_font.setWeight(QFont.Bold)
                 buf.setFont(title_font)
                 buf.setPen(QColor("#f5f0e4"))
-                title_rect = QRectF(pad, y, float(base_w) - pad * 2, float(base_h) * 0.14)
+                inner_w_fb = float(base_w) - pad * 2
+                title_bounds_fb = QFontMetrics(title_font).boundingRect(
+                    QRect(0, 0, int(inner_w_fb), int(float(base_h) * 0.28)),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    game.title,
+                )
+                title_h_fb = max(18.0, float(title_bounds_fb.height()) + 2.0)
+                title_rect = QRectF(pad, y, inner_w_fb, title_h_fb)
                 buf.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, game.title)
-                y += float(base_h) * 0.12
+                y += title_h_fb + 4.0
 
                 meta_bits = [part for part in (game.system, str(game.year) if game.year else "", game.genre) if part]
                 if meta_bits:
@@ -1684,16 +1733,17 @@ class ShelfCanvas(QWidget):
                     buf.setFont(meta_font)
                     buf.setPen(accent_col)
                     buf.drawText(
-                        QRectF(pad, y, float(base_w) - pad * 2, 18.0),
+                        QRectF(pad, y, inner_w_fb, 18.0),
                         Qt.AlignLeft | Qt.AlignVCenter,
                         " · ".join(meta_bits),
                     )
-                    y += 22.0
+                    y += 20.0
 
-                # Synopsis card
-                desc_h = float(base_h) * 0.42
-                desc_rect = QRectF(pad, y, float(base_w) - pad * 2, desc_h)
-                panel = QColor(0, 0, 0, 75)
+                # Synopsis card (opaque background + scrollable)
+                foot_y = float(base_h) - pad - 34.0
+                desc_h = max(48.0, foot_y - 10.0 - y)
+                desc_rect = QRectF(pad, y, inner_w_fb, desc_h)
+                panel = QColor(10, 12, 18, 240)
                 buf.setPen(QPen(QColor(255, 255, 255, 28), 0.9))
                 buf.setBrush(panel)
                 buf.drawRoundedRect(desc_rect, 6.0, 6.0)
@@ -1702,11 +1752,42 @@ class ShelfCanvas(QWidget):
                 buf.setFont(body_font)
                 buf.setPen(QColor("#ded8c8"))
                 synopsis = (game.description or "").strip() or "Sin descripción disponible. Puedes editarla en la ficha del juego."
-                buf.drawText(
-                    desc_rect.adjusted(8.0, 8.0, -8.0, -8.0),
+                syn_inner = desc_rect.adjusted(8.0, 8.0, -8.0, -8.0)
+                full_fb = QFontMetrics(body_font).boundingRect(
+                    QRect(0, 0, int(max(20.0, syn_inner.width() - 6.0)), 4000),
                     Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
                     synopsis,
                 )
+                max_scroll_fb = max(0.0, float(full_fb.height()) - syn_inner.height() + 4.0)
+                if is_current:
+                    self._back_max_scroll = max_scroll_fb
+                    if self._back_scroll > max_scroll_fb:
+                        self._back_scroll = max_scroll_fb
+                scroll_y_fb = min(float(scroll_px), max_scroll_fb)
+                buf.save()
+                buf.setClipRect(syn_inner)
+                buf.drawText(
+                    QRectF(
+                        syn_inner.left(),
+                        syn_inner.top() - scroll_y_fb,
+                        syn_inner.width() - (6.0 if max_scroll_fb > 1.0 else 0.0),
+                        max(syn_inner.height(), float(full_fb.height()) + 6.0),
+                    ),
+                    Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+                    synopsis,
+                )
+                buf.restore()
+                if max_scroll_fb > 1.0:
+                    tx = syn_inner.right() - 2.5
+                    th = syn_inner.height()
+                    buf.setPen(Qt.NoPen)
+                    buf.setBrush(QColor(255, 255, 255, 28))
+                    buf.drawRoundedRect(QRectF(tx, syn_inner.top(), 2.5, th), 1.25, 1.25)
+                    tr = min(1.0, th / max(th + 1.0, float(full_fb.height())))
+                    tbh = max(14.0, th * tr)
+                    tby = syn_inner.top() + (th - tbh) * (scroll_y_fb / max_scroll_fb)
+                    buf.setBrush(QColor(accent_col.red(), accent_col.green(), accent_col.blue(), 190))
+                    buf.drawRoundedRect(QRectF(tx, tby, 2.5, tbh), 1.25, 1.25)
 
                 # Footer stats + barcode accent
                 foot_y = float(base_h) - pad - 34.0
