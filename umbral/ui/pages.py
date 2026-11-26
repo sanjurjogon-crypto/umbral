@@ -363,6 +363,18 @@ class LibraryPage(QWidget):
         self.flip_button.refresh_icon()
         self.flip_button.clicked.connect(self.canvas.toggle_flip)
         self.info_actions.addWidget(self.flip_button)
+        self.fav_button = UmbralButton("☆ Favorito")
+        self.fav_button.setObjectName("ghost")
+        self.fav_button.setCursor(Qt.PointingHandCursor)
+        self.fav_button.setToolTip("Marcar o quitar de favoritos")
+        self.fav_button.clicked.connect(self._toggle_current_favorite)
+        self.info_actions.addWidget(self.fav_button)
+        self.state_button = UmbralButton("Estado: Sin jugar")
+        self.state_button.setObjectName("ghost")
+        self.state_button.setCursor(Qt.PointingHandCursor)
+        self.state_button.setToolTip("Cambiar estado (Sin jugar / En curso / Terminado)")
+        self.state_button.clicked.connect(self._cycle_current_state)
+        self.info_actions.addWidget(self.state_button)
         self.manual_button = UmbralButton("Manual (PDF)", icon_name="book", icon_size=14)
         self.manual_button.setObjectName("ghost")
         self.manual_button.setCursor(Qt.PointingHandCursor)
@@ -940,8 +952,47 @@ class LibraryPage(QWidget):
         if hasattr(self, "flip_button"):
             self.flip_button.setVisible(self._view_mode == "shelf")
         self._on_flipped_changed(self.canvas.is_flipped())
+        self._update_quick_action_buttons(game)
         self._update_quick_jump_state(game)
         self._layout_overlays()
+
+    def _update_quick_action_buttons(self, game: Game) -> None:
+        if hasattr(self, "fav_button"):
+            self.fav_button.setText("★ Favorito" if game.favorite else "☆ Favorito")
+            self.fav_button.setVisible(self._view_mode == "shelf")
+        if hasattr(self, "state_button"):
+            labels = {"playing": "En curso", "finished": "Terminado"}
+            self.state_button.setText(f"Estado: {labels.get(game.state, 'Sin jugar')}")
+            self.state_button.setVisible(self._view_mode == "shelf")
+
+    def _toggle_current_favorite(self) -> None:
+        game = self.canvas.current_game()
+        if game is None:
+            return
+        game.favorite = not game.favorite
+        self.store.save_library()
+        self._update_quick_action_buttons(game)
+        self.canvas.update()
+        if self._favorites_only and not game.favorite:
+            self.refresh()
+
+    def _cycle_current_state(self) -> None:
+        game = self.canvas.current_game()
+        if game is None:
+            return
+        if game.playtime_seconds > 0 or game.sessions > 0:
+            game.progress = "playing" if game.state == "finished" else "finished"
+        else:
+            order = ("", "playing", "finished")
+            cur = game.progress if game.progress in order else ""
+            game.progress = order[(order.index(cur) + 1) % len(order)]
+        self.store.save_library()
+        self._update_quick_action_buttons(game)
+        item = self.canvas._current_item()
+        if item is not None:
+            item.back_cache = None
+            item.back_cache_key = ()
+        self.canvas.update()
 
     def _on_flipped_changed(self, flipped: bool) -> None:
         if hasattr(self, "flip_button"):
