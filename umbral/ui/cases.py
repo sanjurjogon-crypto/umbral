@@ -532,7 +532,7 @@ CASE_PROFILES: dict[str, CaseProfile] = {
         w_scale=1.08,
         h_scale=0.95,
         radius=5.5,
-        spine_color="#1a1714",
+        spine_color="#124dc4",
         header_bg="#14110f",
         header_accent="#d97706",
         header_text="#fef3c7",
@@ -2034,11 +2034,33 @@ def paint_console_case(
 def paint_console_spine(
     painter: QPainter, target: QRectF, profile: CaseProfile, turn: float
 ) -> None:
-    """Paint the 3D side spine matching real polycarbonate / jewel / cardboard physics."""
+    """Paint the 3D side spines and bottom box lip matching real shell physics."""
     width = target.width()
     max_depth = 26.0 * (width / 222.0) * 0.55 * profile.depth_scale
+    bottom_h = max(3.5, max_depth * 0.44)
     base = QColor(profile.spine_color)
     clamped = max(-1.0, min(1.0, float(turn)))
+
+    # Bottom face rectangle of the 3D case
+    bottom_rect = QRectF(target.left(), target.bottom() - 1.5, width, bottom_h + 1.5)
+    bottom_path = QPainterPath()
+    bottom_path.addRoundedRect(bottom_rect, max(1.5, profile.radius * 0.45), max(1.5, profile.radius * 0.45))
+    bottom_grad = QLinearGradient(0, target.bottom(), 0, target.bottom() + bottom_h)
+    if profile.shell_kind in {"translucent_clear", "jewel_clear"}:
+        bottom_grad.setColorAt(0.0, _mix(base, QColor("#ffffff"), 0.14))
+        bottom_grad.setColorAt(0.55, base)
+        bottom_grad.setColorAt(1.0, base.darker(160))
+    else:
+        bottom_grad.setColorAt(0.0, base)
+        bottom_grad.setColorAt(1.0, base.darker(165))
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QBrush(bottom_grad))
+    painter.drawPath(bottom_path)
+    painter.setPen(QPen(QColor(255, 255, 255, 36), 0.8))
+    painter.drawLine(
+        QPointF(target.left() + 2.0, target.bottom() + bottom_h - 0.5),
+        QPointF(target.right() - 2.0, target.bottom() + bottom_h - 0.5),
+    )
 
     left_depth = max_depth * (0.28 + 0.72 * max(0.0, clamped))
     right_depth = max_depth * (0.28 + 0.72 * max(0.0, -clamped))
@@ -2050,10 +2072,11 @@ def paint_console_spine(
             x0, x1 = target.left(), target.left() - depth
         else:
             x0, x1 = target.right(), target.right() + depth
+        y_bot = target.bottom() + bottom_h * 0.85
         p0 = QPointF(x0, target.top())
         p1 = QPointF(x1, target.top() + depth * 0.32)
-        p2 = QPointF(x1, target.bottom() - depth * 0.32)
-        p3 = QPointF(x0, target.bottom())
+        p2 = QPointF(x1, y_bot - depth * 0.32)
+        p3 = QPointF(x0, y_bot)
         path.moveTo(p0)
         path.lineTo(p1)
         path.lineTo(p2)
