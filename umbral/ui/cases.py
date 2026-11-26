@@ -1936,19 +1936,28 @@ def load_spine_texture(system_key: str, side: str = "left") -> Optional[QPixmap]
 
 def load_case_overlay(system_key: str) -> Optional[tuple[QPixmap, QRectF]]:
     """Load an authentic PNG case overlay template from user data or bundled assets if available."""
+    return _load_template_pair(system_key, ".png")
+
+
+def load_back_overlay(system_key: str) -> Optional[tuple[QPixmap, QRectF]]:
+    """Load an authentic PNG back-cover template from user data or bundled assets if available."""
+    return _load_template_pair(system_key, "_back.png")
+
+
+def _load_template_pair(system_key: str, suffix: str) -> Optional[tuple[QPixmap, QRectF]]:
     key = (system_key or "").strip().lower()
     if not key:
         return None
     from ..paths import data_dir
 
     candidates = (
-        data_dir() / "cases" / f"{key}.png",
-        assets_dir() / "cases" / f"{key}.png",
+        data_dir() / "cases" / f"{key}{suffix}",
+        assets_dir() / "cases" / f"{key}{suffix}",
     )
     for path in candidates:
         if not path.is_file():
             continue
-        cache_key = f"{key}:{path}:{path.stat().st_mtime_ns}"
+        cache_key = f"{key}{suffix}:{path}:{path.stat().st_mtime_ns}"
         if cache_key in _OVERLAY_CACHE:
             return _OVERLAY_CACHE[cache_key]
         pix = QPixmap(str(path))

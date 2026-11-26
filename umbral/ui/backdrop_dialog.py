@@ -21,6 +21,38 @@ from ..backdrops import BackdropOption, download_backdrop, fetch_thumbnail, sear
 from ..models import Game
 
 
+_ACTIVE_WORKERS: set[QThread] = set()
+
+
+def _retire_worker(worker: Optional[QThread]) -> None:
+    if worker is None:
+        return
+    try:
+        for sig_name in ("found", "ready", "done"):
+            sig = getattr(worker, sig_name, None)
+            if sig is not None:
+                try:
+                    sig.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+        if worker.isRunning():
+            worker.requestInterruption()
+            _ACTIVE_WORKERS.add(worker)
+            worker.finished.connect(lambda w=worker: _cleanup_retired_worker(w))
+        else:
+            worker.deleteLater()
+    except RuntimeError:
+        pass
+
+
+def _cleanup_retired_worker(worker: QThread) -> None:
+    _ACTIVE_WORKERS.discard(worker)
+    try:
+        worker.deleteLater()
+    except RuntimeError:
+        pass
+
+
 class _SearchWorker(QThread):
     found = Signal(list)
 
@@ -177,10 +209,12 @@ class BackdropPickerDialog(QDialog):
         self._start_search()
 
     def _stop_workers(self) -> None:
-        for worker in (self._thumb_worker, self._search_worker, self._download_worker):
-            if worker is not None and worker.isRunning():
-                worker.requestInterruption()
-                worker.wait(400)
+        _retire_worker(self._thumb_worker)
+        self._thumb_worker = None
+        _retire_worker(self._search_worker)
+        self._search_worker = None
+        _retire_worker(self._download_worker)
+        self._download_worker = None
 
     def _clear_grid(self) -> None:
         self._cards.clear()
@@ -196,7 +230,7 @@ class BackdropPickerDialog(QDialog):
         self._clear_grid()
         self.status_label.setText(f"Buscando fondos para «{query}»...")
         self.search_btn.setEnabled(False)
-        self._search_worker = _SearchWorker(query, self.game, self)
+        self._search_worker = _SearchWorker(query, self.game)
         self._search_worker.found.connect(self._on_results)
         self._search_worker.start()
 
@@ -212,7 +246,7 @@ class BackdropPickerDialog(QDialog):
             card.clicked.connect(self._pick_option)
             self.grid.addWidget(card, idx // 3, idx % 3)
             self._cards.append(card)
-        self._thumb_worker = _ThumbWorker(options, self)
+        self._thumb_worker = _ThumbWorker(options)
         self._thumb_worker.ready.connect(self._on_thumb)
         self._thumb_worker.start()
 
@@ -229,7 +263,7 @@ class BackdropPickerDialog(QDialog):
         self.status_label.setText("Descargando fondo seleccionado...")
         for card in self._cards:
             card.setEnabled(False)
-        self._download_worker = _DownloadWorker(opt.url, self.game, self)
+        self._download_worker = _DownloadWorker(opt.url, self.game)
         self._download_worker.done.connect(self._on_downloaded)
         self._download_worker.start()
 
@@ -245,6 +279,10 @@ class BackdropPickerDialog(QDialog):
     def _restore(self) -> None:
         self.restore_default = True
         self.accept()
+
+    def done(self, result: int) -> None:
+        self._stop_workers()
+        super().done(result)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - API de Qt
         self._stop_workers()

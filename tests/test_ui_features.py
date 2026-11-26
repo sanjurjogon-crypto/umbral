@@ -1111,3 +1111,65 @@ def test_collections_tags_advanced_filters_flip_manual_and_fullscreen(
 
     win.close()
     app.processEvents()
+
+
+def test_back_templates_zoom_synopsis_and_backdrop_dialog_safe_close(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from umbral.synopsis import needs_synopsis
+    from umbral.ui.backdrop_dialog import BackdropPickerDialog
+    from umbral.ui.cases import load_back_overlay
+
+    app = _app()
+    for key in ("steam", "3ds", "pc", "switch2", "hookshot", "longshot", "dusklight", "epic"):
+        res = load_back_overlay(key)
+        assert res is not None, f"Missing back cover template for {key}"
+        pix, win_rect = res
+        assert not pix.isNull()
+        assert 0.01 < win_rect.x() < 0.20
+        assert 0.10 < win_rect.y() < 0.35
+        assert 0.70 < win_rect.width() <= 0.98
+        assert 0.35 < win_rect.height() <= 0.80
+
+    # Synopsis detection helper
+    assert needs_synopsis(Game(id="s1", title="Portal", system="Steam", system_key="steam", description="")) is True
+    assert needs_synopsis(
+        Game(id="s2", title="Portal", system="Steam", system_key="steam", description="Juego de Steam instalado en C:/Steam/Portal.")
+    ) is True
+    assert needs_synopsis(
+        Game(id="s3", title="Portal", system="Steam", system_key="steam", description="Resuelve puzles con portales en Aperture Science.")
+    ) is False
+
+    # BackdropPickerDialog stops workers cleanly on accept()/reject()
+    monkeypatch.setattr("umbral.ui.backdrop_dialog.search_backdrops", lambda *_a, **_k: [])
+    dlg = BackdropPickerDialog(Game(id="g1", title="Portal", system="Steam", system_key="steam"))
+    dlg.accept()
+    app.processEvents()
+
+    # Clicking a flipped game zooms in to read back cover instead of launching
+    from umbral.ui.shelf import ShelfCanvas
+    canvas = ShelfCanvas()
+    canvas.resize(1200, 720)
+    g = Game(id="p1", title="Portal", system="Steam", system_key="steam", source="steam", description="Gran juego de puzles.")
+    canvas.set_games([g])
+    canvas.toggle_flip()
+    assert canvas.is_flipped() is True
+    launched: list[Game] = []
+    canvas.activated.connect(launched.append)
+    cx, cy, _cw, _ch, _gap = canvas._layout()
+    evt = QMouseEvent(
+        QMouseEvent.MouseButtonPress,
+        QPointF(cx, cy),
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    canvas.mousePressEvent(evt)
+    assert launched == []
+    assert canvas.is_back_zoomed() is True
+    canvas.mousePressEvent(evt)
+    assert canvas.is_back_zoomed() is False
+    canvas.deleteLater()
+    app.processEvents()
