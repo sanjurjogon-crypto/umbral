@@ -57,6 +57,7 @@ from .icons import vector_icon
 from .pages import HealthPage, HomePage, LibraryPage, SettingsPage, StatsPage, clear_layout
 from .shelf import apply_style
 from .style import active, is_dark, is_reduced_motion, set_active, set_reduced_motion
+from .sfx import set_sounds_enabled
 from .theme import qss
 from .update_dialog import CheckWorker, DownloadWorker
 from .widgets import Backdrop, StartupOverlay, Toast, UmbralButton, UpdateBanner
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
         style_key = str(self.store.settings.get("style", "souls"))
         set_active(style_key)
         set_reduced_motion(bool(self.store.settings.get("reduce_animations", False)))
+        set_sounds_enabled(bool(self.store.settings.get("ui_sounds", True)))
         apply_style(style_key)
         self.setWindowTitle("Umbral")
         self.setMinimumSize(1040, 660)
