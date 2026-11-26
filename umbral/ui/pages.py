@@ -285,6 +285,29 @@ class LibraryPage(QWidget):
         top_row.addWidget(self.title_box_frame)
         top_row.addStretch(1)
 
+        self.state_pills_bar = QFrame()
+        self.state_pills_bar.setObjectName("statePillsBar")
+        self.state_pills_bar.setStyleSheet(
+            "#statePillsBar { background: rgba(12, 15, 22, 165); "
+            "border: 1px solid rgba(255, 255, 255, 22); border-radius: 10px; }"
+            "#statePillsBar QPushButton { background: transparent; border: none; color: rgba(203, 213, 225, 190); "
+            "padding: 4px 10px; border-radius: 7px; font-size: 11px; font-weight: 600; }"
+            "#statePillsBar QPushButton:hover { background: rgba(255, 255, 255, 24); color: #ffffff; }"
+            "#statePillsBar QPushButton[active='true'] { background: rgba(245, 158, 11, 55); color: #fde68a; }"
+        )
+        pills_row = QHBoxLayout(self.state_pills_bar)
+        pills_row.setContentsMargins(4, 3, 4, 3)
+        pills_row.setSpacing(2)
+        self._state_pill_buttons: dict[str, QPushButton] = {}
+        for key, label in (("", "Todos"), ("playing", "En curso"), ("unplayed", "Sin jugar"), ("finished", "Terminados")):
+            btn = QPushButton(label)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.clicked.connect(lambda _checked=False, s=key: self._set_state_filter(s))
+            pills_row.addWidget(btn)
+            self._state_pill_buttons[key] = btn
+        top_row.addWidget(self.state_pills_bar, 0, Qt.AlignVCenter)
+
         self.filters_button = UmbralButton("Filtros  ▾", icon_name="filter", icon_size=14)
         self.filters_button.setObjectName("filterBtn")
         self.filters_button.setCursor(Qt.PointingHandCursor)
@@ -746,6 +769,13 @@ class LibraryPage(QWidget):
         if hasattr(self, "_state_actions"):
             for key, act in self._state_actions.items():
                 act.setChecked(self._state_filter == key)
+        if hasattr(self, "_state_pill_buttons"):
+            for key, btn in self._state_pill_buttons.items():
+                is_active = self._state_filter == key
+                if btn.property("active") != is_active:
+                    btn.setProperty("active", is_active)
+                    btn.style().unpolish(btn)
+                    btn.style().polish(btn)
         if hasattr(self, "filters_button"):
             active_badge = bool(
                 self._state_filter
