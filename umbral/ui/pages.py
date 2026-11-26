@@ -303,6 +303,7 @@ class LibraryPage(QWidget):
         self.canvas.context_requested.connect(self.context_requested)
         self.canvas.selection_changed.connect(self._on_selection)
         self.canvas.flipped_changed.connect(self._on_flipped_changed)
+        self.canvas.back_zoom_changed.connect(self._on_back_zoom_changed)
 
         self.grid_scroll = QScrollArea(self)
         self.grid_scroll.setWidgetResizable(True)
@@ -373,6 +374,37 @@ class LibraryPage(QWidget):
         info_body.addWidget(self.info_meta)
         info_body.addSpacing(4)
         info_body.addLayout(self.info_actions)
+
+        self.quick_jump_bar = QFrame()
+        self.quick_jump_bar.setObjectName("quickJumpBar")
+        self.quick_jump_bar.setStyleSheet(
+            "#quickJumpBar { background: rgba(12, 15, 22, 175); "
+            "border: 1px solid rgba(255, 255, 255, 24); border-radius: 12px; }"
+            "#quickJumpBar QLabel { color: rgba(226, 232, 240, 210); font-size: 11px; font-weight: 600; }"
+            "#quickJumpBar QPushButton { background: transparent; border: none; color: rgba(203, 213, 225, 185); "
+            "padding: 2px 6px; border-radius: 6px; font-size: 11px; font-weight: 600; }"
+            "#quickJumpBar QPushButton:hover { background: rgba(255, 255, 255, 26); color: #ffffff; }"
+            "#quickJumpBar QPushButton[active='true'] { background: rgba(245, 158, 11, 55); color: #fde68a; }"
+        )
+        jump_row = QHBoxLayout(self.quick_jump_bar)
+        jump_row.setContentsMargins(10, 3, 8, 3)
+        jump_row.setSpacing(6)
+        self.jump_pos_label = QLabel("0 / 0")
+        jump_row.addWidget(self.jump_pos_label)
+        self.jump_letters_layout = QHBoxLayout()
+        self.jump_letters_layout.setContentsMargins(4, 0, 4, 0)
+        self.jump_letters_layout.setSpacing(2)
+        jump_row.addLayout(self.jump_letters_layout)
+        self.random_button = QPushButton("Aleatorio")
+        self.random_button.setCursor(Qt.PointingHandCursor)
+        self.random_button.setFocusPolicy(Qt.NoFocus)
+        self.random_button.setToolTip("Saltar a un juego al azar")
+        self.random_button.clicked.connect(self._jump_random_game)
+        jump_row.addWidget(self.random_button)
+        self._jump_letter_buttons: dict[str, QPushButton] = {}
+        self.quick_jump_bar.hide()
+        info_body.addSpacing(6)
+        info_body.addWidget(self.quick_jump_bar, 0, Qt.AlignHCenter)
 
         self.bottom = QWidget(self)
         bottom_body = QVBoxLayout(self.bottom)
@@ -908,11 +940,83 @@ class LibraryPage(QWidget):
         if hasattr(self, "flip_button"):
             self.flip_button.setVisible(self._view_mode == "shelf")
         self._on_flipped_changed(self.canvas.is_flipped())
+        self._update_quick_jump_state(game)
         self._layout_overlays()
 
     def _on_flipped_changed(self, flipped: bool) -> None:
         if hasattr(self, "flip_button"):
             self.flip_button.setText("Ver frontal" if flipped else "Girar caja")
+
+    def _on_back_zoom_changed(self, zoomed: bool) -> None:
+        if hasattr(self, "quick_jump_bar"):
+            items = self.canvas.items
+            self.quick_jump_bar.setVisible(
+                self._view_mode == "shelf" and len(items) >= 2 and not zoomed
+            )
+
+    @staticmethod
+    def _game_initial(title: str) -> str:
+        for ch in (title or "").strip().upper():
+            if ch.isalpha():
+                return ch
+            if ch.isdigit():
+                return "#"
+        return "#"
+
+    def _rebuild_quick_jump(self) -> None:
+        if not hasattr(self, "jump_letters_layout"):
+            return
+        clear_layout(self.jump_letters_layout)
+        self._jump_letter_buttons.clear()
+        items = self.canvas.items
+        if self._view_mode != "shelf" or len(items) < 2:
+            self.quick_jump_bar.hide()
+            return
+        first_by_letter: dict[str, int] = {}
+        for idx, item in enumerate(items):
+            letter = self._game_initial(item.game.title)
+            first_by_letter.setdefault(letter, idx)
+        for letter, target_idx in first_by_letter.items():
+            btn = QPushButton(letter)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.clicked.connect(lambda _checked=False, idx=target_idx: self._jump_to_index(idx))
+            self.jump_letters_layout.addWidget(btn)
+            self._jump_letter_buttons[letter] = btn
+        self.quick_jump_bar.setVisible(not self.canvas.is_back_zoomed())
+
+    def _update_quick_jump_state(self, game: Game) -> None:
+        if not hasattr(self, "jump_pos_label"):
+            return
+        total = len(self.canvas.items)
+        if self._view_mode != "shelf" or total < 2:
+            self.quick_jump_bar.hide()
+            return
+        self.jump_pos_label.setText(f"{self.canvas.index + 1} / {total}")
+        active_letter = self._game_initial(game.title)
+        for letter, btn in self._jump_letter_buttons.items():
+            is_active = letter == active_letter
+            if btn.property("active") != is_active:
+                btn.setProperty("active", is_active)
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+        self.quick_jump_bar.setVisible(not self.canvas.is_back_zoomed())
+
+    def _jump_to_index(self, target_idx: int) -> None:
+        if not self.canvas.items:
+            return
+        delta = target_idx - self.canvas.index
+        if delta != 0:
+            self.canvas.step(delta)
+
+    def _jump_random_game(self) -> None:
+        import random
+
+        total = len(self.canvas.items)
+        if total < 2:
+            return
+        candidates = [i for i in range(total) if i != self.canvas.index]
+        self._jump_to_index(random.choice(candidates))
 
     def _open_current_manual(self) -> None:
         game = self.canvas.current_game()
@@ -988,6 +1092,7 @@ class LibraryPage(QWidget):
             self.canvas.set_games(games)
             if reset:
                 self.canvas.reset_position()
+            self._rebuild_quick_jump()
             game = self.canvas.current_game()
             if game is not None:
                 self._on_selection(game)

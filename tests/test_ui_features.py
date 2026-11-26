@@ -1311,3 +1311,35 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
 
     store_cached_synopsis(port_game, "Port nativo de acción.")
     assert cached_synopsis(port_game) == "Port nativo de acción."
+
+
+def test_quick_jump_bar_and_corporate_synopsis_filter(monkeypatch, tmp_path: Path) -> None:
+    from umbral.synopsis import _extract_wiki_plot_or_gameplay
+    from umbral.ui.pages import LibraryPage
+
+    app = _app()
+    rl_sample = (
+        "Rocket League es un videojuego desarrollado por Psyonix.\n"
+        "Interactive Entertainment se hizo cargo de esas funciones a finales de año."
+    )
+    assert _extract_wiki_plot_or_gameplay(rl_sample, "es") == ""
+
+    games = [
+        Game(id="a1", title="AlternateWatch", system="PC", system_key="pc"),
+        Game(id="m1", title="Metro 2033", system="Steam", system_key="steam", source="steam"),
+        Game(id="r1", title="Rocket League", system="Epic Games", system_key="epic", source="epic"),
+    ]
+    page = LibraryPage(_store(monkeypatch, tmp_path, games))
+    page.resize(1200, 720)
+    page.refresh(reset=True)
+    assert page.jump_pos_label.text() == "1 / 3"
+    assert set(page._jump_letter_buttons.keys()) == {"A", "M", "R"}
+
+    page._jump_letter_buttons["R"].click()
+    assert page.canvas.index == 2
+    assert page.jump_pos_label.text() == "3 / 3"
+
+    page._jump_random_game()
+    assert page.canvas.index != 2
+    page.deleteLater()
+    app.processEvents()

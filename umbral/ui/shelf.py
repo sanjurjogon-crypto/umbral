@@ -608,6 +608,7 @@ class ShelfCanvas(QWidget):
     selection_changed = Signal(object)
     context_requested = Signal(object, object)
     flipped_changed = Signal(bool)
+    back_zoom_changed = Signal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -1443,6 +1444,7 @@ class ShelfCanvas(QWidget):
 
     def set_back_zoom(self, zoomed: bool) -> None:
         target = 1.0 if (zoomed and self.is_flipped()) else 0.0
+        changed = abs(target - self._back_zoom_target) > 0.01
         self._back_zoom_target = target
         self._back_zoom_anim.stop()
         if is_reduced_motion():
@@ -1452,6 +1454,8 @@ class ShelfCanvas(QWidget):
             self._back_zoom_anim.setStartValue(self._back_zoom)
             self._back_zoom_anim.setEndValue(target)
             self._back_zoom_anim.start()
+        if changed:
+            self.back_zoom_changed.emit(target >= 0.5)
 
     def toggle_back_zoom(self) -> None:
         self.set_back_zoom(not self.is_back_zoomed())
