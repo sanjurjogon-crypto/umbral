@@ -2149,6 +2149,8 @@ class ShelfCanvas(QWidget):
             badges.append(("star", QColor("#14120d"), QColor("#e8c45e")))
         if item.game.state == "finished":
             badges.append(("check", QColor("#101712"), QColor("#8bc382")))
+        elif item.game.state == "playing":
+            badges.append(("dot", QColor("#0d151d"), QColor("#38bdf8")))
         if not badges:
             return
         pill_size = max(14.0, min(22.0, art.width() * 0.115))
@@ -2184,6 +2186,11 @@ class ShelfCanvas(QWidget):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(fg)
                 painter.drawPath(star)
+            elif kind == "dot":
+                r = pill_size * 0.22
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(fg)
+                painter.drawEllipse(QPointF(cx, cy), r, r)
             else:
                 check = QPainterPath()
                 r = pill_size * 0.25

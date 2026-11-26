@@ -1361,3 +1361,32 @@ def test_ui_sfx_synthesis_and_toggle() -> None:
         assert is_sounds_enabled() is True
     finally:
         set_sounds_enabled(prev)
+
+
+def test_quick_favorite_and_state_buttons(monkeypatch, tmp_path: Path) -> None:
+    from umbral.ui.pages import LibraryPage
+
+    app = _app()
+    g1 = Game(id="q1", title="Portal 2", system="Steam", system_key="steam", source="steam")
+    store = _store(monkeypatch, tmp_path, [g1])
+    page = LibraryPage(store)
+    page.resize(1200, 720)
+    page.refresh(reset=True)
+
+    assert page.fav_button.text() == "☆ Favorito"
+    assert page.state_button.text() == "Estado: Sin jugar"
+
+    page.fav_button.click()
+    assert g1.favorite is True
+    assert page.fav_button.text() == "★ Favorito"
+
+    page.state_button.click()
+    assert g1.state == "playing"
+    assert page.state_button.text() == "Estado: En curso"
+
+    page.state_button.click()
+    assert g1.state == "finished"
+    assert page.state_button.text() == "Estado: Terminado"
+
+    page.deleteLater()
+    app.processEvents()
