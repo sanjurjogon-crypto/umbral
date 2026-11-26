@@ -1239,6 +1239,7 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
     from umbral.synopsis import (
         _clean_search_title,
         _extract_wiki_plot_or_gameplay,
+        _wiki_title_matches,
         cached_synopsis,
         fetch_synopsis,
         needs_synopsis,
@@ -1274,6 +1275,9 @@ def test_synopsis_cache_and_non_steam_boilerplate(monkeypatch, tmp_path: Path) -
     assert needs_synopsis(indie_title_only) is True
     assert _clean_search_title(rom_game.title) == "The Legend of Zelda: Ocarina of Time"
     assert _clean_search_title(indie_title_only.title) == "Alternate Watch"
+    assert _wiki_title_matches("AlternateWatch", "Mario's Cement Factory") is False
+    assert _wiki_title_matches("Rocket League", "Rocket League Sideswipe") is False
+    assert _wiki_title_matches("AlternateWatch", "Alternate Watch (video game)") is True
 
     # Wikipedia extractor must prefer plot/gameplay over development intro
     wiki_sample = (
