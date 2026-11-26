@@ -42,7 +42,7 @@ from ..relink import missing_parts, relink, relocate_missing_paths
 from ..scan import DetectWorker, ScanWorker
 from ..standalone import StandaloneCandidate
 from ..store import Store
-from ..synopsis import SynopsisWorker, needs_synopsis
+from ..synopsis import SynopsisWorker, cached_synopsis, needs_synopsis
 from ..profiles import EmulatorProfile, all_profiles, custom_profiles
 from ..updater import UpdateError, UpdateInfo, apply_update, backup_data, is_newer
 from .dialogs import (
@@ -594,7 +594,24 @@ class MainWindow(QMainWindow):
         pending = [game for game in self.store.games if needs_synopsis(game)]
         if not pending:
             return
-        self.synopsis_worker = SynopsisWorker(pending)
+        # Restore any already-cached synopses immediately so they never need re-fetching
+        restored: list[tuple[str, str]] = []
+        remaining: list = []
+        for game in pending:
+            cached = cached_synopsis(game)
+            if cached:
+                restored.append((game.id, cached))
+            else:
+                remaining.append(game)
+        if restored:
+            self._on_synopses_done(restored)
+        if not remaining:
+            return
+        # Prioritize the currently focused game first
+        current = self.library.canvas.current_game() if hasattr(self, "library") else None
+        if current is not None:
+            remaining.sort(key=lambda g: 0 if g.id == current.id else 1)
+        self.synopsis_worker = SynopsisWorker(remaining)
         self.synopsis_worker.updated.connect(self._on_synopses_done)
         self.synopsis_worker.finished.connect(self._clear_synopsis_worker)
         self.synopsis_worker.start()
@@ -623,6 +640,7 @@ class MainWindow(QMainWindow):
             self.synopsis_worker = None
 
     def _refresh_covers(self) -> None:
+        self._fetch_missing_synopses()
         if self.cover_worker is not None and self.cover_worker.isRunning():
             self.toast.show_message("Ya se están buscando carátulas.")
             return
