@@ -13,13 +13,21 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QThread, Signal
 
-from .covers import _request_json, _steam_app_id
+from .covers import (
+    GAMEDB_ROOT,
+    PLATFORM_IDS,
+    _bucket_key,
+    _compact,
+    _request_json,
+    _steam_app_id,
+)
 from .models import Game
 from .net import ssl_context
 from .paths import data_dir
 
-_WIKI_USER_AGENT = "UmbralLauncher/8.53 (https://github.com/sanjurjogon-crypto/umbral)"
+_WIKI_USER_AGENT = "UmbralLauncher/8.54 (https://github.com/sanjurjogon-crypto/umbral)"
 _CACHE_LOCK = threading.Lock()
+_CACHE_VERSION = 2
 
 _BOILERPLATE_PREFIXES = (
     "juego de steam instalado en ",
@@ -39,12 +47,16 @@ _BOILERPLATE_SUBSTRINGS = (
 
 def needs_synopsis(game: Game) -> bool:
     desc = (game.description or "").strip()
-    if not desc:
+    if not desc or len(desc) < 28:
         return True
     low = desc.lower()
+    if re.sub(r"[^a-z0-9]+", "", low) == re.sub(r"[^a-z0-9]+", "", (game.title or "").lower()):
+        return True
     if any(low.startswith(prefix) for prefix in _BOILERPLATE_PREFIXES):
         return True
     if any(part in low for part in _BOILERPLATE_SUBSTRINGS) and len(desc) < 160:
+        return True
+    if any(pat in low for pat in _DEV_LEAD_PATTERNS):
         return True
     return False
 
@@ -64,6 +76,7 @@ def _clean_text(raw: str, max_chars: int = 260) -> str:
 def _clean_search_title(title: str) -> str:
     cleaned = re.sub(r"\s*[\(\[].*?[\)\]]", "", title or "")
     cleaned = cleaned.replace("™", "").replace("®", "").replace("©", "")
+    cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
     cleaned = re.sub(r"\s+[-–]\s+", ": ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
 
@@ -84,8 +97,12 @@ def _load_cache() -> dict[str, str]:
         return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            return {str(k): str(v) for k, v in raw.items() if isinstance(v, str) and v.strip()}
+        if isinstance(raw, dict) and raw.get("_v") == _CACHE_VERSION:
+            return {
+                str(k): str(v)
+                for k, v in raw.items()
+                if k != "_v" and isinstance(v, str) and v.strip()
+            }
     except (OSError, ValueError):
         pass
     return {}
@@ -96,7 +113,8 @@ def _save_cache(cache: dict[str, str]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload: dict[str, object] = {"_v": _CACHE_VERSION, **cache}
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, path)
     except OSError:
         pass
@@ -160,6 +178,102 @@ def _steam_synopsis(game: Game) -> str:
     return _clean_text(raw) if raw else ""
 
 
+_DEV_LEAD_PATTERNS = (
+    "es un videojuego",
+    "fue un videojuego",
+    "desarrollado por",
+    "publicado por",
+    "distribuido por",
+    "is a video game",
+    "is an action",
+    "is a role-playing",
+    "is a survival",
+    "developed by",
+    "published by",
+)
+
+
+def _strip_dev_sentences(text: str) -> str:
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    kept = [
+        s
+        for s in sentences
+        if not any(pat in s.lower() for pat in _DEV_LEAD_PATTERNS)
+    ]
+    return " ".join(kept).strip()
+
+
+def _extract_wiki_plot_or_gameplay(extract: str, lang: str) -> str:
+    # Split plain-text Wikipedia extract into sections by == Heading ==
+    parts = re.split(r"(?m)^=+\s*([^=\n]+?)\s*=+\s*$", extract)
+    intro = parts[0].strip() if parts else ""
+    sections: list[tuple[str, str]] = []
+    for idx in range(1, len(parts) - 1, 2):
+        sections.append((parts[idx].strip().lower(), parts[idx + 1].strip()))
+
+    preferred = (
+        ("argumento", "sinopsis", "trama", "historia", "premisa", "jugabilidad", "modo de juego")
+        if lang == "es"
+        else ("plot", "premise", "synopsis", "story", "gameplay")
+    )
+    for kw in preferred:
+        for heading, body in sections:
+            if kw in heading and len(body) >= 40:
+                return _clean_text(body)
+
+    # Fallback to intro only after stripping pure development/release sentences
+    if intro:
+        trimmed = _strip_dev_sentences(intro)
+        if len(trimmed) >= 45:
+            return _clean_text(trimmed)
+    return ""
+
+
+def _gamedb_synopsis(game: Game) -> str:
+    clean_title = _clean_search_title(game.title)
+    if not clean_title:
+        return ""
+    target = _compact(clean_title)
+    if not target:
+        return ""
+    try:
+        bucket = _request_json(f"{GAMEDB_ROOT}/buckets/{_bucket_key(clean_title)}.json")
+    except (URLError, TimeoutError, OSError, ValueError):
+        return ""
+    if not isinstance(bucket, dict):
+        return ""
+
+    candidates: list[tuple[int, str]] = []
+    for gid, entry in bucket.items():
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "")
+        comp = _compact(name)
+        if not comp:
+            continue
+        if comp == target:
+            candidates.append((100, str(gid)))
+        elif target in comp:
+            candidates.append((60 - min(30, abs(len(comp) - len(target))), str(gid)))
+    candidates.sort(reverse=True)
+
+    wanted = set(PLATFORM_IDS.get((game.system_key or "").lower(), ()))
+    for _score, gid in candidates[:4]:
+        try:
+            details = _request_json(f"{GAMEDB_ROOT}/games/{gid}.json", limit=3_000_000)
+        except (URLError, TimeoutError, OSError, ValueError):
+            continue
+        if not isinstance(details, dict):
+            continue
+        platforms = [p for p in details.get("platforms", []) if isinstance(p, int)]
+        if wanted and platforms and not any(pid in wanted for pid in platforms):
+            continue
+        raw = str(details.get("storyline") or details.get("summary") or "").strip()
+        if len(raw) >= 28:
+            return _clean_text(raw)
+    return ""
+
+
 def _wikipedia_synopsis(title: str, lang: str = "es") -> str:
     clean_title = _clean_search_title(title)
     if not clean_title:
@@ -187,12 +301,12 @@ def _wikipedia_synopsis(title: str, lang: str = "es") -> str:
                 continue
             extract_url = (
                 f"https://{lang}.wikipedia.org/w/api.php?action=query&prop=extracts"
-                f"&exintro=1&explaintext=1&redirects=1&titles={quote(page_title, safe='')}&format=json"
+                f"&explaintext=1&redirects=1&titles={quote(page_title, safe='')}&format=json"
             )
             try:
                 req = Request(extract_url, headers={"User-Agent": _WIKI_USER_AGENT})
                 with urlopen(req, timeout=10, context=ssl_context()) as resp:
-                    ex_data = json.loads(resp.read(256_000).decode("utf-8", errors="ignore"))
+                    ex_data = json.loads(resp.read(512_000).decode("utf-8", errors="ignore"))
             except (URLError, TimeoutError, OSError, ValueError):
                 continue
 
@@ -204,18 +318,22 @@ def _wikipedia_synopsis(title: str, lang: str = "es") -> str:
                 low = extract.lower()
                 if not extract or "puede referirse a" in low or "may refer to" in low:
                     continue
-                return _clean_text(extract)
+                parsed = _extract_wiki_plot_or_gameplay(extract, lang)
+                if parsed:
+                    return parsed
     return ""
 
 
 def fetch_synopsis(game: Game) -> str:
-    """Fetch a clean synopsis from local cache, Steam (Spanish), or Wikipedia ES/EN."""
+    """Fetch a clean synopsis (plot/premise/gameplay) from cache, Steam, Wikipedia ES, GameDB, or Wikipedia EN."""
     cached = cached_synopsis(game)
     if cached:
         return cached
     text = _steam_synopsis(game)
     if not text:
         text = _wikipedia_synopsis(game.title, lang="es")
+    if not text:
+        text = _gamedb_synopsis(game)
     if not text:
         text = _wikipedia_synopsis(game.title, lang="en")
     if text:
