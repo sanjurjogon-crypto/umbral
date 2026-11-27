@@ -2073,7 +2073,16 @@ class ShelfCanvas(QWidget):
             front_pix = self._front_pixmap_for(item, base_w, base_h)
             back_pix = self._back_pixmap_for(item, base_w, base_h)
             gl_pix = renderer.render_case(
-                item.profile, front_pix, back_pix, out_w, out_h, dpr, rx, ry
+                item.profile,
+                front_pix,
+                back_pix,
+                target.width(),
+                target.height(),
+                out_w,
+                out_h,
+                dpr,
+                rx,
+                ry,
             )
             if gl_pix is not None and not gl_pix.isNull():
                 item.gl_cache = gl_pix
