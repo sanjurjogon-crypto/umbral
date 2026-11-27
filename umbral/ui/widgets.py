@@ -1461,9 +1461,8 @@ class StylePreview(QFrame):
         self.selected = selected
         self._hovered = False
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(196, 104)
+        self.setFixedSize(196, 78)
         self.setAttribute(Qt.WA_Hover, True)
-        self.setToolTip(f"{style.game}: {style.blurb}")
 
     def set_selected(self, selected: bool) -> None:
         self.selected = selected
@@ -1516,27 +1515,11 @@ class StylePreview(QFrame):
         title_font.setLetterSpacing(QFont.AbsoluteSpacing, 1.2)
         painter.setFont(title_font)
         painter.setPen(QColor(style.accent_2))
-        painter.drawText(QRect(14, 18, rect.width() - 28, 22), Qt.AlignLeft | Qt.AlignVCenter, style.name)
-
-        body_font = QFont(style.body_font)
-        body_font.setPixelSize(11)
-        painter.setFont(body_font)
-        painter.setPen(QColor(style.muted))
-        painter.drawText(
-            QRect(14, 40, rect.width() - 28, 18),
-            Qt.AlignLeft | Qt.AlignVCenter,
-            style.game,
-        )
-        painter.setPen(QColor(style.muted_2))
-        painter.drawText(
-            QRect(14, 58, rect.width() - 28, 30),
-            Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
-            style.blurb,
-        )
+        painter.drawText(QRect(14, 16, rect.width() - 28, 24), Qt.AlignLeft | Qt.AlignVCenter, style.name)
 
         swatches = [style.accent, style.accent_2, style.success, style.danger]
         for index, color in enumerate(swatches):
-            chip = QRect(14 + index * 16, 90, 10, 6)
+            chip = QRect(14 + index * 18, 50, 12, 7)
             painter.fillRect(chip, QColor(color))
 
         painter.setClipping(False)
@@ -1561,18 +1544,29 @@ class StartupOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._elapsed_ms = 0
         self._total_ms = 2550
+        self._start_ts = 0.0
+        self._bg_cache: Optional[QPixmap] = None
+        self._bg_cache_key: tuple = ()
         self._timer = QTimer(self)
-        self._timer.setInterval(16)
+        self._timer.setInterval(20)
         self._timer.timeout.connect(self._tick)
 
     def start(self) -> None:
+        import time
+
         self._elapsed_ms = 0
+        self._start_ts = time.monotonic()
         self.show()
         self.raise_()
         self._timer.start()
 
     def _tick(self) -> None:
-        self._elapsed_ms += 16
+        import time
+
+        if self._start_ts > 0.0:
+            self._elapsed_ms = int((time.monotonic() - self._start_ts) * 1000.0)
+        else:
+            self._elapsed_ms += 20
         if self._elapsed_ms >= self._total_ms:
             self._timer.stop()
             self.hide()
@@ -1584,6 +1578,31 @@ class StartupOverlay(QWidget):
     def _ease_in_out_cubic(t: float) -> float:
         t = max(0.0, min(1.0, t))
         return 4 * t * t * t if t < 0.5 else 1 - ((-2 * t + 2) ** 3) / 2
+
+    def _ensure_bg_cache(self, w: int, h: int, style) -> QPixmap:
+        key = (w, h, style.key)
+        if self._bg_cache is not None and self._bg_cache_key == key:
+            return self._bg_cache
+        pix = QPixmap(max(1, w), max(1, h))
+        pix.fill(Qt.black)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing)
+        accent = QColor(style.accent)
+        cx, cy = w * 0.5, h * 0.48
+        bg_grad = QLinearGradient(0.0, 0.0, float(w), float(h))
+        bg_grad.setColorAt(0.0, QColor("#070604"))
+        bg_grad.setColorAt(0.55, QColor(style.bg))
+        bg_grad.setColorAt(1.0, QColor(accent.red() // 6, accent.green() // 6, accent.blue() // 8))
+        p.fillRect(pix.rect(), QBrush(bg_grad))
+        amb = QRadialGradient(cx, cy, max(w, h) * 0.42)
+        amb.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 44))
+        amb.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 14))
+        amb.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.fillRect(pix.rect(), QBrush(amb))
+        p.end()
+        self._bg_cache = pix
+        self._bg_cache_key = key
+        return pix
 
     def paintEvent(self, event) -> None:
         t = float(self._elapsed_ms)
@@ -1602,18 +1621,8 @@ class StartupOverlay(QWidget):
         accent = QColor(style.accent)
         accent_2 = QColor(style.accent_2)
 
-        # Black-to-gold gradient background matching Umbral's dark gold theme
-        bg_grad = QLinearGradient(0.0, 0.0, w, h)
-        bg_grad.setColorAt(0.0, QColor("#070604"))
-        bg_grad.setColorAt(0.55, QColor(style.bg))
-        bg_grad.setColorAt(1.0, QColor(accent.red() // 6, accent.green() // 6, accent.blue() // 8))
-        painter.fillRect(self.rect(), QBrush(bg_grad))
-
-        amb = QRadialGradient(cx, cy, max(w, h) * 0.42)
-        amb.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 44))
-        amb.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 14))
-        amb.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.fillRect(self.rect(), QBrush(amb))
+        bg_pix = self._ensure_bg_cache(self.width(), self.height(), style)
+        painter.drawPixmap(0, 0, bg_pix)
 
         # Typography measurement for "UMBRAL"
         title_font = QFont(style.heading_font or "Cinzel")
@@ -1644,22 +1653,34 @@ class StartupOverlay(QWidget):
             painter.drawText(QRectF(cx - text_w, cy - 52.0, text_w * 2.0, 104.0), Qt.AlignCenter, text)
             painter.restore()
 
-        # Draw sharp left (<) and right (>) half-diamond brackets
-        pen = QPen(accent, 4.4, Qt.SolidLine, Qt.FlatCap, Qt.MiterJoin)
-        painter.setPen(pen)
+        # Draw sharp left (<) and right (>) half-diamond brackets; when joined, draw a single closed diamond
         painter.setBrush(Qt.NoBrush)
+        if offset <= 0.6:
+            pen = QPen(accent, 4.4, Qt.SolidLine, Qt.RoundCap, Qt.MiterJoin)
+            pen.setMiterLimit(4.0)
+            painter.setPen(pen)
+            closed = QPainterPath()
+            closed.moveTo(cx, cy - half_h)
+            closed.lineTo(cx + half_w, cy)
+            closed.lineTo(cx, cy + half_h)
+            closed.lineTo(cx - half_w, cy)
+            closed.closeSubpath()
+            painter.drawPath(closed)
+        else:
+            pen = QPen(accent, 4.4, Qt.SolidLine, Qt.RoundCap, Qt.MiterJoin)
+            painter.setPen(pen)
 
-        left_path = QPainterPath()
-        left_path.moveTo(cx - offset, cy - half_h)
-        left_path.lineTo(cx - offset - half_w, cy)
-        left_path.lineTo(cx - offset, cy + half_h)
-        painter.drawPath(left_path)
+            left_path = QPainterPath()
+            left_path.moveTo(cx - offset, cy - half_h)
+            left_path.lineTo(cx - offset - half_w, cy)
+            left_path.lineTo(cx - offset, cy + half_h)
+            painter.drawPath(left_path)
 
-        right_path = QPainterPath()
-        right_path.moveTo(cx + offset, cy - half_h)
-        right_path.lineTo(cx + offset + half_w, cy)
-        right_path.lineTo(cx + offset, cy + half_h)
-        painter.drawPath(right_path)
+            right_path = QPainterPath()
+            right_path.moveTo(cx + offset, cy - half_h)
+            right_path.lineTo(cx + offset + half_w, cy)
+            right_path.lineTo(cx + offset, cy + half_h)
+            painter.drawPath(right_path)
 
         # Subtitle "Gonzalo Sanjurjo" below
         sub_font = QFont(style.heading_font or "Cinzel")

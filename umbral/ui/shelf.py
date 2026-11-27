@@ -415,7 +415,9 @@ def _shelf_horizon_y(center_y: float, cover_h: float) -> float:
     return center_y + cover_h * 0.385
 
 
-def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarray:
+def _apply_frosted_floor(
+    arr: np.ndarray, floor_y: Optional[float], blur: int = 0
+) -> np.ndarray:
     """Apply subtle, realistic frosted-glass Gaussian blur with low opacity so background stays visible."""
     if floor_y is None:
         return arr
@@ -426,7 +428,8 @@ def _apply_frosted_floor(arr: np.ndarray, floor_y: Optional[float]) -> np.ndarra
         return arr
     lower_u8 = np.clip(arr[fy:, :, :], 0.0, 255.0).astype(np.uint8)
     pil_low = Image.fromarray(lower_u8, "RGB")
-    blurred = pil_low.filter(ImageFilter.GaussianBlur(radius=4))
+    floor_radius = max(4.0, min(80.0, float(max(0, int(blur))) * 2.5))
+    blurred = pil_low.filter(ImageFilter.GaussianBlur(radius=floor_radius))
     frost_arr = np.asarray(blurred, dtype=np.float32)
 
     y_rel = np.linspace(0.0, 1.0, lower_h, dtype=np.float32)[:, None, None]
@@ -523,7 +526,7 @@ def render_debanded_backdrop(
     u2 = rng.random((h, w), dtype=np.float32)
     grain = (u1 + u2 - 1.0) * 3.1
     base = np.clip(base + grain[:, :, None], 0.0, 255.0)
-    base = _apply_frosted_floor(base, floor_y).astype(np.uint8)
+    base = _apply_frosted_floor(base, floor_y, blur=blur).astype(np.uint8)
 
     qimg = QImage(base.data, w, h, w * 3, QImage.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
@@ -584,7 +587,7 @@ def render_custom_backdrop(
     bottom_fade = np.where(y_norm > 0.68, np.clip((y_norm - 0.68) / 0.32, 0.0, 1.0), 0.0)
     shade = (dim_factor * (1.0 - 0.42 * (bottom_fade ** 1.25)))[:, :, None]
     arr = np.clip(arr * shade, 0.0, 255.0)
-    arr = _apply_frosted_floor(arr, floor_y).astype(np.uint8)
+    arr = _apply_frosted_floor(arr, floor_y, blur=blur).astype(np.uint8)
     qimg = QImage(arr.data, w, h, w * 3, QImage.Format_RGB888).copy()
     return QPixmap.fromImage(qimg)
 
@@ -647,6 +650,16 @@ class ShelfCanvas(QWidget):
         self._chrome_anim_start_bg: Optional[QPixmap] = None
         self._chrome_anim_target_bg: Optional[QPixmap] = None
         self._last_backdrop_by_id: dict[str, QPixmap] = {}
+        self._inspect_yaw = 0.0
+        self._inspect_pitch = 0.0
+        self._left_press_pos: Optional[QPointF] = None
+        self._left_last_x = 0.0
+        self._left_drag_accum = 0.0
+        self._left_dragging = False
+        self._right_press_pos: Optional[QPointF] = None
+        self._right_last_pos: Optional[QPointF] = None
+        self._right_dragging = False
+        self._suppress_context_menu = False
 
         self._anim = QPropertyAnimation(self, b"position", self)
         self._anim.setDuration(380)
@@ -888,7 +901,7 @@ class ShelfCanvas(QWidget):
     def wheelEvent(self, event) -> None:  # noqa: N802 - API de Qt
         if not self.items:
             return
-        if self.is_flipped() and self._back_max_scroll > 0.0:
+        if (self.is_flipped() or self._flip_angle > 0.5) and self._back_max_scroll > 0.0:
             dy = event.angleDelta().y()
             if dy != 0:
                 step_px = 26.0
@@ -900,10 +913,6 @@ class ShelfCanvas(QWidget):
                     ),
                 )
                 self.update()
-            event.accept()
-            return
-        delta = -1 if event.angleDelta().y() > 0 else 1
-        self.step(delta)
         event.accept()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - API de Qt
@@ -944,7 +953,7 @@ class ShelfCanvas(QWidget):
             return
         if key == Qt.Key_F and event.modifiers() == Qt.NoModifier:
             if self.items:
-                self.toggle_flip()
+                self.toggle_back_zoom()
             event.accept()
             return
         if key in (Qt.Key_I, Qt.Key_Up):
@@ -960,6 +969,50 @@ class ShelfCanvas(QWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - API de Qt
         point = event.position()
+        if (
+            (event.buttons() & Qt.RightButton)
+            and self._right_press_pos is not None
+            and self.is_back_zoomed()
+        ):
+            if (
+                not self._right_dragging
+                and (point - self._right_press_pos).manhattanLength() > 4.0
+            ):
+                self._right_dragging = True
+            if self._right_dragging and self._right_last_pos is not None:
+                dx = point.x() - self._right_last_pos.x()
+                dy = point.y() - self._right_last_pos.y()
+                self._inspect_yaw = (self._inspect_yaw + dx * 0.55) % 360.0
+                self._inspect_pitch = max(
+                    -65.0, min(65.0, self._inspect_pitch + dy * 0.45)
+                )
+                self._right_last_pos = point
+                self.setCursor(Qt.SizeAllCursor)
+                self.update()
+                event.accept()
+                return
+
+        if (event.buttons() & Qt.LeftButton) and self._left_press_pos is not None:
+            if (
+                not self._left_dragging
+                and abs(point.x() - self._left_press_pos.x()) > 6.0
+            ):
+                self._left_dragging = True
+            if self._left_dragging:
+                dx = point.x() - self._left_last_x
+                self._left_last_x = point.x()
+                self._left_drag_accum += dx
+                step_px = 58.0
+                while self._left_drag_accum <= -step_px:
+                    self.step(1)
+                    self._left_drag_accum += step_px
+                while self._left_drag_accum >= step_px:
+                    self.step(-1)
+                    self._left_drag_accum -= step_px
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+
         position = self._hit_test(point)
         if position != self._hover_index:
             self._hover_index = position
@@ -1009,28 +1062,60 @@ class ShelfCanvas(QWidget):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - API de Qt
-        if event.button() != Qt.LeftButton:
-            super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._left_press_pos = event.position()
+            self._left_last_x = event.position().x()
+            self._left_drag_accum = 0.0
+            self._left_dragging = False
+            event.accept()
             return
-        position = self._hit_test(event.position())
-        if position < 0:
+        if event.button() == Qt.RightButton and self.is_back_zoomed():
+            self._right_press_pos = event.position()
+            self._right_last_pos = event.position()
+            self._right_dragging = False
+            self._suppress_context_menu = False
+            event.accept()
             return
-        if position == self.index:
-            if self.is_flipped():
-                self.toggle_back_zoom()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        if event.button() == Qt.RightButton and self._right_press_pos is not None:
+            was_drag = self._right_dragging
+            self._right_press_pos = None
+            self._right_last_pos = None
+            self._right_dragging = False
+            self.setCursor(Qt.ArrowCursor)
+            if was_drag:
+                self._suppress_context_menu = True
                 event.accept()
                 return
-            game = self.current_game()
-            if game is not None:
-                self.activated.emit(game)
-        else:
-            self.step(position - self.index)
-        event.accept()
+        if event.button() == Qt.LeftButton and self._left_press_pos is not None:
+            was_drag = self._left_dragging
+            self._left_press_pos = None
+            self._left_dragging = False
+            self._left_drag_accum = 0.0
+            if was_drag:
+                position = self._hit_test(event.position())
+                self.setCursor(Qt.PointingHandCursor if position >= 0 else Qt.ArrowCursor)
+                event.accept()
+                return
+            position = self._hit_test(event.position())
+            if position == self.index and position >= 0:
+                self.toggle_flip()
+            elif position >= 0:
+                self.step(position - self.index)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - API de Qt
         event.accept()
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - API de Qt
+        if self._right_dragging or self._suppress_context_menu:
+            self._suppress_context_menu = False
+            event.accept()
+            return
         position = self._hit_test(QPointF(event.pos()))
         if position >= 0 and position != self.index:
             self.step(position - self.index)
@@ -1451,9 +1536,12 @@ class ShelfCanvas(QWidget):
         return self._back_zoom_target >= 0.5
 
     def set_back_zoom(self, zoomed: bool) -> None:
-        target = 1.0 if (zoomed and self.is_flipped()) else 0.0
+        target = 1.0 if zoomed else 0.0
         changed = abs(target - self._back_zoom_target) > 0.01
         self._back_zoom_target = target
+        if target < 0.5:
+            self._inspect_yaw = 0.0
+            self._inspect_pitch = 0.0
         self._back_zoom_anim.stop()
         if is_reduced_motion():
             self._back_zoom = target
@@ -1472,14 +1560,19 @@ class ShelfCanvas(QWidget):
         self._flip_anim.stop()
         self._back_zoom_anim.stop()
         was_flipped = self._flip_target >= 0.5 or self._flip_angle != 0.0
+        was_zoomed = self._back_zoom_target >= 0.5 or self._back_zoom != 0.0
         self._flip_target = 0.0
         self._flip_angle = 0.0
         self._back_zoom_target = 0.0
         self._back_zoom = 0.0
+        self._inspect_yaw = 0.0
+        self._inspect_pitch = 0.0
         self._back_scroll = 0.0
         self._back_max_scroll = 0.0
         if was_flipped:
             self.flipped_changed.emit(False)
+        if was_zoomed:
+            self.back_zoom_changed.emit(False)
 
     def toggle_flip(self) -> None:
         if not self.items:
@@ -1489,7 +1582,6 @@ class ShelfCanvas(QWidget):
         if target < 0.5:
             self._back_scroll = 0.0
             self._back_max_scroll = 0.0
-            self.set_back_zoom(False)
         play_ui_sound("flip")
         self._flip_anim.stop()
         if is_reduced_motion():
@@ -1846,17 +1938,22 @@ class ShelfCanvas(QWidget):
         return pix
 
     def _refl_pixmap_for(
-        self, item: ShelfItem, base_w: int, base_h: int
+        self, item: ShelfItem, base_w: int, base_h: int, show_back: bool = False
     ) -> QPixmap:
-        """Build a flipped, softly alpha-faded copy of the complete 3D box front (zero hard bottom cut)."""
-        front = self._front_pixmap_for(item, base_w, base_h)
-        refl_h = max(32, int(round(front.height() * 0.68)))
-        key = (*item.front_cache_key, refl_h)
+        """Build a flipped, softly alpha-faded copy of the complete 3D box front/back."""
+        face = (
+            self._back_pixmap_for(item, base_w, base_h)
+            if show_back
+            else self._front_pixmap_for(item, base_w, base_h)
+        )
+        face_key = item.back_cache_key if show_back else item.front_cache_key
+        refl_h = max(32, int(round(face.height() * 0.68)))
+        key = (show_back, *face_key, refl_h)
         if item.refl_cache is not None and item.refl_cache_key == key:
             return item.refl_cache
 
-        flipped_full = front.transformed(QTransform().scale(1.0, -1.0))
-        cropped = flipped_full.copy(0, 0, front.width(), min(refl_h, flipped_full.height()))
+        flipped_full = face.transformed(QTransform().scale(1.0, -1.0))
+        cropped = flipped_full.copy(0, 0, face.width(), min(refl_h, flipped_full.height()))
         frost_blur = cropped.scaled(
             max(8, int(round(cropped.width() * 0.22))),
             max(8, int(round(cropped.height() * 0.22))),
@@ -1864,7 +1961,7 @@ class ShelfCanvas(QWidget):
             Qt.SmoothTransformation,
         ).scaled(cropped.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 
-        out = QPixmap(front.width(), refl_h)
+        out = QPixmap(face.width(), refl_h)
         out.fill(Qt.transparent)
         p = QPainter(out)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
@@ -1889,6 +1986,96 @@ class ShelfCanvas(QWidget):
         item.refl_cache_key = key
         return out
 
+    def _render_gl_case(
+        self,
+        item: ShelfItem,
+        geometry: dict,
+        center_x: float,
+        center_y: float,
+        cover_w: float,
+        cover_h: float,
+        selected: bool,
+    ) -> tuple[Optional[QPixmap], QRectF, int, int, float, float, float, float, float]:
+        target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
+        flip = self._flip_angle if selected else 0.0
+        cos_scale = max(0.06, abs(math.cos(flip * math.pi)))
+        turn = float(geometry.get("turn", 0.0))
+        if flip > 0.005:
+            turn = max(-1.0, min(1.0, turn + math.sin(flip * math.pi) * 0.85))
+        tilt_amount = (1.0 - geometry["focus"]) * 0.85 + 0.12
+        hover_x = self._tilt_x * geometry["focus"] if selected else 0.0
+        hover_y = self._tilt_y * geometry["focus"] if selected else 0.0
+        zoom = self._back_zoom if selected else 0.0
+        inspect_yaw = self._inspect_yaw * zoom if selected else 0.0
+        inspect_pitch = self._inspect_pitch * zoom if selected else 0.0
+        if zoom > 0.005:
+            scale_boost = 1.0 + 0.44 * zoom
+            target = QRectF(
+                target.center().x() - (target.width() * scale_boost) / 2.0,
+                target.center().y() - (target.height() * scale_boost) / 2.0 - cover_h * 0.04 * zoom,
+                target.width() * scale_boost,
+                target.height() * scale_boost,
+            )
+            turn = turn * (1.0 - zoom)
+            tilt_amount = tilt_amount * (1.0 - zoom)
+            hover_x = hover_x * (1.0 - zoom)
+            hover_y = hover_y * (1.0 - zoom)
+
+        renderer = get_case_3d_renderer()
+        base_w = max(48, int(round(cover_w * item.profile.w_scale)))
+        base_h = max(48, int(round(cover_h * item.profile.h_scale)))
+        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
+        out_w = max(64, int(round(target.width() * 1.42)))
+        out_h = max(64, int(round(target.height() * 1.32)))
+        ry = -(turn * 34.0) + (flip * 180.0) + hover_x * 18.0 + inspect_yaw
+        rx = -hover_y * 14.0 + inspect_pitch
+        scroll_k = int(round(self._back_scroll)) if selected else 0
+        gl_key = (
+            base_w,
+            base_h,
+            out_w,
+            out_h,
+            round(rx, 1),
+            round(ry, 1),
+            round(dpr, 2),
+            item.game.title,
+            item.game.favorite,
+            item.game.state,
+            item.cover_path,
+            (item.game.back_cover or "").strip(),
+            item.game.description,
+            item.game.genre,
+            item.game.year,
+            item.game.playtime_seconds,
+            item.game.sessions,
+            tuple(item.game.tags),
+            tuple(item.game.collections),
+            item.profile.key,
+            active_style().key,
+            scroll_k,
+        )
+        if item.gl_cache is not None and item.gl_cache_key == gl_key:
+            gl_pix: Optional[QPixmap] = item.gl_cache
+        else:
+            front_pix = self._front_pixmap_for(item, base_w, base_h)
+            back_pix = self._back_pixmap_for(item, base_w, base_h)
+            gl_pix = renderer.render_case(
+                item.profile,
+                front_pix,
+                back_pix,
+                target.width(),
+                target.height(),
+                out_w,
+                out_h,
+                dpr,
+                rx,
+                ry,
+            )
+            if gl_pix is not None and not gl_pix.isNull():
+                item.gl_cache = gl_pix
+                item.gl_cache_key = gl_key
+        return gl_pix, target, out_w, out_h, cos_scale, turn, tilt_amount, hover_x, hover_y
+
     def _paint_reflection(
         self,
         painter: QPainter,
@@ -1905,28 +2092,49 @@ class ShelfCanvas(QWidget):
         strength = max(0.50, 0.68 + 0.32 * focus) * (1.0 - min(0.45, dist * 0.14))
         if strength <= 0.08:
             return
-        target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
-        turn = float(geometry.get("turn", 0.0))
-        tilt_amount = (1.0 - focus) * 0.85 + 0.12
-        hover_x = self._tilt_x * focus if selected else 0.0
-        hover_y = self._tilt_y * focus if selected else 0.0
-        # Compute zoom-adjusted center & scale for close-up back cover reading
-        zoom = self._back_zoom if selected else 0.0
-        if zoom > 0.005:
-            scale_boost = 1.0 + 0.44 * zoom
-            target = QRectF(
-                target.center().x() - (target.width() * scale_boost) / 2.0,
-                target.center().y() - (target.height() * scale_boost) / 2.0 - cover_h * 0.04 * zoom,
-                target.width() * scale_boost,
-                target.height() * scale_boost,
+        gl_pix, target, out_w, out_h, _cos_scale, turn, tilt_amount, hover_x, hover_y = (
+            self._render_gl_case(item, geometry, center_x, center_y, cover_w, cover_h, selected)
+        )
+        if gl_pix is not None and not gl_pix.isNull():
+            # Mirror the actual 3D-rendered case so silhouette & rotation match 1:1
+            mirrored = QPixmap(gl_pix.size())
+            mirrored.fill(Qt.transparent)
+            mp = QPainter(mirrored)
+            mp.setRenderHint(QPainter.SmoothPixmapTransform)
+            mp.translate(0.0, float(gl_pix.height()))
+            mp.scale(1.0, -1.0)
+            mp.drawPixmap(
+                QRectF(0.0, 0.0, float(gl_pix.width()), float(gl_pix.height())),
+                gl_pix,
+                QRectF(gl_pix.rect()),
             )
-            turn = turn * (1.0 - zoom)
-            tilt_amount = tilt_amount * (1.0 - zoom)
-            hover_x = hover_x * (1.0 - zoom)
-            hover_y = hover_y * (1.0 - zoom)
+            mp.resetTransform()
+            mp.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            fade_grad = QLinearGradient(0.0, 0.0, 0.0, float(gl_pix.height()))
+            fade_grad.setColorAt(0.0, QColor(0, 0, 0, 225))
+            fade_grad.setColorAt(0.42, QColor(0, 0, 0, 95))
+            fade_grad.setColorAt(0.82, QColor(0, 0, 0, 14))
+            fade_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+            mp.fillRect(mirrored.rect(), QBrush(fade_grad))
+            mp.end()
+
+            pad_y = (out_h - target.height()) * 0.5
+            gap = max(4.0, target.height() * 0.025)
+            refl_y = target.bottom() + gap - pad_y
+            draw_rect = QRectF(
+                target.center().x() - out_w / 2.0,
+                refl_y,
+                float(out_w),
+                float(out_h),
+            )
+            painter.save()
+            painter.setOpacity((0.50 if selected else 0.40) * strength)
+            painter.drawPixmap(draw_rect, mirrored, QRectF(mirrored.rect()))
+            painter.restore()
+            return
 
         quad = _perspective_quad(
-            target.width(), target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
+            target.width() * _cos_scale, target.height(), tilt_amount, turn, hover_x=hover_x, hover_y=hover_y
         )
 
         max_depth = CASE_DEPTH * (target.width() / CASE_W) * 0.55 * item.profile.depth_scale
@@ -1958,7 +2166,8 @@ class ShelfCanvas(QWidget):
 
         base_w = max(48, int(round(cover_w * item.profile.w_scale)))
         base_h = max(48, int(round(cover_h * item.profile.h_scale)))
-        refl_pix = self._refl_pixmap_for(item, base_w, base_h)
+        show_back = (self._flip_angle if selected else 0.0) >= 0.5
+        refl_pix = self._refl_pixmap_for(item, base_w, base_h, show_back=show_back)
 
         painter.save()
         painter.setTransform(trans, False)
@@ -2016,77 +2225,9 @@ class ShelfCanvas(QWidget):
         cover_h: float,
         selected: bool,
     ) -> None:
-        target = self._case_rect(item, geometry, center_x, center_y, cover_w, cover_h)
-        flip = self._flip_angle if selected else 0.0
-        cos_scale = max(0.06, abs(math.cos(flip * math.pi)))
-        turn = float(geometry.get("turn", 0.0))
-        if flip > 0.005:
-            turn = max(-1.0, min(1.0, turn + math.sin(flip * math.pi) * 0.85))
-        tilt_amount = (1.0 - geometry["focus"]) * 0.85 + 0.12
-        hover_x = self._tilt_x * geometry["focus"] if selected else 0.0
-        hover_y = self._tilt_y * geometry["focus"] if selected else 0.0
-
-        # Compute zoom-adjusted center & scale for close-up back cover reading
-        zoom = self._back_zoom if selected else 0.0
-        if zoom > 0.005:
-            scale_boost = 1.0 + 0.44 * zoom
-            target = QRectF(
-                target.center().x() - (target.width() * scale_boost) / 2.0,
-                target.center().y() - (target.height() * scale_boost) / 2.0 - cover_h * 0.04 * zoom,
-                target.width() * scale_boost,
-                target.height() * scale_boost,
-            )
-            turn = turn * (1.0 - zoom)
-            tilt_amount = tilt_amount * (1.0 - zoom)
-            hover_x = hover_x * (1.0 - zoom)
-            hover_y = hover_y * (1.0 - zoom)
-
-        renderer = get_case_3d_renderer()
-        base_w = max(48, int(round(cover_w * item.profile.w_scale)))
-        base_h = max(48, int(round(cover_h * item.profile.h_scale)))
-        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
-        out_w = max(64, int(round(target.width() * 1.42)))
-        out_h = max(64, int(round(target.height() * 1.32)))
-        ry = -(turn * 34.0) + (flip * 180.0) + hover_x * 18.0
-        rx = -hover_y * 14.0
-        scroll_k = int(round(self._back_scroll)) if selected else 0
-        gl_key = (
-            base_w,
-            base_h,
-            out_w,
-            out_h,
-            round(rx, 1),
-            round(ry, 1),
-            round(dpr, 2),
-            item.game.title,
-            item.game.favorite,
-            item.game.state,
-            item.cover_path,
-            item.game.description,
-            item.profile.key,
-            active_style().key,
-            scroll_k,
+        gl_pix, target, out_w, out_h, cos_scale, turn, tilt_amount, hover_x, hover_y = (
+            self._render_gl_case(item, geometry, center_x, center_y, cover_w, cover_h, selected)
         )
-        if item.gl_cache is not None and item.gl_cache_key == gl_key:
-            gl_pix: Optional[QPixmap] = item.gl_cache
-        else:
-            front_pix = self._front_pixmap_for(item, base_w, base_h)
-            back_pix = self._back_pixmap_for(item, base_w, base_h)
-            gl_pix = renderer.render_case(
-                item.profile,
-                front_pix,
-                back_pix,
-                target.width(),
-                target.height(),
-                out_w,
-                out_h,
-                dpr,
-                rx,
-                ry,
-            )
-            if gl_pix is not None and not gl_pix.isNull():
-                item.gl_cache = gl_pix
-                item.gl_cache_key = gl_key
 
         if gl_pix is not None and not gl_pix.isNull():
             draw_rect = QRectF(
@@ -2134,7 +2275,7 @@ class ShelfCanvas(QWidget):
             geometry["focus"],
             cover_w,
             cover_h,
-            show_back=(flip >= 0.5),
+            show_back=((self._flip_angle if selected else 0.0) >= 0.5),
         )
         painter.restore()
 

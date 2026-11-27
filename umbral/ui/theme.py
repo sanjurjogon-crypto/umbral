@@ -254,14 +254,14 @@ def qss(accent: str | None = None, style_key: str | None = None) -> str:
     QPushButton#nav {
         background: transparent;
         text-align: left;
-        padding: 11px 14px;
+        padding: 10px 10px;
         border-radius: __RADIUS__px;
         border-left: 2px solid transparent;
         color: __MUTED__;
         font-family: "__HEADING__";
-        font-size: 12px;
+        font-size: 11px;
         font-weight: __WEIGHT__;
-        letter-spacing: 1.5px;
+        letter-spacing: 0.6px;
         __TRANSFORM__
     }
     QPushButton#nav:hover {

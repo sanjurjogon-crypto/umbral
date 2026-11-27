@@ -1944,6 +1944,8 @@ _SPINE_CACHE: dict[str, Optional[QPixmap]] = {}
 
 def _detect_transparent_window(pixmap: QPixmap) -> QRectF:
     """Find the normalized [0..1] bounding box of the interior transparent cutout in a PNG overlay."""
+    if pixmap.isNull():
+        return QRectF(0.0, 0.0, 1.0, 1.0)
     size = 128
     probe = pixmap.toImage().scaled(size, size, Qt.IgnoreAspectRatio, Qt.FastTransformation)
     cx, cy = size // 2, size // 2

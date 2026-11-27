@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         root = Backdrop()
         self.backdrop = root
         root.setObjectName("root")
-        self._sidebar_expanded_width = 238
+        self._sidebar_expanded_width = 270
         self._sidebar_width = self._sidebar_expanded_width
         self._sidebar_collapsed = False
         self._sidebar_anim = QVariantAnimation(self)
@@ -339,6 +339,15 @@ class MainWindow(QMainWindow):
         self.fullscreen_button.clicked.connect(self.toggle_fullscreen_mode)
         top.addWidget(self.fullscreen_button)
 
+        self._fs_exit_btn = UmbralButton("", icon_name="fullscreen", icon_size=15, parent=root)
+        self._fs_exit_btn.setObjectName("sidebarToggle")
+        self._fs_exit_btn.setFixedSize(36, 36)
+        self._fs_exit_btn.setFocusPolicy(Qt.NoFocus)
+        self._fs_exit_btn.setCursor(Qt.PointingHandCursor)
+        self._fs_exit_btn.setToolTip("Salir de pantalla completa (F11)")
+        self._fs_exit_btn.clicked.connect(self.toggle_fullscreen_mode)
+        self._fs_exit_btn.hide()
+
         self.home = HomePage(self.store)
         self.library = LibraryPage(self.store)
         self.stats = StatsPage(self.store)
@@ -397,6 +406,9 @@ class MainWindow(QMainWindow):
         self._manual_covers_scan = False
         if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
             self._startup_overlay = StartupOverlay(self)
+            self._startup_overlay.destroyed.connect(
+                lambda _obj=None: setattr(self, "_startup_overlay", None)
+            )
             self._startup_overlay.start()
         self._layout_chrome()
 
@@ -458,6 +470,11 @@ class MainWindow(QMainWindow):
         )
         self.sidebar.raise_()
         self.topbar.raise_()
+        if hasattr(self, "_fs_exit_btn"):
+            self._fs_exit_btn.setVisible(self._fullscreen_mode)
+            if self._fullscreen_mode:
+                self._fs_exit_btn.setGeometry(max(12, width - 52), 16, 36, 36)
+                self._fs_exit_btn.raise_()
         if hasattr(self, "_gamepad_bar") and self._gamepad_bar.isVisible():
             self._gamepad_bar.adjustSize()
             bar_w = min(width - 40, self._gamepad_bar.sizeHint().width())
@@ -1703,6 +1720,14 @@ class MainWindow(QMainWindow):
         self._refresh_all()
         self.toast.show_message("Color de acento actualizado.")
 
+    def _realign_sidebar_indicators(self) -> None:
+        if hasattr(self, "_side_content") and self._side_content.layout() is not None:
+            self._side_content.layout().activate()
+        if hasattr(self, "_systems_container") and self._systems_container.layout() is not None:
+            self._systems_container.layout().activate()
+        self._sync_nav_indicator(animate=False)
+        self._sync_sys_indicator(animate=False)
+
     def _set_style(self, key: str) -> None:
         set_active(key)
         self.store.settings["style"] = key
@@ -1714,6 +1739,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._apply_titlebar()
         self._refresh_all()
+        QTimer.singleShot(0, self._realign_sidebar_indicators)
         self.toast.show_message(f"Estilo {active().name} aplicado.")
 
     def _set_halo(self, enabled: bool) -> None:
@@ -2002,6 +2028,9 @@ class MainWindow(QMainWindow):
             self.toggle_fullscreen_mode()
 
     def toggle_fullscreen_mode(self) -> None:
+        if hasattr(self, "_sidebar_anim") and self._sidebar_anim.state() == QVariantAnimation.Running:
+            self._sidebar_anim.stop()
+            self.library.canvas.set_chrome_animating(False)
         self._fullscreen_mode = not self._fullscreen_mode
         if self._fullscreen_mode:
             self._pre_fullscreen_collapsed = self._sidebar_collapsed
