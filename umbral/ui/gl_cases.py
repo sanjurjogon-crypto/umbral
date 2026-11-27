@@ -402,6 +402,8 @@ class Case3DRenderer:
         profile: CaseProfile,
         front_pix: QPixmap,
         back_pix: QPixmap,
+        target_w: float,
+        target_h: float,
         out_w: int,
         out_h: int,
         dpr: float,
@@ -439,21 +441,25 @@ class Case3DRenderer:
             if right_img is None:
                 right_img = _procedural_right_image(top_cap)
 
-            aspect_box = profile.w_scale / max(0.2, profile.h_scale)
-            box_h = 1.18
+            aspect_box = max(0.25, float(target_w) / max(1.0, float(target_h)))
+            box_h = 1.0
             box_w = box_h * aspect_box
-            box_d = 0.13 * max(0.65, min(1.25, profile.depth_scale))
+            box_d = 0.115 * max(0.65, min(1.25, profile.depth_scale))
             corner_r = (
                 0.008
                 if profile.shell_kind in {"cardboard", "jewel_clear"} or profile.radius <= 3.5
-                else 0.036
+                else 0.032
             )
             mesh = _build_rounded_case_mesh(
                 box_w, box_h, box_d, corner_radius=corner_r, bevel=0.006, front_uv=uv, back_uv=uv
             )
 
-            proj = _mat4_perspective(26.0, pw / max(1, ph), 0.1, 30.0)
-            model = _mat4_translate(0.0, 0.0, -3.55) @ _mat4_rotate_x(rx) @ _mat4_rotate_y(ry)
+            fov_deg = 26.0
+            proj = _mat4_perspective(fov_deg, pw / max(1, ph), 0.1, 30.0)
+            # Match front face height 1:1 with target_h inside out_h so case sits flush on the shelf floor
+            view_h = box_h * (float(out_h) / max(1.0, float(target_h)))
+            cam_z = (view_h * 0.5) / math.tan(math.radians(fov_deg * 0.5)) + box_d * 0.5
+            model = _mat4_translate(0.0, 0.0, -cam_z) @ _mat4_rotate_x(rx) @ _mat4_rotate_y(ry)
             mvp = proj @ model
             normal_mat = model[:3, :3]
 
