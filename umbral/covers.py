@@ -7,12 +7,13 @@ import re
 import shutil
 import struct
 import threading
+import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -348,18 +349,37 @@ def _cache_valid(entry: dict) -> bool:
     return datetime.now(timezone.utc) - checked < CACHE_TTL
 
 
+def _read_url_with_retry(request: Request, timeout: float, limit: int) -> bytes:
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            with urlopen(request, timeout=timeout, context=ssl_context()) as response:
+                return response.read(limit)
+        except HTTPError as exc:
+            last_exc = exc
+            if attempt == 0 and exc.code in (429, 500, 502, 503, 504):
+                time.sleep(0.35)
+                continue
+            raise
+        except (URLError, TimeoutError, OSError) as exc:
+            last_exc = exc
+            if attempt == 0:
+                time.sleep(0.35)
+                continue
+            raise
+    raise last_exc  # pragma: no cover
+
+
 def _request_json(url: str, limit: int = 8_000_000) -> dict:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urlopen(request, timeout=20, context=ssl_context()) as response:
-        payload = response.read(limit)
+    payload = _read_url_with_retry(request, timeout=20, limit=limit)
     data = json.loads(payload.decode("utf-8", errors="replace"))
     return data if isinstance(data, dict) else {}
 
 
 def _request_bytes(url: str) -> bytes:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
-    with urlopen(request, timeout=25, context=ssl_context()) as response:
-        return response.read(4_000_000)
+    return _read_url_with_retry(request, timeout=25, limit=4_000_000)
 
 
 def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
@@ -559,8 +579,8 @@ def _resolve_online(game: Game) -> dict | None:
     return None
 
 
-UPSCALE_MIN_WIDTH = 600
-UPSCALE_MIN_HEIGHT = 800
+UPSCALE_MIN_WIDTH = 750
+UPSCALE_MIN_HEIGHT = 1000
 UPSCALE_MAX_EDGE = 1400
 
 

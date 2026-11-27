@@ -86,11 +86,11 @@ def test_upscale_cover_bytes_upscales_low_res_and_keeps_hd(tmp_path: Path) -> No
     out_file = tmp_path / "up.jpg"
     out_file.write_bytes(upscaled)
     new_w, new_h = image_size(out_file)
-    assert new_w >= 600
-    assert new_h >= 800
+    assert new_w >= 750
+    assert new_h >= 1000
 
     hd_buf = io.BytesIO()
-    Image.new("RGB", (600, 900), (30, 140, 90)).save(hd_buf, format="JPEG", quality=90)
+    Image.new("RGB", (800, 1200), (30, 140, 90)).save(hd_buf, format="JPEG", quality=90)
     hd_raw = hd_buf.getvalue()
     assert upscale_cover_bytes(hd_raw) == hd_raw
 

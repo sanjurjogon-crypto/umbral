@@ -150,7 +150,7 @@ def _cached_cover_data(
         return None, "", QColor(fallback)
     dom = _dominant_color(pixmap, fallback)
     _RAW_COVER_CACHE[key] = (mtime, pixmap, dom)
-    if len(_RAW_COVER_CACHE) > 120:
+    if len(_RAW_COVER_CACHE) > 48:
         _RAW_COVER_CACHE.popitem(last=False)
     return pixmap, key, dom
 
@@ -1324,6 +1324,7 @@ class ShelfCanvas(QWidget):
     ) -> QPixmap:
         """Render and cache the complete 3D box front design (title, art, console band, badge, border)."""
         style = active_style()
+        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
         key = (
             max(48, base_w),
             max(48, base_h),
@@ -1333,13 +1334,15 @@ class ShelfCanvas(QWidget):
             item.cover_path,
             item.profile.key,
             style.key,
+            round(dpr, 2),
         )
         if item.front_cache is not None and item.front_cache_key == key:
             return item.front_cache
 
         width = float(key[0])
         height = float(key[1])
-        pix = QPixmap(key[0], key[1])
+        pix = QPixmap(max(48, int(round(width * dpr))), max(48, int(round(height * dpr))))
+        pix.setDevicePixelRatio(dpr)
         pix.fill(Qt.transparent)
         buf = QPainter(pix)
         buf.setRenderHint(QPainter.Antialiasing)
@@ -1505,6 +1508,7 @@ class ShelfCanvas(QWidget):
         back_path = (game.back_cover or "").strip()
         is_current = item is self._current_item()
         scroll_px = int(round(self._back_scroll)) if is_current else 0
+        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
         key = (
             base_w,
             base_h,
@@ -1521,11 +1525,13 @@ class ShelfCanvas(QWidget):
             tuple(game.collections),
             style.key,
             scroll_px,
+            round(dpr, 2),
         )
         if item.back_cache is not None and item.back_cache_key == key:
             return item.back_cache
 
-        pix = QPixmap(base_w, base_h)
+        pix = QPixmap(max(48, int(round(base_w * dpr))), max(48, int(round(base_h * dpr))))
+        pix.setDevicePixelRatio(dpr)
         pix.fill(Qt.transparent)
         buf = QPainter(pix)
         buf.setRenderHint(QPainter.Antialiasing, True)

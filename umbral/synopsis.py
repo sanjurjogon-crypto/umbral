@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Iterable
 from urllib.error import URLError
@@ -387,20 +388,32 @@ class SynopsisWorker(QThread):
         self.requestInterruption()
 
     def run(self) -> None:
+        if not self._games:
+            return
         batch: list[tuple[str, str]] = []
-        for idx, game in enumerate(self._games):
-            if self._stop.is_set() or self.isInterruptionRequested():
-                break
-            try:
-                text = fetch_synopsis(game)
-            except Exception:  # noqa: BLE001
-                text = ""
-            if text or (game.description or "").strip():
-                batch.append((game.id, text))
-                # Emit early for the first game and every 3 games thereafter so synopses persist incrementally
-                if idx == 0 or len(batch) >= 3:
-                    if not self._stop.is_set() and not self.isInterruptionRequested():
-                        self.updated.emit(list(batch))
-                    batch.clear()
-        if batch and not self._stop.is_set() and not self.isInterruptionRequested():
-            self.updated.emit(batch)
+        emitted_first = False
+        pool = ThreadPoolExecutor(max_workers=min(4, len(self._games)))
+        try:
+            future_map = {pool.submit(fetch_synopsis, game): game for game in self._games}
+            pending = set(future_map.keys())
+            while pending:
+                if self._stop.is_set() or self.isInterruptionRequested():
+                    break
+                done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                for fut in done:
+                    game = future_map[fut]
+                    try:
+                        text = fut.result()
+                    except Exception:  # noqa: BLE001
+                        text = ""
+                    if text or (game.description or "").strip():
+                        batch.append((game.id, text))
+                        if not emitted_first or len(batch) >= 3:
+                            emitted_first = True
+                            if not self._stop.is_set() and not self.isInterruptionRequested():
+                                self.updated.emit(list(batch))
+                            batch.clear()
+            if batch and not self._stop.is_set() and not self.isInterruptionRequested():
+                self.updated.emit(batch)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
