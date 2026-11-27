@@ -7,8 +7,15 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .models import Game, now_iso
-from .paths import library_file, path_key as _path_key, settings_file
+from .paths import (
+    covers_dir,
+    library_file,
+    path_key as _path_key,
+    settings_file,
+    usage_file,
+)
 from .relink import is_installed
 from .rom_rules import is_ambiguous, plausible
 
@@ -115,6 +122,25 @@ class Store:
         self.settings.setdefault("hidden_paths", [])
         self.games: list[Game] = []
         self._load_library()
+        self._record_usage_session()
+
+    def _record_usage_session(self) -> None:
+        try:
+            path = usage_file()
+            data, _ = _read_json(path, {})
+            if not isinstance(data, dict):
+                data = {}
+            versions = list(data.get("versions_used", []))
+            if __version__ not in versions:
+                versions.append(__version__)
+            data["versions_used"] = versions
+            data["last_version"] = __version__
+            data["last_opened_at"] = now_iso()
+            data["app_launches"] = int(data.get("app_launches", 0) or 0) + 1
+            data["total_games"] = len(self.games)
+            _write_json(path, data)
+        except OSError:
+            pass
 
     def _load_library(self) -> None:
         raw, library_backup = _read_json(library_file(), {"games": []})
@@ -136,6 +162,8 @@ class Store:
                 game.system = "GOG"
                 game.system_key = "gog"
                 game.subtitle = "GOG"
+            elif game.source == "standalone" and game.subtitle == "PC · Steam":
+                game.subtitle = "PC"
             elif (
                 game.source == "manual"
                 and game.system_key == "otros"
@@ -151,7 +179,11 @@ class Store:
                 game.emulator = "Dusklight"
                 changed = True
             if game.cover and not Path(game.cover).is_file():
-                game.cover = ""
+                migrated_cover = covers_dir() / Path(game.cover).name
+                if migrated_cover.is_file():
+                    game.cover = str(migrated_cover)
+                else:
+                    game.cover = ""
                 changed = True
         kept: list[Game] = []
         removed = 0
