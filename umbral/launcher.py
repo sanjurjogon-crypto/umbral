@@ -155,14 +155,23 @@ class ProcessWatcher(QThread):
         self.game_id = game_id
         self.started_at = time.monotonic()
         self._job = create_job_for_process(self._process)
+        self._stop = threading.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
 
     def elapsed_seconds(self) -> int:
         return max(1, int(time.monotonic() - self.started_at))
 
     def run(self) -> None:
-        code = self._process.wait()
-        wait_for_job(self._job)
-        self.finished_ok.emit(int(code), self.elapsed_seconds(), self._log_path)
+        while not self._stop.is_set():
+            code = self._process.poll()
+            if code is not None:
+                wait_for_job(self._job)
+                if not self._stop.is_set():
+                    self.finished_ok.emit(int(code), self.elapsed_seconds(), self._log_path)
+                return
+            self._stop.wait(0.2)
 
 
 def steam_app_id(game: Game) -> str:

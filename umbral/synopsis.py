@@ -28,7 +28,7 @@ from .paths import data_dir
 
 _WIKI_USER_AGENT = "UmbralLauncher/8.58 (https://github.com/sanjurjogon-crypto/umbral)"
 _CACHE_LOCK = threading.Lock()
-_CACHE_VERSION = 5
+_CACHE_VERSION = 6
 
 _BOILERPLATE_PREFIXES = (
     "juego de steam instalado en ",
@@ -160,7 +160,10 @@ def _steam_synopsis(game: Game) -> str:
             "https://store.steampowered.com/api/storesearch/"
             f"?term={quote(clean_title, safe='')}&cc=ES&l=spanish"
         )
-        data = _request_json(search_url)
+        try:
+            data = _request_json(search_url)
+        except (URLError, TimeoutError, OSError, ValueError):
+            return ""
         items = data.get("items") if isinstance(data, dict) else None
         if isinstance(items, list) and items:
             first = items[0]
@@ -177,7 +180,10 @@ def _steam_synopsis(game: Game) -> str:
     details_url = (
         f"https://store.steampowered.com/api/appdetails?appids={app_id}&l=spanish"
     )
-    payload = _request_json(details_url)
+    try:
+        payload = _request_json(details_url)
+    except (URLError, TimeoutError, OSError, ValueError):
+        return ""
     entry = payload.get(str(app_id)) if isinstance(payload, dict) else None
     if not isinstance(entry, dict) or not entry.get("success"):
         return ""
@@ -358,8 +364,42 @@ def _wikipedia_synopsis(title: str, lang: str = "es") -> str:
     return ""
 
 
+def _looks_spanish(text: str) -> bool:
+    low = f" {(text or '').lower()} "
+    if any(ch in low for ch in "ñ¿¡"):
+        return True
+    markers = (" el ", " la ", " los ", " las ", " de ", " del ", " que ", " en ", " un ", " una ", " para ", " con ")
+    hits = sum(1 for m in markers if m in low)
+    if hits >= 3:
+        return True
+    return hits >= 1 and any(ch in low for ch in "áéíóúü")
+
+
+def _translate_to_spanish(text: str) -> str:
+    clean = (text or "").strip()
+    if not clean or _looks_spanish(clean):
+        return clean
+    url = (
+        "https://translate.googleapis.com/translate_a/single"
+        f"?client=gtx&sl=auto&tl=es&dt=t&q={quote(clean, safe='')}"
+    )
+    req = Request(url, headers={"User-Agent": _WIKI_USER_AGENT})
+    try:
+        with urlopen(req, timeout=6, context=ssl_context()) as response:
+            payload = json.loads(response.read(200_000).decode("utf-8", errors="replace"))
+        if isinstance(payload, list) and payload and isinstance(payload[0], list):
+            translated = "".join(
+                str(part[0]) for part in payload[0] if isinstance(part, list) and part and part[0]
+            ).strip()
+            if translated:
+                return _clean_text(translated, max_chars=280)
+    except (URLError, TimeoutError, OSError, ValueError):
+        pass
+    return clean
+
+
 def fetch_synopsis(game: Game) -> str:
-    """Fetch a clean synopsis (plot/premise/gameplay) from cache, Steam, Wikipedia ES, GameDB, or Wikipedia EN."""
+    """Fetch a clean synopsis (plot/premise/gameplay) in Spanish from cache, Steam, Wikipedia ES, GameDB, or Wikipedia EN."""
     cached = cached_synopsis(game)
     if cached:
         return cached
@@ -371,6 +411,7 @@ def fetch_synopsis(game: Game) -> str:
     if not text:
         text = _wikipedia_synopsis(game.title, lang="en")
     if text:
+        text = _translate_to_spanish(text)
         store_cached_synopsis(game, text)
     return text
 

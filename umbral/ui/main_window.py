@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -247,7 +247,7 @@ class MainWindow(QMainWindow):
         new_col_btn.setFocusPolicy(Qt.NoFocus)
         new_col_btn.setCursor(Qt.PointingHandCursor)
         new_col_btn.setToolTip("Crear colección")
-        new_col_btn.clicked.connect(self._create_collection_prompt)
+        new_col_btn.clicked.connect(lambda _checked=False: self._create_collection_prompt())
         col_header.addWidget(new_col_btn)
         collections_layout.addLayout(col_header)
         self.collections_box = QVBoxLayout()
@@ -363,6 +363,7 @@ class MainWindow(QMainWindow):
             page.context_requested.connect(self._show_game_menu)
             page.add_requested.connect(self._add_game)
         self.library.backdrop_change_requested.connect(self._pick_game_backdrop)
+        self.home.delete_many_requested.connect(self._delete_games_batch)
         self.health.rescan_requested.connect(self._rescan)
         self.health.relink_requested.connect(self._relink_game)
         self.health.add_folder_requested.connect(self._add_scan_folder)
@@ -641,7 +642,7 @@ class MainWindow(QMainWindow):
         changed_ids = set()
         for game_id, text in changes:
             target = self.store.get(game_id)
-            if target is not None and target.description != text:
+            if target is not None and text and target.description != text:
                 target.description = text
                 changed_ids.add(game_id)
         if not changed_ids:
@@ -1054,7 +1055,7 @@ class MainWindow(QMainWindow):
         if not clean:
             return
         self.store.add_collection(clean)
-        if game is not None and clean not in game.collections:
+        if isinstance(game, Game) and clean not in game.collections:
             game.collections.append(clean)
             self.store.save_library()
         self._refresh_all()
@@ -1233,6 +1234,17 @@ class MainWindow(QMainWindow):
         watcher.finished.connect(lambda worker=watcher: self._cleanup_watcher(worker))
         watcher.start()
         self.watchers.append(watcher)
+        if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
+            QTimer.singleShot(
+                1800,
+                lambda p=process, s=game.source: self._close_after_launch(p, s),
+            )
+
+    def _close_after_launch(self, process, source: str) -> None:
+        if self._closing:
+            return
+        if source == "steam" or (process is not None and process.poll() is None):
+            self.close()
 
     def _cleanup_watcher(self, watcher: ProcessWatcher) -> None:
         if watcher in self.watchers:
@@ -1324,6 +1336,25 @@ class MainWindow(QMainWindow):
         self.store.save_library()
         self._refresh_all()
         self.toast.show_message(f"«{game.title}» quitado de Umbral.")
+
+    def _delete_games_batch(self, games: list[Game]) -> None:
+        if not games:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Eliminar juegos seleccionados",
+            f"¿Quitar {len(games)} juego(s) de tu biblioteca de Umbral?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        for game in games:
+            self.store.hide(game.id)
+        self.home._selected_ids.clear()
+        self.store.save_library()
+        self._refresh_all()
+        self.toast.show_message(f"{len(games)} juego(s) quitado(s) de Umbral.")
 
     def _save_and_refresh(self) -> None:
         self.store.save_library()
@@ -1552,6 +1583,10 @@ class MainWindow(QMainWindow):
         self._show_error("La búsqueda no terminó", message)
 
     def _clear_scan_worker(self) -> None:
+        sender = self.sender()
+        if sender is not None and sender is not self.scan_worker:
+            sender.deleteLater()
+            return
         if hasattr(self, "scan_button"):
             self.scan_button.set_loading(False)
         if self.scan_worker is not None:
@@ -1579,12 +1614,30 @@ class MainWindow(QMainWindow):
             _path_key(str(item))
             for item in self.store.settings.get("hidden_paths", [])
         }
-        fresh = [
-            candidate
-            for candidate in candidates
-            if _path_key(str(candidate.executable)) not in known
-            and _path_key(str(candidate.executable)) not in hidden_paths
-        ]
+        existing_title_sys = {
+            (re.sub(r"[^a-z0-9]+", "", (g.title or "").lower()), g.system_key)
+            for g in self.store.games
+        }
+        existing_appids = {aid for aid in (steam_app_id(g) for g in self.store.games) if aid}
+        profiles_by_key = {
+            p.key: p for p in all_profiles(self.store.settings)
+        }
+        found_emulator_keys = {
+            getattr(emu, "key", "")
+            for emu in self.emulators
+            if getattr(emu, "found", False)
+        }
+        found_emulator_systems: set[str] = set()
+        for emu in self.emulators:
+            if not getattr(emu, "found", False):
+                continue
+            sys_key = getattr(emu, "system_key", "")
+            if sys_key:
+                found_emulator_systems.add(sys_key)
+            prof = profiles_by_key.get(getattr(emu, "key", ""))
+            if prof is not None:
+                found_emulator_systems.update(prof.systems)
+
         existing_ids = {game.id for game in self.store.games}
         emulated_known = {
             _path_key(game.rom_path) for game in self.store.games if game.rom_path
@@ -1594,6 +1647,18 @@ class MainWindow(QMainWindow):
             for game in emulated
             if game.id not in existing_ids
             and game.id not in hidden
+            and "zelda3" not in (game.title or "").lower()
+            and "zelda3" not in Path(game.executable or "").name.lower()
+            and (
+                re.sub(r"[^a-z0-9]+", "", (game.title or "").lower()),
+                game.system_key,
+            )
+            not in existing_title_sys
+            and (
+                game.source in {"steam", "epic", "gog"}
+                or game.system_key in {"pc", "ports"}
+                or game.system_key in found_emulator_systems
+            )
             and (not game.rom_path or _path_key(game.rom_path) not in emulated_known)
             and (not game.rom_path or _path_key(game.rom_path) not in hidden_paths)
             and (
@@ -1602,15 +1667,54 @@ class MainWindow(QMainWindow):
                 or _path_key(game.executable) not in hidden_paths
             )
         ]
+        new_game_exes = {_path_key(g.executable) for g in new_games if g.executable}
+        new_game_titles = {
+            re.sub(r"[^a-z0-9]+", "", (g.title or "").lower()) for g in new_games
+        }
+        new_game_appids = {aid for aid in (steam_app_id(g) for g in new_games) if aid}
+        fresh = [
+            candidate
+            for candidate in candidates
+            if candidate.online_ok
+            and "zelda3" not in candidate.executable.name.lower()
+            and "zelda3" not in (candidate.display_title or "").lower()
+            and _path_key(str(candidate.executable)) not in known
+            and _path_key(str(candidate.executable)) not in hidden_paths
+            and _path_key(str(candidate.executable)) not in new_game_exes
+            and (
+                re.sub(r"[^a-z0-9]+", "", (candidate.display_title or "").lower()),
+                "pc",
+            )
+            not in existing_title_sys
+            and re.sub(r"[^a-z0-9]+", "", (candidate.display_title or "").lower())
+            not in new_game_titles
+            and (
+                not getattr(candidate, "steam_app_id", "")
+                or (
+                    str(candidate.steam_app_id) not in existing_appids
+                    and str(candidate.steam_app_id) not in new_game_appids
+                )
+            )
+        ]
         store_fresh = [game for game in new_games if game.source in {"steam", "epic", "gog"}]
         emulated_fresh = [game for game in new_games if game.source not in {"steam", "epic", "gog"}]
         downloaded_known = {_path_key(game.rom_path) for game in self.store.games if game.rom_path}
-        pending = [
-            download
-            for download in pending
-            if _path_key(str(download.path)) not in downloaded_known
-            and _path_key(str(download.path)) not in hidden_paths
-        ]
+        downloaded_known.update(
+            _path_key(game.rom_path) for game in emulated_fresh if game.rom_path
+        )
+        from ..downloads import emulator_for as _download_emulator_for
+
+        filtered_pending: list[Download] = []
+        for download in pending:
+            if _path_key(str(download.path)) in downloaded_known:
+                continue
+            if _path_key(str(download.path)) in hidden_paths:
+                continue
+            prof = _download_emulator_for(download.path)
+            if prof is None or prof.key not in found_emulator_keys:
+                continue
+            filtered_pending.append(download)
+        pending = filtered_pending
         if not fresh and not pending and not emulated_fresh and not store_fresh:
             self.toast.show_message("No hay juegos nuevos que añadir.")
             return
@@ -1824,7 +1928,7 @@ class MainWindow(QMainWindow):
         self.update_button.setEnabled(False)
         self.update_button.setText("Comprobando…")
         self.settings_page.set_update_checking(True)
-        worker = CheckWorker(__version__, self)
+        worker = CheckWorker(__version__)
         worker.found.connect(
             lambda info, manual=manual: self._on_update_checked(info, manual)
         )
@@ -1927,7 +2031,7 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.processEvents()
-        download = DownloadWorker(info, self)
+        download = DownloadWorker(info)
         download.progress.connect(self.update_banner.show_progress)
         download.progress.connect(self.settings_page.set_update_downloading)
         download.done.connect(self._on_update_downloaded)
@@ -1966,6 +2070,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(60, lambda target_path=path: self._finalize_update_install(target_path))
 
     def _finalize_update_install(self, path: str) -> None:
+        if self._closing:
+            return
         try:
             backup_data(__version__)
         except OSError:
@@ -2148,10 +2254,12 @@ class MainWindow(QMainWindow):
                 worker.wait(worker_wait)
         if self.update_worker is not None and self.update_worker.isRunning():
             self.update_worker.requestInterruption()
-            self.update_worker.wait(update_wait)
+            if not self.update_worker.wait(update_wait):
+                self.update_worker.setParent(None)
         if self.download_worker is not None and self.download_worker.isRunning():
             self.download_worker.cancel()
-            self.download_worker.wait(download_wait)
+            if not self.download_worker.wait(download_wait):
+                self.download_worker.setParent(None)
         if self.cover_worker is not None and self.cover_worker.isRunning():
             self.cover_worker.cancel()
             self.cover_worker.wait(cover_wait)

@@ -360,12 +360,18 @@ class CoverArt(QWidget):
 
     def paintEvent(self, event) -> None:
         style = active_style()
+        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
+        target_sz = QSize(
+            max(1, int(round(self.width() * dpr))),
+            max(1, int(round(self.height() * dpr))),
+        )
         if (
             self._cached_render is None
-            or self._cached_render.size() != self.size()
+            or self._cached_render.size() != target_sz
             or self._cached_style_key != style.key
         ):
-            rendered = QPixmap(self.size())
+            rendered = QPixmap(target_sz)
+            rendered.setDevicePixelRatio(dpr)
             rendered.fill(Qt.transparent)
             buf = QPainter(rendered)
             buf.setRenderHint(QPainter.Antialiasing)
@@ -401,44 +407,37 @@ class CoverArt(QWidget):
             return
         ratio = pixmap.width() / max(1, pixmap.height())
         target_ratio = rect.width() / max(1, rect.height())
-        style = active_style()
         if ratio > target_ratio * 1.25:
-            painter.fillRect(rect, QColor(style.canvas))
-            small = QSize(
-                max(1, int(rect.width() * 0.1)),
-                max(1, int(rect.height() * 0.1)),
+            dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
+            hi_sz = QSize(
+                max(1, int(round(rect.width() * dpr))),
+                max(1, int(round(rect.height() * dpr))),
             )
-            backdrop = pixmap.scaled(
-                small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
-            ).scaled(rect.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            painter.setOpacity(0.4)
-            painter.drawPixmap(
-                QPoint(
-                    rect.center().x() - backdrop.width() // 2,
-                    rect.center().y() - backdrop.height() // 2,
-                ),
-                backdrop,
-            )
-            painter.setOpacity(1.0)
             scaled = pixmap.scaled(
-                rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                hi_sz, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
             )
-            painter.drawPixmap(
-                QPoint(
-                    rect.center().x() - scaled.width() // 2,
-                    rect.center().y() - scaled.height() // 2,
-                ),
-                scaled,
-            )
-        else:
-            scaled = pixmap.scaled(
-                rect.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
-            )
-            source_x = max(0, (scaled.width() - rect.width()) // 2)
-            source_y = max(0, (scaled.height() - rect.height()) // 3)
+            scaled.setDevicePixelRatio(dpr)
+            source_x = max(0, (scaled.width() - hi_sz.width()) // 2)
+            source_y = max(0, (scaled.height() - hi_sz.height()) // 3)
             painter.drawPixmap(
                 rect.topLeft(),
-                scaled.copy(QRect(source_x, source_y, rect.width(), rect.height())),
+                scaled.copy(QRect(source_x, source_y, hi_sz.width(), hi_sz.height())),
+            )
+        else:
+            dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
+            hi_sz = QSize(
+                max(1, int(round(rect.width() * dpr))),
+                max(1, int(round(rect.height() * dpr))),
+            )
+            scaled = pixmap.scaled(
+                hi_sz, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            )
+            scaled.setDevicePixelRatio(dpr)
+            source_x = max(0, (scaled.width() - hi_sz.width()) // 2)
+            source_y = max(0, (scaled.height() - hi_sz.height()) // 3)
+            painter.drawPixmap(
+                rect.topLeft(),
+                scaled.copy(QRect(source_x, source_y, hi_sz.width(), hi_sz.height())),
             )
 
         if self._show_pill:
@@ -530,8 +529,14 @@ class GameCard(QFrame):
     play_requested = Signal(object)
     details_requested = Signal(object)
     context_requested = Signal(object, object)
+    selection_toggled = Signal(object, bool)
 
-    def __init__(self, game: Game, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        game: Game,
+        selected: bool = False,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.game = game
         self.setObjectName("card")
@@ -571,6 +576,21 @@ class GameCard(QFrame):
         self.play_button.hide()
         self.play_button.raise_()
 
+        from PySide6.QtWidgets import QCheckBox
+
+        self.select_check = QCheckBox(self.cover)
+        self.select_check.setCursor(Qt.PointingHandCursor)
+        self.select_check.setFixedSize(22, 22)
+        self.select_check.move(168 - 22 - 8, 8)
+        self.select_check.setStyleSheet(
+            "QCheckBox { background: rgba(12, 12, 16, 175); border-radius: 5px; padding: 2px; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }"
+        )
+        self.select_check.setChecked(selected)
+        self.select_check.setVisible(selected)
+        self.select_check.toggled.connect(self._on_select_toggled)
+        self.select_check.raise_()
+
         self._shadow = QGraphicsDropShadowEffect(self)
         self._shadow.setBlurRadius(18)
         self._shadow.setOffset(0, 7)
@@ -586,11 +606,17 @@ class GameCard(QFrame):
         self._details_timer.setInterval(180)
         self._details_timer.timeout.connect(lambda: self.details_requested.emit(self.game))
 
+    def _on_select_toggled(self, checked: bool) -> None:
+        self.select_check.setVisible(checked or bool(self.property("hovered")))
+        self.selection_toggled.emit(self.game, checked)
+
     def _set_hovered(self, hovered: bool) -> None:
         self.setProperty("hovered", hovered)
         self.style().unpolish(self)
         self.style().polish(self)
         self.play_button.setVisible(hovered)
+        if hasattr(self, "select_check"):
+            self.select_check.setVisible(hovered or self.select_check.isChecked())
         self._animation.stop()
         target_blur = 36 if hovered else 18
         if is_reduced_motion():
@@ -651,8 +677,15 @@ class CardRow(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
     context_requested = Signal(object, object)
+    selection_toggled = Signal(object, bool)
 
-    def __init__(self, title: str, games: list[Game], parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        games: list[Game],
+        selected_ids: Optional[set[str]] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         from PySide6.QtWidgets import QScrollArea
 
@@ -671,11 +704,13 @@ class CardRow(QWidget):
         row = QHBoxLayout(inner)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(16)
+        sel = selected_ids or set()
         for game in games:
-            card = GameCard(game)
+            card = GameCard(game, selected=(game.id in sel))
             card.play_requested.connect(self.play_requested)
             card.details_requested.connect(self.details_requested)
             card.context_requested.connect(self.context_requested)
+            card.selection_toggled.connect(self.selection_toggled)
             row.addWidget(card)
         row.addStretch(1)
         scroll.setWidget(inner)

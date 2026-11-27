@@ -112,6 +112,7 @@ def clear_layout(layout) -> None:
         child = item.layout()
         if child is not None:
             clear_layout(child)
+            child.deleteLater()
 
 
 def _scroll_page() -> tuple[QScrollArea, QWidget, QVBoxLayout]:
@@ -126,22 +127,62 @@ def _scroll_page() -> tuple[QScrollArea, QWidget, QVBoxLayout]:
     return scroll, content, body
 
 
+def _added_within_days(game: Game, days: int = 3) -> bool:
+    raw = (game.added_at or "").strip()
+    if not raw:
+        return False
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return dt >= cutoff
+
+
 class HomePage(QWidget):
     play_requested = Signal(object)
     details_requested = Signal(object)
     context_requested = Signal(object, object)
     add_requested = Signal()
     backdrop_change_requested = Signal(object)
+    delete_many_requested = Signal(list)
 
     def __init__(self, store: Store, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.store = store
         self._filter = ""
+        self._selected_ids: set[str] = set()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
         scroll, _content, self.body = _scroll_page()
         outer.addWidget(scroll)
+
+        self._batch_bar = QFrame()
+        self._batch_bar.setObjectName("card")
+        batch_row = QHBoxLayout(self._batch_bar)
+        batch_row.setContentsMargins(14, 10, 14, 10)
+        batch_row.setSpacing(10)
+        self._batch_label = QLabel("")
+        self._batch_label.setObjectName("muted")
+        batch_row.addWidget(self._batch_label)
+        batch_row.addStretch(1)
+        clear_sel = QPushButton("Limpiar selección")
+        clear_sel.setObjectName("ghost")
+        clear_sel.setCursor(Qt.PointingHandCursor)
+        clear_sel.clicked.connect(self._clear_selection)
+        batch_row.addWidget(clear_sel)
+        del_sel = QPushButton("Eliminar seleccionados")
+        del_sel.setObjectName("primary")
+        del_sel.setCursor(Qt.PointingHandCursor)
+        del_sel.clicked.connect(self._delete_selected)
+        batch_row.addWidget(del_sel)
+        self._batch_bar.hide()
+        self.body.addWidget(self._batch_bar)
 
         self.hero = HeroBanner()
         self.hero.play_requested.connect(self.play_requested)
@@ -153,37 +194,80 @@ class HomePage(QWidget):
         self.body.addLayout(self.rows)
         self.body.addStretch(1)
 
+    def _sync_batch_bar(self) -> None:
+        valid_ids = {game.id for game in self.store.games}
+        self._selected_ids &= valid_ids
+        count = len(self._selected_ids)
+        self._batch_bar.setVisible(count > 0)
+        if count > 0:
+            self._batch_label.setText(
+                f"{count} juego seleccionado" if count == 1 else f"{count} juegos seleccionados"
+            )
+
+    def _on_selection_toggled(self, game: Game, checked: bool) -> None:
+        if checked:
+            self._selected_ids.add(game.id)
+        else:
+            self._selected_ids.discard(game.id)
+        from .widgets import GameCard
+
+        for card in self.findChildren(GameCard):
+            if card.game.id == game.id and hasattr(card, "select_check"):
+                card.select_check.blockSignals(True)
+                card.select_check.setChecked(checked)
+                card.select_check.setVisible(checked or bool(card.property("hovered")))
+                card.select_check.blockSignals(False)
+        self._sync_batch_bar()
+
+    def _clear_selection(self) -> None:
+        self._selected_ids.clear()
+        self.refresh()
+
+    def _delete_selected(self) -> None:
+        selected = [game for game in self.store.games if game.id in self._selected_ids]
+        if selected:
+            self.delete_many_requested.emit(selected)
+
     def refresh(self) -> None:
         clear_layout(self.rows)
+        self._sync_batch_bar()
         games = self.store.games
         if self._filter:
             games = [game for game in games if game.system_key == self._filter]
         featured = self._featured(games)
         self.hero.set_game(featured)
 
-        pool = [game for game in games if featured is None or game.id != featured.id]
-
+        # Keep featured game in all listed rows so console submenus and shelves stay complete
         recent = sorted(
-            (game for game in pool if game.last_played),
+            (game for game in games if game.last_played),
             key=lambda game: game.last_played,
             reverse=True,
         )[:8]
         if recent:
             self._add_row("Recientes", recent)
         for label, state_key in HOME_SHELVES:
-            shelf = shelf_games(pool, state_key)
+            shelf = shelf_games(games, state_key)
             if shelf:
                 self._add_row(label, shelf)
-        favorites = [game for game in pool if game.favorite][:8]
+        favorites = [game for game in games if game.favorite][:8]
         if favorites:
             self._add_row("Favoritos", favorites)
         for col_name, _count in self.store.collections():
             col_games = [game for game in games if col_name in game.collections][:8]
             if col_games:
                 self._add_row(col_name, col_games)
-        added = sorted(pool, key=lambda game: game.added_at, reverse=True)[:8]
+        added = sorted(
+            (game for game in games if _added_within_days(game, 3)),
+            key=lambda game: game.added_at,
+            reverse=True,
+        )[:8]
         if added:
             self._add_row("Añadidos recientes", added)
+        if not self._filter and games:
+            self._add_row(
+                "Todos los juegos",
+                sorted(games, key=lambda game: game.title.lower()),
+            )
 
         if not games:
             if self._filter:
@@ -221,10 +305,11 @@ class HomePage(QWidget):
         return games[0]
 
     def _add_row(self, title: str, games: list[Game]) -> None:
-        row = CardRow(title, games)
+        row = CardRow(title, games, selected_ids=self._selected_ids)
         row.play_requested.connect(self.play_requested)
         row.details_requested.connect(self.details_requested)
         row.context_requested.connect(self.context_requested)
+        row.selection_toggled.connect(self._on_selection_toggled)
         self.rows.addWidget(row)
 
 
@@ -553,9 +638,12 @@ class LibraryPage(QWidget):
                 )
                 self.backdrop_button.raise_()
         if hasattr(self, "_empty"):
-            self._empty.setGeometry(left, top, inner_w, inner_h)
+            empty_h = max(120, inner_h - header_h - bottom_h)
+            self._empty.setGeometry(left, top + header_h, inner_w, empty_h)
             if self._empty.isVisible():
                 self._empty.raise_()
+                self.header.raise_()
+                self.bottom.raise_()
 
     def set_mode(self, favorites_only: bool) -> None:
         changed = self._favorites_only != favorites_only
@@ -1130,6 +1218,7 @@ class LibraryPage(QWidget):
         games = self._visible_games()
         self.count_label.setText(f"{len(games)} JUEGOS" if len(games) != 1 else "1 JUEGO")
         if not games:
+            self.canvas.set_games([])
             if self._favorites_only:
                 self._empty.set_text(
                     "Todavía no hay favoritos",

@@ -58,14 +58,14 @@ def test_wheel_does_not_step_and_drag_pans_shelf() -> None:
     )
     move = QMouseEvent(
         QEvent.Type.MouseMove,
-        QPointF(520, 360),
+        QPointF(420, 360),
         Qt.LeftButton,
         Qt.LeftButton,
         Qt.NoModifier,
     )
     release = QMouseEvent(
         QMouseEvent.MouseButtonRelease,
-        QPointF(520, 360),
+        QPointF(420, 360),
         Qt.LeftButton,
         Qt.NoButton,
         Qt.NoModifier,
@@ -199,3 +199,65 @@ def test_startup_overlay_no_crash_and_miter() -> None:
     overlay.repaint()
     app.processEvents()
     host.deleteLater()
+
+
+def test_v866_home_library_synopsis_and_backdrop_fixes(monkeypatch, tmp_path: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+    from umbral.backdrops import game_backdrop
+    from umbral.synopsis import _looks_spanish
+    from umbral.ui.pages import HomePage, LibraryPage, _added_within_days
+
+    _app()
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+
+    # 3-day recent filter
+    recent_g = Game(
+        id="r1",
+        title="Recent",
+        system="PC",
+        system_key="pc",
+        added_at=datetime.now(timezone.utc).isoformat(),
+    )
+    old_g = Game(
+        id="r2",
+        title="Old",
+        system="PC",
+        system_key="pc",
+        added_at=(datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+    )
+    assert _added_within_days(recent_g, 3) is True
+    assert _added_within_days(old_g, 3) is False
+
+    # English with accented loanword should not be treated as Spanish
+    assert _looks_spanish("Catch Pokémon across the region in this classic RPG.") is False
+    assert _looks_spanish("Un juego de rol clásico en el que exploras la región.") is True
+
+    # Backdrop fallback across migrated data_dir
+    bd_dir = tmp_path / "backdrops"
+    bd_dir.mkdir(parents=True, exist_ok=True)
+    bd_file = bd_dir / "hero.jpg"
+    bd_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 400)
+    g_bd = Game(
+        id="gbd",
+        title="Hero",
+        system="PC",
+        system_key="pc",
+        backdrop="C:/old/AppData/Umbral/backdrops/hero.jpg",
+    )
+    assert game_backdrop(g_bd) == bd_file
+
+    # HomePage includes featured in console lists, "Todos los juegos" at bottom, and Library empty filter clears canvas
+    store = Store()
+    store.games = [recent_g, old_g]
+    home = HomePage(store)
+    home.refresh()
+    home.deleteLater()
+
+    lib = LibraryPage(store)
+    lib.resize(1200, 720)
+    lib.refresh()
+    assert len(lib.canvas.items) == 2
+    lib.set_filter("n64")
+    assert len(lib.canvas.items) == 0
+    assert lib._empty.isHidden() is False
+    lib.deleteLater()

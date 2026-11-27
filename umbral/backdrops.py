@@ -57,7 +57,14 @@ def game_backdrop(game: Game) -> Path | None:
         if path.is_file() and path.stat().st_size > 256:
             return path
     except OSError:
-        return None
+        pass
+    # Fallback across version/folder migrations (e.g. AppData -> Downloads/Umbral)
+    for candidate in (backdrops_dir() / path.name, backdrop_path(game)):
+        try:
+            if candidate.is_file() and candidate.stat().st_size > 256:
+                return candidate
+        except OSError:
+            continue
     return None
 
 
