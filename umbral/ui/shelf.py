@@ -607,6 +607,7 @@ class ShelfItem:
     refl_cache_key: tuple = ()
     gl_cache: Optional[QPixmap] = None
     gl_cache_key: tuple = ()
+    back_max_scroll: float = 0.0
 
 
 class ShelfCanvas(QWidget):
@@ -649,7 +650,7 @@ class ShelfCanvas(QWidget):
         self._chrome_anim_target_left = 0
         self._chrome_anim_start_bg: Optional[QPixmap] = None
         self._chrome_anim_target_bg: Optional[QPixmap] = None
-        self._last_backdrop_by_id: dict[str, QPixmap] = {}
+        self._last_backdrop_by_id: OrderedDict[str, QPixmap] = OrderedDict()
         self._inspect_yaw = 0.0
         self._inspect_pitch = 0.0
         self._left_press_pos: Optional[QPointF] = None
@@ -736,6 +737,7 @@ class ShelfCanvas(QWidget):
         self._inset_bottom = bottom_val
         self._inset_header = header_val
         self._backdrop_cache.clear()
+        self._last_backdrop_by_id.clear()
         self.update()
 
     def set_halo_enabled(self, enabled: bool) -> None:
@@ -744,6 +746,7 @@ class ShelfCanvas(QWidget):
             return
         self._halo_enabled = flag
         self._backdrop_cache.clear()
+        self._last_backdrop_by_id.clear()
         self.update()
 
     def get_float(self) -> float:
@@ -769,6 +772,8 @@ class ShelfCanvas(QWidget):
 
     def set_backdrop_mix(self, value: float) -> None:
         self._backdrop_mix = float(value)
+        if self._backdrop_mix >= 0.99:
+            self._prev_backdrop_item = None
         self.update()
 
     backdrop_mix = Property(float, get_backdrop_mix, set_backdrop_mix)
@@ -808,6 +813,8 @@ class ShelfCanvas(QWidget):
         self._active_backdrop_id = current_item.game.id if current_item else ""
         self._prev_backdrop_item = None
         self._backdrop_mix = 1.0
+        self._last_backdrop_by_id.clear()
+        self._trim_item_caches()
         self._sync()
         self._emit_selection()
 
@@ -873,6 +880,18 @@ class ShelfCanvas(QWidget):
             self.selection_changed.emit(game)
         self.update()
 
+    def _trim_item_caches(self) -> None:
+        for idx, item in enumerate(self.items):
+            if abs(idx - self.index) > 4:
+                item.gl_cache = None
+                item.gl_cache_key = ()
+                item.back_cache = None
+                item.back_cache_key = ()
+                item.refl_cache = None
+                item.refl_cache_key = ()
+                item.front_cache = None
+                item.front_cache_key = ()
+
     def step(self, delta: int) -> None:
         if not self.items:
             return
@@ -884,6 +903,7 @@ class ShelfCanvas(QWidget):
         if new_index != old_index:
             self._back_scroll = 0.0
             self._back_max_scroll = 0.0
+            self._trim_item_caches()
             self._start_backdrop_transition(previous_item, current_item)
             play_ui_sound("step")
         self._sync()
@@ -896,23 +916,30 @@ class ShelfCanvas(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802 - API de Qt
         super().resizeEvent(event)
         self._backdrop_cache.clear()
+        self._last_backdrop_by_id.clear()
         self.update()
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - API de Qt
         if not self.items:
             return
-        if (self.is_flipped() or self._flip_angle > 0.5) and self._back_max_scroll > 0.0:
-            dy = event.angleDelta().y()
-            if dy != 0:
-                step_px = 26.0
-                self._back_scroll = max(
-                    0.0,
-                    min(
-                        self._back_max_scroll,
-                        self._back_scroll + (-step_px if dy > 0 else step_px),
-                    ),
-                )
-                self.update()
+        if self.is_flipped():
+            item = self._current_item()
+            max_scroll = max(self._back_max_scroll, item.back_max_scroll if item else 0.0)
+            if max_scroll > 0.0:
+                dy = event.angleDelta().y()
+                if dy == 0:
+                    dy = event.pixelDelta().y()
+                if dy != 0:
+                    step_px = 32.0
+                    self._back_scroll = max(
+                        0.0,
+                        min(
+                            max_scroll,
+                            self._back_scroll + (-step_px if dy > 0 else step_px),
+                        ),
+                    )
+                    self._back_max_scroll = max_scroll
+                    self.update()
         event.accept()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - API de Qt
@@ -998,17 +1025,25 @@ class ShelfCanvas(QWidget):
                 and abs(point.x() - self._left_press_pos.x()) > 6.0
             ):
                 self._left_dragging = True
-            if self._left_dragging:
+            if self._left_dragging and self.items:
                 dx = point.x() - self._left_last_x
                 self._left_last_x = point.x()
-                self._left_drag_accum += dx
-                step_px = 58.0
-                while self._left_drag_accum <= -step_px:
-                    self.step(1)
-                    self._left_drag_accum += step_px
-                while self._left_drag_accum >= step_px:
-                    self.step(-1)
-                    self._left_drag_accum -= step_px
+                self._anim.stop()
+                _cx, _cy, cover_w, _ch, gap = self._layout()
+                stride = max(110.0, (cover_w + gap * 0.72) * 0.55)
+                self._float = max(
+                    0.0, min(float(len(self.items) - 1), self._float - dx / stride)
+                )
+                new_index = max(0, min(len(self.items) - 1, int(round(self._float))))
+                if new_index != self.index:
+                    prev_item = self._current_item()
+                    self.index = new_index
+                    self._reset_flip()
+                    self._trim_item_caches()
+                    self._start_backdrop_transition(prev_item, self._current_item())
+                    self._emit_selection()
+                else:
+                    self.update()
                 self.setCursor(Qt.ClosedHandCursor)
                 event.accept()
                 return
@@ -1095,6 +1130,7 @@ class ShelfCanvas(QWidget):
             self._left_dragging = False
             self._left_drag_accum = 0.0
             if was_drag:
+                self._sync()
                 position = self._hit_test(event.position())
                 self.setCursor(Qt.PointingHandCursor if position >= 0 else Qt.ArrowCursor)
                 event.accept()
@@ -1179,6 +1215,23 @@ class ShelfCanvas(QWidget):
         if not self.items:
             return -1
         center_x, center_y, cover_w, cover_h, gap = self._layout()
+        if 0 <= self.index < len(self.items) and self._back_zoom > 0.005:
+            sel_geo = self._slot_geometry(self.index, gap, cover_w)
+            if sel_geo is not None:
+                sel_rect = self._case_rect(
+                    self.items[self.index], sel_geo, center_x, center_y, cover_w, cover_h
+                )
+                scale_boost = 1.0 + 0.44 * self._back_zoom
+                zoom_rect = QRectF(
+                    sel_rect.center().x() - (sel_rect.width() * scale_boost) / 2.0,
+                    sel_rect.center().y()
+                    - (sel_rect.height() * scale_boost) / 2.0
+                    - cover_h * 0.04 * self._back_zoom,
+                    sel_rect.width() * scale_boost,
+                    sel_rect.height() * scale_boost,
+                )
+                if zoom_rect.contains(point):
+                    return self.index
         best = -1
         best_distance = 1e9
         for position in range(len(self.items)):
@@ -1264,7 +1317,10 @@ class ShelfCanvas(QWidget):
             )
         self._backdrop_cache[cache_key] = rendered
         self._last_backdrop_by_id[key_id] = rendered
-        if len(self._backdrop_cache) > 18:
+        self._last_backdrop_by_id.move_to_end(key_id)
+        while len(self._last_backdrop_by_id) > 3:
+            self._last_backdrop_by_id.popitem(last=False)
+        if len(self._backdrop_cache) > 5:
             self._backdrop_cache.popitem(last=False)
         return rendered
 
@@ -1579,6 +1635,8 @@ class ShelfCanvas(QWidget):
             return
         target = 0.0 if self._flip_target >= 0.5 else 1.0
         self._flip_target = target
+        self._inspect_yaw = 0.0
+        self._inspect_pitch = 0.0
         if target < 0.5:
             self._back_scroll = 0.0
             self._back_max_scroll = 0.0
@@ -1623,6 +1681,8 @@ class ShelfCanvas(QWidget):
             round(dpr, 2),
         )
         if item.back_cache is not None and item.back_cache_key == key:
+            if is_current:
+                self._back_max_scroll = item.back_max_scroll
             return item.back_cache
 
         pix = QPixmap(max(48, int(round(base_w * dpr))), max(48, int(round(base_h * dpr))))
@@ -1732,6 +1792,7 @@ class ShelfCanvas(QWidget):
                     synopsis,
                 )
                 max_scroll = max(0.0, float(full_syn.height()) - syn_rect.height() + 4.0)
+                item.back_max_scroll = max_scroll
                 if is_current:
                     self._back_max_scroll = max_scroll
                     if self._back_scroll > max_scroll:
@@ -1867,6 +1928,7 @@ class ShelfCanvas(QWidget):
                     synopsis,
                 )
                 max_scroll_fb = max(0.0, float(full_fb.height()) - syn_inner.height() + 4.0)
+                item.back_max_scroll = max_scroll_fb
                 if is_current:
                     self._back_max_scroll = max_scroll_fb
                     if self._back_scroll > max_scroll_fb:
@@ -2055,6 +2117,8 @@ class ShelfCanvas(QWidget):
             scroll_k,
         )
         if item.gl_cache is not None and item.gl_cache_key == gl_key:
+            if selected:
+                self._back_max_scroll = item.back_max_scroll
             gl_pix: Optional[QPixmap] = item.gl_cache
         else:
             front_pix = self._front_pixmap_for(item, base_w, base_h)

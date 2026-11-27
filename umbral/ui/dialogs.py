@@ -1380,7 +1380,6 @@ class GameScanDialog(QDialog):
         rows.setSpacing(8)
 
         confirmed = [item for item in candidates if item.online_ok]
-        unknown = [item for item in candidates if not item.online_ok]
 
         if self.stores:
             rows.addWidget(self._section("Steam, Epic Games y GOG"))
@@ -1402,15 +1401,9 @@ class GameScanDialog(QDialog):
             for download in pending:
                 rows.addWidget(self._download_row(download))
 
-        if unknown:
-            rows.addWidget(self._section("Sin coincidencia online · revisa antes de añadir"))
-            for candidate in unknown:
-                rows.addWidget(self._candidate_row(candidate))
-
-        if not candidates and not pending and not self.emulated and not self.stores:
+        if not confirmed and not pending and not self.emulated and not self.stores:
             empty = QLabel(
-                "No se ha encontrado ningún juego nuevo. Si tienes juegos en otra carpeta, "
-                "añádela en Ajustes y vuelve a escanear."
+                "No se ha encontrado ningún juego nuevo compatible con tus emuladores o verificado en internet."
             )
             empty.setObjectName("muted")
             empty.setWordWrap(True)

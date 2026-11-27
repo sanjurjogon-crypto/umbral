@@ -178,6 +178,11 @@ class BackdropPickerDialog(QDialog):
 
         bottom = QHBoxLayout()
         bottom.setSpacing(10)
+        upload_btn = QPushButton("Subir desde archivo…")
+        upload_btn.setObjectName("ghost")
+        upload_btn.setCursor(Qt.PointingHandCursor)
+        upload_btn.clicked.connect(self._upload_local)
+        bottom.addWidget(upload_btn)
         if game.backdrop:
             restore_btn = QPushButton("Restaurar fondo por defecto")
             restore_btn.setObjectName("ghost")
@@ -259,6 +264,29 @@ class BackdropPickerDialog(QDialog):
         for card in self._cards:
             card.setEnabled(True)
         self.status_label.setText("No se pudo descargar esa imagen. Prueba con otra opción.")
+
+    def _upload_local(self) -> None:
+        from PIL import Image, UnidentifiedImageError
+        from PySide6.QtWidgets import QFileDialog
+        from ..backdrops import backdrop_path
+
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            "Elegir imagen de fondo",
+            "",
+            "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if not chosen:
+            return
+        try:
+            with Image.open(chosen) as img:
+                rgb = img.convert("RGB")
+                target = backdrop_path(self.game)
+                rgb.save(target, format="JPEG", quality=92, optimize=True)
+                self.selected_path = str(target)
+                self.accept()
+        except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+            self.status_label.setText("No se pudo cargar esa imagen. Prueba con otro archivo.")
 
     def _restore(self) -> None:
         self.restore_default = True

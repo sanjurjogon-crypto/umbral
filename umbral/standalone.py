@@ -336,12 +336,8 @@ class StandaloneCandidate:
     def to_game(self) -> Game:
         digest = hashlib.sha1(str(self.executable).lower().encode("utf-8")).hexdigest()[:8]
         title = self.display_title
-        subtitle = "PC · Juego independiente"
-        if self.online_status == "steam-local":
-            subtitle = "PC · Steam"
-        elif self.online_status == "steam":
-            subtitle = "PC · Steam"
-        elif self.online_status == "itch":
+        subtitle = "PC"
+        if self.online_status == "itch":
             subtitle = "PC · itch.io"
         elif self.online_status == "pcgamingwiki":
             subtitle = "PC · PCGamingWiki"
