@@ -1462,3 +1462,25 @@ def test_hidpi_upscale_retry_and_parallel_synopsis(monkeypatch) -> None:
     worker.updated.connect(collected.extend)
     worker.run()
     assert dict(collected) == {"s1": "Sinopsis de Uno", "s2": "Sinopsis de Dos"}
+
+
+def test_3d_case_mesh_all_profiles_and_psp_cutout() -> None:
+    from umbral.ui.cases import CASE_PROFILES, load_case_overlay
+    from umbral.ui.gl_cases import _build_rounded_case_mesh, _template_3d_meta
+
+    app = _app()
+    psp = load_case_overlay("psp")
+    assert psp is not None
+    # PSP cutout should reach right below the yellow header line (~0.092)
+    assert psp[1].y() < 0.11
+
+    for key, prof in CASE_PROFILES.items():
+        uv, top_cap, bottom_cap, _sp, _rt = _template_3d_meta(key, prof.shell_color)
+        assert len(uv) == 4
+        assert not top_cap.isNull() and not bottom_cap.isNull()
+
+    rounded = _build_rounded_case_mesh(0.9, 1.2, 0.13, corner_radius=0.036)
+    sharp = _build_rounded_case_mesh(1.0, 0.95, 0.12, corner_radius=0.008)
+    for mesh in (rounded, sharp):
+        for face in ("front", "back", "spine", "right", "top_cap", "bottom_cap"):
+            assert len(mesh[face]) > 0, f"Missing 3D face {face}"
