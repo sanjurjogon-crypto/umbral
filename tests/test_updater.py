@@ -129,7 +129,7 @@ def test_backup_data_rotates_and_keeps_latest(monkeypatch, tmp_path: Path) -> No
     umbral_dir.mkdir(parents=True)
     (umbral_dir / "library.json").write_text('{"games": []}', encoding="utf-8")
     (umbral_dir / "settings.json").write_text('{"version": 1}', encoding="utf-8")
-    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("UMBRAL_DATA_DIR", str(umbral_dir))
 
     for version in ("8.18.0", "8.19.0", "8.20.0", "8.21.0"):
         dest = backup_data(version, keep=3)

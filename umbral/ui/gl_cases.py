@@ -278,20 +278,26 @@ def _template_3d_meta(profile_key: str, shell_color: str) -> tuple[
 ]:
     """Compute tight opaque UV bounds, top/bottom cap colors, and spine/right textures."""
     tmpl = load_case_overlay(profile_key)
-    if tmpl is not None:
+    if tmpl is not None and not tmpl[0].isNull():
         img = tmpl[0].toImage().convertToFormat(QImage.Format_RGBA8888)
-        arr = np.frombuffer(img.bits(), dtype=np.uint8).reshape((img.height(), img.width(), 4))
-        h, w = arr.shape[:2]
-        xs = np.where(arr[h // 2, :, 3] > 215)[0]
-        ys = np.where(arr[:, w // 2, 3] > 215)[0]
-        uv = (
-            (int(xs[0]) + 3) / w if len(xs) else 0.01,
-            (int(ys[0]) + 3) / h if len(ys) else 0.01,
-            (int(xs[-1]) - 3) / w if len(xs) else 0.99,
-            (int(ys[-1]) - 3) / h if len(ys) else 0.99,
-        )
-        top_cap = _sample_edge_cap(arr, "top", shell_color)
-        bottom_cap = _sample_edge_cap(arr, "bottom", shell_color)
+        if not img.isNull() and img.width() > 0 and img.height() > 0:
+            arr = np.frombuffer(img.bits(), dtype=np.uint8).reshape((img.height(), img.width(), 4))
+            h, w = arr.shape[:2]
+            xs = np.where(arr[h // 2, :, 3] > 215)[0]
+            ys = np.where(arr[:, w // 2, 3] > 215)[0]
+            uv = (
+                (int(xs[0]) + 3) / w if len(xs) else 0.01,
+                (int(ys[0]) + 3) / h if len(ys) else 0.01,
+                (int(xs[-1]) - 3) / w if len(xs) else 0.99,
+                (int(ys[-1]) - 3) / h if len(ys) else 0.99,
+            )
+            top_cap = _sample_edge_cap(arr, "top", shell_color)
+            bottom_cap = _sample_edge_cap(arr, "bottom", shell_color)
+        else:
+            uv = (0.006, 0.006, 0.994, 0.994)
+            top_cap = QImage(16, 16, QImage.Format_RGBA8888)
+            top_cap.fill(QColor(shell_color))
+            bottom_cap = top_cap.copy()
     else:
         uv = (0.006, 0.006, 0.994, 0.994)
         top_cap = QImage(16, 16, QImage.Format_RGBA8888)
@@ -412,8 +418,11 @@ class Case3DRenderer:
     ) -> Optional[QPixmap]:
         if not self._ensure_gl() or self._ctx is None or self._surf is None or self._prog is None:
             return None
+        if front_pix is None or front_pix.isNull() or back_pix is None or back_pix.isNull():
+            return None
         if not self._ctx.makeCurrent(self._surf):
             return None
+        fbo: Optional[QOpenGLFramebufferObject] = None
         try:
             pw = max(64, int(round(out_w * dpr)))
             ph = max(64, int(round(out_h * dpr)))
@@ -480,35 +489,43 @@ class Case3DRenderer:
                 "bottom_cap": bottom_cap,
             }
             for face_name, verts in mesh.items():
-                if len(verts) == 0:
+                if len(verts) == 0 or textures[face_name].isNull():
                     continue
-                tex = QOpenGLTexture(textures[face_name], QOpenGLTexture.DontGenerateMipMaps)
-                tex.setMinificationFilter(QOpenGLTexture.Linear)
-                tex.setMagnificationFilter(QOpenGLTexture.Linear)
-                tex.setWrapMode(QOpenGLTexture.ClampToEdge)
-                tex.bind(0)
-
-                vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
-                vbo.create()
-                vbo.bind()
-                vbo.allocate(verts.tobytes(), verts.nbytes)
-
-                stride = 8 * 4
+                tex: Optional[QOpenGLTexture] = None
+                vbo: Optional[QOpenGLBuffer] = None
                 pos_loc = self._prog.attributeLocation("aPos")
                 norm_loc = self._prog.attributeLocation("aNormal")
                 tex_loc = self._prog.attributeLocation("aTex")
-                self._prog.enableAttributeArray(pos_loc)
-                self._prog.enableAttributeArray(norm_loc)
-                self._prog.enableAttributeArray(tex_loc)
-                self._prog.setAttributeBuffer(pos_loc, 0x1406, 0, 3, stride)
-                self._prog.setAttributeBuffer(norm_loc, 0x1406, 3 * 4, 3, stride)
-                self._prog.setAttributeBuffer(tex_loc, 0x1406, 6 * 4, 2, stride)
+                try:
+                    tex = QOpenGLTexture(textures[face_name], QOpenGLTexture.DontGenerateMipMaps)
+                    tex.setMinificationFilter(QOpenGLTexture.Linear)
+                    tex.setMagnificationFilter(QOpenGLTexture.Linear)
+                    tex.setWrapMode(QOpenGLTexture.ClampToEdge)
+                    tex.bind(0)
 
-                gl.glDrawArrays(0x0004, 0, int(verts.shape[0]))
+                    vbo = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+                    if not vbo.create() or not vbo.bind():
+                        continue
+                    vbo.allocate(verts.tobytes(), verts.nbytes)
 
-                vbo.release()
-                vbo.destroy()
-                tex.destroy()
+                    stride = 8 * 4
+                    self._prog.enableAttributeArray(pos_loc)
+                    self._prog.enableAttributeArray(norm_loc)
+                    self._prog.enableAttributeArray(tex_loc)
+                    self._prog.setAttributeBuffer(pos_loc, 0x1406, 0, 3, stride)
+                    self._prog.setAttributeBuffer(norm_loc, 0x1406, 3 * 4, 3, stride)
+                    self._prog.setAttributeBuffer(tex_loc, 0x1406, 6 * 4, 2, stride)
+
+                    gl.glDrawArrays(0x0004, 0, int(verts.shape[0]))
+                finally:
+                    self._prog.disableAttributeArray(pos_loc)
+                    self._prog.disableAttributeArray(norm_loc)
+                    self._prog.disableAttributeArray(tex_loc)
+                    if vbo is not None:
+                        vbo.release()
+                        vbo.destroy()
+                    if tex is not None:
+                        tex.destroy()
 
             self._prog.release()
             fbo.release()
@@ -517,6 +534,9 @@ class Case3DRenderer:
             result_pix.setDevicePixelRatio(dpr)
             return result_pix
         finally:
+            if fbo is not None:
+                fbo.release()
+                del fbo
             self._ctx.doneCurrent()
 
 

@@ -63,6 +63,18 @@ SKIP_DIRS = {
     "readme",
     "saves",
     "save",
+    "windows",
+    "system32",
+    "syswow64",
+    "driverstore",
+    "assembly",
+    "windowsapps",
+    "windows.old",
+    "appdata",
+    "programdata",
+    "recovery",
+    "perflogs",
+    "msocache",
 }
 
 CACHE_TTL = 60.0

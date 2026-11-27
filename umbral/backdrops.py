@@ -19,6 +19,8 @@ from .covers import (
     USER_AGENT,
     _bucket_key,
     _compact,
+    _is_strict_title_match,
+    _normalize,
     _request_json,
     _steam_app_id,
     is_image_bytes,
@@ -141,16 +143,10 @@ def _steam_search_backdrops(query: str) -> list[BackdropOption]:
             continue
         name = str(item.get("name", ""))
         app_id = item.get("id")
-        compact = _compact(name)
-        if not app_id or not compact:
-            continue
-        if compact == target or target in compact or compact in target:
+        if app_id and _is_strict_title_match(query, name):
             best_id = str(app_id)
             best_name = name
             break
-    if not best_id and isinstance(items[0], dict) and items[0].get("id"):
-        best_id = str(items[0]["id"])
-        best_name = str(items[0].get("name", query))
     return _steam_options_for_app(best_id, best_name) if best_id else []
 
 
@@ -184,21 +180,32 @@ def _gamedb_backdrops(query: str, system_key: str) -> list[BackdropOption]:
         if compact == target:
             score = 100
         elif compact.startswith(target) or target.startswith(compact):
+            shorter = min(len(compact), len(target))
+            longer = max(len(compact), len(target))
+            if longer == 0 or shorter / longer < 0.72:
+                continue
             score = 70
         elif target in compact:
+            shorter = min(len(compact), len(target))
+            longer = max(len(compact), len(target))
+            if len(target) < 4 or longer == 0 or shorter / longer < 0.72:
+                continue
             score = 55
         else:
             continue
         candidates.append((score, -abs(len(compact) - len(target)), str(game_id)))
 
     options: list[BackdropOption] = []
-    for _, _, game_id in sorted(candidates, reverse=True)[:4]:
+    fallback_candidates: list[str] = []
+    for score, _, game_id in sorted(candidates, reverse=True)[:6]:
         try:
             data = _request_json(f"{GAMEDB_ROOT}/games/{game_id}.json", limit=3_000_000)
         except (URLError, TimeoutError, OSError, ValueError):
             continue
         platforms = {p for p in data.get("platforms", []) if isinstance(p, int)}
-        if wanted and platforms and not (wanted & platforms) and options:
+        if wanted and platforms and not (wanted & platforms):
+            if score >= 70:
+                fallback_candidates.append(game_id)
             continue
         title = str(data.get("name", query))
         for key in ("artworks", "screenshots"):
@@ -212,11 +219,29 @@ def _gamedb_backdrops(query: str, system_key: str) -> list[BackdropOption]:
                     options.append(BackdropOption(url=full, thumb_url=thumb or full, title=title, source="IGDB"))
         if len(options) >= 6:
             break
+    if not options and fallback_candidates:
+        for game_id in fallback_candidates[:2]:
+            try:
+                data = _request_json(f"{GAMEDB_ROOT}/games/{game_id}.json", limit=3_000_000)
+            except (URLError, TimeoutError, OSError, ValueError):
+                continue
+            title = str(data.get("name", query))
+            for key in ("artworks", "screenshots"):
+                for item in (data.get(key) or [])[:5]:
+                    if not isinstance(item, dict):
+                        continue
+                    raw = str(item.get("url", ""))
+                    full = _igdb_url(raw, "t_1080p")
+                    thumb = _igdb_url(raw, "t_screenshot_med")
+                    if full:
+                        options.append(BackdropOption(url=full, thumb_url=thumb or full, title=title, source="IGDB"))
+            if len(options) >= 6:
+                break
     return options
 
 
 def _bing_image_search(query: str, limit: int = 8) -> list[BackdropOption]:
-    search_term = f"{query} wallpaper 1080p"
+    search_term = f"{query} game wallpaper 1080p"
     url = f"https://www.bing.com/images/search?q={quote(search_term, safe='')}&first=1&qft=+filterui:aspect-wide"
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"})
     try:
@@ -224,6 +249,7 @@ def _bing_image_search(query: str, limit: int = 8) -> list[BackdropOption]:
             raw_html = response.read(1_500_000).decode("utf-8", errors="replace")
     except (URLError, TimeoutError, OSError, ValueError):
         return []
+    q_tokens = [tok for tok in _normalize(query).split() if len(tok) >= 3]
     options: list[BackdropOption] = []
     for match in re.finditer(r'm="([^"]+)"', raw_html):
         blob = html.unescape(match.group(1))
@@ -235,10 +261,15 @@ def _bing_image_search(query: str, limit: int = 8) -> list[BackdropOption]:
             continue
         murl = str(meta.get("murl", "")).strip()
         turl = str(meta.get("turl", "")).strip() or murl
-        title = str(meta.get("t", "")).strip() or query
+        title = str(meta.get("t", "")).strip() or ""
         if not murl.startswith(("http://", "https://")):
             continue
-        options.append(BackdropOption(url=murl, thumb_url=turl, title=title, source="Web"))
+        if q_tokens and title:
+            t_norm = _normalize(title)
+            matched_tokens = sum(1 for tok in q_tokens if tok in t_norm)
+            if matched_tokens < max(1, (len(q_tokens) + 1) // 2):
+                continue
+        options.append(BackdropOption(url=murl, thumb_url=turl, title=title or query, source="Web"))
         if len(options) >= limit:
             break
     return options

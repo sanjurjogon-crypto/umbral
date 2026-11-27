@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -163,19 +162,6 @@ class BackdropPickerDialog(QDialog):
         root.setContentsMargins(22, 20, 22, 18)
         root.setSpacing(12)
 
-        top = QHBoxLayout()
-        top.setSpacing(10)
-        self.query_edit = QLineEdit(game.title)
-        self.query_edit.setPlaceholderText("Buscar fondo por nombre del juego...")
-        self.query_edit.returnPressed.connect(self._start_search)
-        self.search_btn = QPushButton("Buscar")
-        self.search_btn.setObjectName("primary")
-        self.search_btn.setCursor(Qt.PointingHandCursor)
-        self.search_btn.clicked.connect(self._start_search)
-        top.addWidget(self.query_edit, 1)
-        top.addWidget(self.search_btn)
-        root.addLayout(top)
-
         self.status_label = QLabel("Buscando fondos en internet...")
         self.status_label.setObjectName("muted")
         root.addWidget(self.status_label)
@@ -225,20 +211,18 @@ class BackdropPickerDialog(QDialog):
                 widget.deleteLater()
 
     def _start_search(self) -> None:
-        query = self.query_edit.text().strip() or self.game.title
+        query = self.game.title.strip() or self.game.title
         self._stop_workers()
         self._clear_grid()
         self.status_label.setText(f"Buscando fondos para «{query}»...")
-        self.search_btn.setEnabled(False)
         self._search_worker = _SearchWorker(query, self.game)
         self._search_worker.found.connect(self._on_results)
         self._search_worker.start()
 
     def _on_results(self, options: list[BackdropOption]) -> None:
-        self.search_btn.setEnabled(True)
         self._options = options
         if not options:
-            self.status_label.setText("No se encontraron fondos. Prueba a editar la búsqueda.")
+            self.status_label.setText("No se encontraron fondos para este juego.")
             return
         self.status_label.setText(f"{len(options)} opciones encontradas. Haz clic en una para aplicarla:")
         for idx, opt in enumerate(options):

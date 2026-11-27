@@ -357,6 +357,8 @@ class AddGameDialog(QDialog):
         self._emulators = list(emulators or [])
         self._filling = False
         self._auto_title = ""
+        self._auto_arguments = ""
+        self._auto_subtitle = ""
         self._initial_minutes = (game.playtime_seconds // 60) if game else 0
         self.setWindowTitle("Editar juego" if game else "Añadir juego")
         self.setModal(True)
@@ -469,8 +471,14 @@ class AddGameDialog(QDialog):
         self._row(grid, 12, "Estado", self.progress_combo)
         self._row(grid, 13, "Tiempo jugado", self.playtime_spin)
         self._row(grid, 14, "Notas", self.notes_edit)
-        self.advanced.hide()
-        body.addWidget(self.advanced)
+
+        self._adv_scroll = QScrollArea()
+        self._adv_scroll.setWidgetResizable(True)
+        self._adv_scroll.setFrameShape(QFrame.NoFrame)
+        self._adv_scroll.setWidget(self.advanced)
+        self._adv_scroll.setMaximumHeight(280)
+        self._adv_scroll.hide()
+        body.addWidget(self._adv_scroll)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(10)
@@ -637,20 +645,22 @@ class AddGameDialog(QDialog):
                     emulator_profile = next(
                         (item for item in profiles if item.key == emulator.key), None
                     )
+                    cur_args = self.arguments_edit.toPlainText().strip()
                     if (
                         emulator_profile is not None
-                        and not self.arguments_edit.toPlainText().strip()
+                        and (not cur_args or cur_args == self._auto_arguments)
                     ):
-                        self.arguments_edit.setPlainText(
-                            chr(10).join(emulator_profile.arguments)
-                        )
+                        args_text = chr(10).join(emulator_profile.arguments)
+                        self.arguments_edit.setPlainText(args_text)
+                        self._auto_arguments = args_text.strip()
+                    cur_sub = self.subtitle_edit.text().strip()
                     if (
                         emulator_profile is not None
-                        and not self.subtitle_edit.text().strip()
+                        and (not cur_sub or cur_sub == self._auto_subtitle)
                     ):
-                        self.subtitle_edit.setText(
-                            f"{emulator_profile.system} · {emulator_profile.name}"
-                        )
+                        sub_text = f"{emulator_profile.system} · {emulator_profile.name}"
+                        self.subtitle_edit.setText(sub_text)
+                        self._auto_subtitle = sub_text
                     self.status.setText(
                         f"Sistema {self.system_combo.currentText()} · emulador {emulator.name}."
                     )
@@ -691,8 +701,22 @@ class AddGameDialog(QDialog):
             self.exe_edit.setText(emulator.executable)
 
     def _toggle_advanced(self, checked: bool) -> None:
+        if hasattr(self, "_adv_scroll"):
+            if checked:
+                screen = self.screen() or (
+                    self.parentWidget().screen() if self.parentWidget() else None
+                )
+                avail_h = screen.availableGeometry().height() if screen else 720
+                self._adv_scroll.setFixedHeight(min(280, max(120, avail_h - 490)))
+            self._adv_scroll.setVisible(checked)
         self.advanced.setVisible(checked)
         self.advanced_button.setText("Menos opciones" if checked else "Más opciones")
+        if self.layout() is not None:
+            self.layout().activate()
+        self.adjustSize()
+        screen = self.screen()
+        max_h = (screen.availableGeometry().height() - 40) if screen else self.sizeHint().height()
+        self.resize(max(self.minimumWidth(), self.width()), min(self.sizeHint().height(), max_h))
 
     def _fill(self, game: Game) -> None:
         self.title_edit.setText(game.title)

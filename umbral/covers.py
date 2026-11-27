@@ -131,11 +131,11 @@ def _candidate_titles(game: Game) -> list[str]:
             else:
                 values.append(game.title)
                 values.append(rom_name)
-                if game.executable:
+                if game.system_key in {"pc", "standalone"} and not game.emulator and game.executable:
                     values.append(safe_path(game.executable).stem)
         else:
             values.append(game.title)
-            if game.system_key not in {"ports", "steam", "epic", "gog"} and game.executable:
+            if game.system_key in {"pc", "standalone"} and not game.emulator and game.executable:
                 values.append(safe_path(game.executable).stem)
     for value in values:
         if not value:
@@ -382,6 +382,26 @@ def _request_bytes(url: str) -> bytes:
     return _read_url_with_retry(request, timeout=25, limit=4_000_000)
 
 
+def _is_strict_title_match(title_a: str, title_b: str) -> bool:
+    a = _compact(title_a)
+    b = _compact(title_b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 4:
+        return False
+    ratio = min(len(a), len(b)) / max(len(a), len(b))
+    if ratio >= 0.72 and (a in b or b in a):
+        return True
+    toks_a = set(_normalize(title_a).split())
+    toks_b = set(_normalize(title_b).split())
+    if not toks_a or not toks_b:
+        return False
+    overlap = len(toks_a & toks_b) / max(len(toks_a), len(toks_b))
+    return overlap >= 0.78 and ratio >= 0.65
+
+
 def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
     wanted = [pid for pid in PLATFORM_IDS.get(system_key, ()) ]
     buckets: dict[str, dict] = {}
@@ -417,7 +437,7 @@ def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
             elif target in compact:
                 shorter = min(len(compact), len(target))
                 longer = max(len(compact), len(target))
-                if len(target) < 4 or longer == 0 or shorter / longer < 0.55:
+                if len(target) < 4 or longer == 0 or shorter / longer < 0.72:
                     continue
                 score = 55
             else:
@@ -429,6 +449,8 @@ def _gamedb_search(titles: list[str], system_key: str) -> dict | None:
                 return details
         if wanted:
             for candidate in sorted(candidates, reverse=True)[:4]:
+                if candidate[0] < 70:
+                    continue
                 details = _gamedb_cover(candidate[3], [])
                 if details:
                     return details
@@ -489,35 +511,32 @@ def _steam_search_cover(title: str) -> dict | None:
     items = data.get("items", [])
     if not isinstance(items, list):
         return None
-    target = _compact(title)
     for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", ""))
         app_id = item.get("id")
-        compact = _compact(name)
-        if not app_id or not compact:
+        if not app_id or not _is_strict_title_match(title, name):
             continue
-        if compact == target or target in compact or compact in target:
-            urls = _steam_portrait_urls(str(app_id))
-            image = str(item.get("tiny_image", "")) or str(item.get("header_image", ""))
-            if image:
-                image = image.replace("capsule_sm_120", "header").replace(
-                    "capsule_231x87", "header"
-                )
-                urls.append(image)
-            header = _steam_header_cover(str(app_id))
-            if header:
-                urls.append(header)
-            if not urls:
-                continue
-            return {
-                "url": urls[0],
-                "urls": urls,
-                "title": name,
-                "source": "Steam",
-                "app_id": str(app_id),
-            }
+        urls = _steam_portrait_urls(str(app_id))
+        image = str(item.get("tiny_image", "")) or str(item.get("header_image", ""))
+        if image:
+            image = image.replace("capsule_sm_120", "header").replace(
+                "capsule_231x87", "header"
+            )
+            urls.append(image)
+        header = _steam_header_cover(str(app_id))
+        if header:
+            urls.append(header)
+        if not urls:
+            continue
+        return {
+            "url": urls[0],
+            "urls": urls,
+            "title": name,
+            "source": "Steam",
+            "app_id": str(app_id),
+        }
     return None
 
 
@@ -531,13 +550,11 @@ def _itch_cover(title: str) -> dict | None:
     games = data.get("games", [])
     if not isinstance(games, list):
         return None
-    target = _compact(title)
     for item in games:
         if not isinstance(item, dict):
             continue
         name = str(item.get("title") or item.get("name") or "")
-        compact = _compact(name)
-        if not compact or not (compact == target or target in compact or compact in target):
+        if not _is_strict_title_match(title, name):
             continue
         image = str(item.get("cover_url") or item.get("thumbnail_url") or "")
         if image:

@@ -1387,9 +1387,7 @@ class HealthPage(QWidget):
                     )
                     self.body.addWidget(row)
                 elif action_target == "__add_folder__":
-                    row = HealthRow(level, title_text, detail, "Añadir carpeta")
-                    row.action_clicked.connect(self.add_folder_requested)
-                    self.body.addWidget(row)
+                    self.body.addWidget(HealthRow(level, title_text, detail))
                 else:
                     self.body.addWidget(HealthRow(level, title_text, detail))
 
@@ -1634,36 +1632,14 @@ class SettingsPage(QWidget):
 
     def _build_library_tab(self) -> QWidget:
         container, layout = self._make_tab_container()
-        layout.addWidget(SectionHeader("Carpetas escaneadas"))
-        folders = self.store.settings.get("scan_folders", [])
-        for folder in folders:
-            frame = QFrame()
-            frame.setObjectName("tile")
-            row = QHBoxLayout(frame)
-            row.setContentsMargins(16, 10, 16, 10)
-            row.setSpacing(12)
-            label = QLabel(folder)
-            label.setObjectName("muted")
-            label.setWordWrap(True)
-            row.addWidget(label, 1)
-            remove = QPushButton("Quitar")
-            remove.setObjectName("icon")
-            remove.setCursor(Qt.PointingHandCursor)
-            remove.clicked.connect(lambda _checked=False, value=folder: self._remove_folder(value))
-            row.addWidget(remove)
-            layout.addWidget(frame)
-        add_folder = QPushButton("Añadir carpeta")
-        add_folder.setObjectName("ghost")
-        add_folder.setCursor(Qt.PointingHandCursor)
-        add_folder.clicked.connect(self._add_folder)
-        layout.addWidget(add_folder, 0, Qt.AlignLeft)
-        if not folders:
-            hint = QLabel(
-                "Sin carpetas propias: Umbral revisa Descargas, Escritorio, Documentos y Juegos."
-            )
-            hint.setObjectName("tiny")
-            hint.setWordWrap(True)
-            layout.addWidget(hint)
+        layout.addWidget(SectionHeader("Detección automática"))
+        hint = QLabel(
+            "Umbral analiza automáticamente todas las unidades y carpetas del equipo "
+            "para localizar juegos, emuladores y ports de forma estricta."
+        )
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         layout.addWidget(SectionHeader("Juegos de PC"))
         pc_text = QLabel(
@@ -1687,10 +1663,7 @@ class SettingsPage(QWidget):
         return container
 
     def _build_appearance_tab(self) -> QWidget:
-        from PySide6.QtWidgets import QColorDialog
-
         from .style import STYLES
-        from .theme import ACCENTS
         from .widgets import StylePreview
 
         container, layout = self._make_tab_container()
@@ -1703,39 +1676,6 @@ class SettingsPage(QWidget):
             card.clicked.connect(self.style_changed.emit)
             styles_grid.addWidget(card, index // 2, index % 2)
         layout.addLayout(styles_grid)
-
-        layout.addWidget(SectionHeader("Color de acento"))
-        accent_row = QHBoxLayout()
-        accent_row.setSpacing(10)
-        current_accent = str(self.store.settings.get("accent") or active_style().accent).lower()
-        for label, color in ACCENTS:
-            swatch = QPushButton("")
-            swatch.setToolTip(label)
-            swatch.setFixedSize(28, 28)
-            swatch.setCursor(Qt.PointingHandCursor)
-            selected = color.lower() == current_accent
-            ring = f"2px solid {active_style().accent_2}" if selected else "1px solid rgba(255, 255, 255, 0.25)"
-            swatch.setStyleSheet(
-                f"QPushButton {{ background: {color}; border: {ring}; border-radius: 14px; }}"
-                "QPushButton:hover { border: 2px solid #ffffff; }"
-            )
-            swatch.clicked.connect(lambda _checked=False, c=color: self.accent_changed.emit(c))
-            accent_row.addWidget(swatch)
-
-        def _pick_custom_accent() -> None:
-            from PySide6.QtGui import QColor
-
-            chosen = QColorDialog.getColor(QColor(current_accent), self, "Elegir color de acento")
-            if chosen.isValid():
-                self.accent_changed.emit(chosen.name())
-
-        custom_btn = QPushButton("Personalizar…")
-        custom_btn.setObjectName("ghost")
-        custom_btn.setCursor(Qt.PointingHandCursor)
-        custom_btn.clicked.connect(_pick_custom_accent)
-        accent_row.addWidget(custom_btn)
-        accent_row.addStretch(1)
-        layout.addLayout(accent_row)
 
         layout.addWidget(SectionHeader("Carátulas"))
         covers_text = QLabel(

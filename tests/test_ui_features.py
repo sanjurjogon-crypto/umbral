@@ -444,7 +444,7 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
     app.processEvents()
 
     assert not hasattr(win.library, "details_button")
-    assert win._sidebar_width == 238
+    assert win._sidebar_width == 270
     assert win.sidebar_toggle._icon_name == "chevron_left"
     assert not win.sidebar_toggle.icon().isNull()
     win.sidebar_toggle.click()
@@ -452,7 +452,7 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
     assert win.sidebar_toggle._icon_name == "chevron_right"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
-    assert win._sidebar_width == 238
+    assert win._sidebar_width == 270
     assert win.sidebar_toggle._icon_name == "chevron_left"
     assert win.sidebar.isVisible()
 
@@ -683,7 +683,7 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
     app.processEvents()
 
     assert not hasattr(win.library, "details_button")
-    assert win._sidebar_width == 238
+    assert win._sidebar_width == 270
     assert win.sidebar_toggle._icon_name == "chevron_left"
     assert not win.sidebar_toggle.icon().isNull()
     win.sidebar_toggle.click()
@@ -691,7 +691,7 @@ def test_collapsible_sidebar_and_right_click_does_not_launch(monkeypatch, tmp_pa
     assert win.sidebar_toggle._icon_name == "chevron_right"
     assert not win.sidebar.isVisible()
     win.sidebar_toggle.click()
-    assert win._sidebar_width == 238
+    assert win._sidebar_width == 270
     assert win.sidebar_toggle._icon_name == "chevron_left"
     assert win.sidebar.isVisible()
 
@@ -1148,28 +1148,40 @@ def test_back_templates_zoom_synopsis_and_backdrop_dialog_safe_close(
     dlg.accept()
     app.processEvents()
 
-    # Clicking a flipped game zooms in to read back cover instead of launching
+    # F key zooms in without flipping; left click flips the focused case without launching
+    from PySide6.QtGui import QKeyEvent
     from umbral.ui.shelf import ShelfCanvas
     canvas = ShelfCanvas()
     canvas.resize(1200, 720)
     g = Game(id="p1", title="Portal", system="Steam", system_key="steam", source="steam", description="Gran juego de puzles.")
     canvas.set_games([g])
-    canvas.toggle_flip()
-    assert canvas.is_flipped() is True
     launched: list[Game] = []
     canvas.activated.connect(launched.append)
+    f_evt = QKeyEvent(QKeyEvent.KeyPress, Qt.Key_F, Qt.NoModifier)
+    canvas.keyPressEvent(f_evt)
+    assert canvas.is_back_zoomed() is True
+    assert canvas.is_flipped() is False
     cx, cy, _cw, _ch, _gap = canvas._layout()
-    evt = QMouseEvent(
+    press_evt = QMouseEvent(
         QMouseEvent.MouseButtonPress,
         QPointF(cx, cy),
         Qt.LeftButton,
         Qt.LeftButton,
         Qt.NoModifier,
     )
-    canvas.mousePressEvent(evt)
+    rel_evt = QMouseEvent(
+        QMouseEvent.MouseButtonRelease,
+        QPointF(cx, cy),
+        Qt.LeftButton,
+        Qt.NoButton,
+        Qt.NoModifier,
+    )
+    canvas.mousePressEvent(press_evt)
+    canvas.mouseReleaseEvent(rel_evt)
     assert launched == []
+    assert canvas.is_flipped() is True
     assert canvas.is_back_zoomed() is True
-    canvas.mousePressEvent(evt)
+    canvas.keyPressEvent(f_evt)
     assert canvas.is_back_zoomed() is False
     canvas.deleteLater()
     app.processEvents()

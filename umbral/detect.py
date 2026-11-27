@@ -28,11 +28,29 @@ def _default_roots() -> list[Path]:
     home = Path.home()
     roots = [
         home / "Games",
+        home / "Juegos",
+        home / "ROMs",
+        home / "Roms",
+        home / "Emulators",
+        home / "Emuladores",
         home / "Downloads",
         home / "Desktop",
         home / "Documents",
     ]
-    if os.name != "nt":
+    if os.name == "nt":
+        for env_key in ("ProgramFiles", "ProgramFiles(x86)"):
+            val = os.environ.get(env_key, "").strip()
+            if val:
+                roots.append(Path(val))
+        for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(f"{letter}:\\")
+            if drive.exists():
+                roots.append(drive)
+        for c_sub in ("Games", "Juegos", "ROMs", "Roms", "Emulators", "Emuladores"):
+            candidate = Path(f"C:\\{c_sub}")
+            if candidate.exists():
+                roots.append(candidate)
+    else:
         roots.append(home / "Applications")
     return roots
 
