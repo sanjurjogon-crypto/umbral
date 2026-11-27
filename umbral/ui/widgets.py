@@ -1622,7 +1622,7 @@ class StartupOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._elapsed_ms = 0
-        self._total_ms = 2550
+        self._total_ms = 3050
         self._start_ts = 0.0
         self._bg_cache: Optional[QPixmap] = None
         self._bg_cache_key: tuple = ()
@@ -1691,8 +1691,8 @@ class StartupOverlay(QWidget):
     def paintEvent(self, event) -> None:
         t = float(self._elapsed_ms)
         fade_out = 1.0
-        if t > 2150.0:
-            fade_out = max(0.0, 1.0 - self._ease_in_out_cubic((t - 2150.0) / 400.0))
+        if t > 2650.0:
+            fade_out = max(0.0, 1.0 - self._ease_in_out_cubic((t - 2650.0) / 400.0))
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -1732,8 +1732,8 @@ class StartupOverlay(QWidget):
         half_h = 84.0
         spread = text_w * 0.5 + 48.0
 
-        # Phase 1: 0..1000ms hold; Phase 2: 1000..1650ms close brackets
-        close_p = 0.0 if t <= 1000.0 else self._ease_in_out_cubic((t - 1000.0) / 650.0)
+        # Phase 1: 0..1500ms hold; Phase 2: 1500..2150ms close brackets
+        close_p = 0.0 if t <= 1500.0 else self._ease_in_out_cubic((t - 1500.0) / 650.0)
         offset = spread * (1.0 - close_p)
 
         # Draw "UMBRAL" clipped strictly between the two closing half-diamond inner edges
@@ -1787,9 +1787,9 @@ class StartupOverlay(QWidget):
             "Gonzalo Sanjurjo",
         )
 
-        # Phase 3: 1600..2150ms inner golden diamond appears & glows
-        if t > 1600.0:
-            glow_p = self._ease_in_out_cubic((t - 1600.0) / 480.0)
+        # Phase 3: 2100..2650ms inner golden diamond appears & glows
+        if t > 2100.0:
+            glow_p = self._ease_in_out_cubic((t - 2100.0) / 480.0)
             bloom_r = 34.0 + 68.0 * glow_p
             bloom = QRadialGradient(cx, cy, bloom_r)
             bloom_alpha = int(175 * glow_p * (1.15 - 0.35 * glow_p))
