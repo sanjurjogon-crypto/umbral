@@ -58,6 +58,7 @@ from .cases import (
     paint_console_case,
     paint_console_spine,
 )
+from .gl_cases import get_case_3d_renderer
 from .sfx import play_ui_sound
 from .style import active as active_style, is_reduced_motion
 
@@ -601,6 +602,8 @@ class ShelfItem:
     back_cache_key: tuple = ()
     refl_cache: Optional[QPixmap] = None
     refl_cache_key: tuple = ()
+    gl_cache: Optional[QPixmap] = None
+    gl_cache_key: tuple = ()
 
 
 class ShelfCanvas(QWidget):
@@ -2037,6 +2040,59 @@ class ShelfCanvas(QWidget):
             tilt_amount = tilt_amount * (1.0 - zoom)
             hover_x = hover_x * (1.0 - zoom)
             hover_y = hover_y * (1.0 - zoom)
+
+        renderer = get_case_3d_renderer()
+        base_w = max(48, int(round(cover_w * item.profile.w_scale)))
+        base_h = max(48, int(round(cover_h * item.profile.h_scale)))
+        dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
+        out_w = max(64, int(round(target.width() * 1.42)))
+        out_h = max(64, int(round(target.height() * 1.32)))
+        ry = -(turn * 34.0) + (flip * 180.0) + hover_x * 18.0
+        rx = -hover_y * 14.0
+        scroll_k = int(round(self._back_scroll)) if selected else 0
+        gl_key = (
+            base_w,
+            base_h,
+            out_w,
+            out_h,
+            round(rx, 1),
+            round(ry, 1),
+            round(dpr, 2),
+            item.game.title,
+            item.game.favorite,
+            item.game.state,
+            item.cover_path,
+            item.game.description,
+            item.profile.key,
+            active_style().key,
+            scroll_k,
+        )
+        if item.gl_cache is not None and item.gl_cache_key == gl_key:
+            gl_pix: Optional[QPixmap] = item.gl_cache
+        else:
+            front_pix = self._front_pixmap_for(item, base_w, base_h)
+            back_pix = self._back_pixmap_for(item, base_w, base_h)
+            gl_pix = renderer.render_case(
+                item.profile, front_pix, back_pix, out_w, out_h, dpr, rx, ry
+            )
+            if gl_pix is not None and not gl_pix.isNull():
+                item.gl_cache = gl_pix
+                item.gl_cache_key = gl_key
+
+        if gl_pix is not None and not gl_pix.isNull():
+            draw_rect = QRectF(
+                target.center().x() - out_w / 2.0,
+                target.center().y() - out_h / 2.0,
+                float(out_w),
+                float(out_h),
+            )
+            fade = min(0.74, geometry["dim"] * 0.92)
+            painter.save()
+            if fade > 0.01:
+                painter.setOpacity(max(0.28, 1.0 - fade * 0.85))
+            painter.drawPixmap(draw_rect, gl_pix, QRectF(gl_pix.rect()))
+            painter.restore()
+            return
 
         quad = _perspective_quad(
             target.width() * cos_scale,
