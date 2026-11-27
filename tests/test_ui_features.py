@@ -1417,3 +1417,48 @@ def test_top_bar_quick_state_pills(monkeypatch, tmp_path: Path) -> None:
     assert len(page._visible_games()) == 3
     page.deleteLater()
     app.processEvents()
+
+
+def test_hidpi_upscale_retry_and_parallel_synopsis(monkeypatch) -> None:
+    from urllib.error import URLError
+    from umbral import covers
+    from umbral.synopsis import SynopsisWorker
+
+    assert covers.UPSCALE_MIN_WIDTH >= 750
+    assert covers.UPSCALE_MIN_HEIGHT >= 1000
+
+    attempts = {"count": 0}
+
+    class FakeResp:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self, _n: int = -1) -> bytes:
+            return self._data
+
+    def flaky_urlopen(_req, timeout=20, context=None):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise URLError("transient")
+        return FakeResp(b'{"ok": true}')
+
+    monkeypatch.setattr(covers, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(covers.time, "sleep", lambda _s: None)
+    assert covers._request_json("https://example.com") == {"ok": True}
+    assert attempts["count"] == 2
+
+    app = _app()
+    monkeypatch.setattr("umbral.synopsis.fetch_synopsis", lambda g: f"Sinopsis de {g.title}")
+    g1 = Game(id="s1", title="Uno", system="PC", system_key="pc")
+    g2 = Game(id="s2", title="Dos", system="PC", system_key="pc")
+    worker = SynopsisWorker([g1, g2])
+    collected: list[tuple[str, str]] = []
+    worker.updated.connect(collected.extend)
+    worker.run()
+    assert dict(collected) == {"s1": "Sinopsis de Uno", "s2": "Sinopsis de Dos"}
