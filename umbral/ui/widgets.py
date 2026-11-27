@@ -359,6 +359,8 @@ class CoverArt(QWidget):
         self.update()
 
     def paintEvent(self, event) -> None:
+        from .cases import case_profile, paint_console_case
+
         style = active_style()
         dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))
         target_sz = QSize(
@@ -377,23 +379,51 @@ class CoverArt(QWidget):
             buf.setRenderHint(QPainter.Antialiasing)
             buf.setRenderHint(QPainter.SmoothPixmapTransform)
             rect = self.rect().adjusted(1, 1, -1, -1)
-            radius = self._custom_radius if self._custom_radius is not None else style.radius
+            profile = case_profile(self.game)
+            accent = QColor(style.accent)
+            # Match the exact front case rendering used in the Library shelf
+            case_aspect = max(0.45, float(profile.w_scale) / max(0.45, float(profile.h_scale)))
+            base_aspect = 0.72
+            target_aspect = base_aspect * case_aspect
+            avail_w = float(rect.width())
+            avail_h = float(rect.height())
+            if avail_w / max(1.0, avail_h) > target_aspect:
+                case_h = avail_h
+                case_w = case_h * target_aspect
+            else:
+                case_w = avail_w
+                case_h = case_w / target_aspect
+            case_frame = QRectF(
+                rect.center().x() - case_w / 2.0,
+                rect.center().y() - case_h / 2.0,
+                case_w,
+                case_h,
+            )
+            radius = self._custom_radius if self._custom_radius is not None else profile.radius
             path = QPainterPath()
-            path.addRoundedRect(QRectF(rect), radius, radius)
+            path.addRoundedRect(case_frame, radius, radius)
             buf.setClipPath(path)
 
-            accent = QColor(style.accent)
-            if self._pixmap is not None and not self._pixmap.isNull():
-                self._paint_cover_image(buf, rect, accent)
+            if profile.shell_kind == "pc_keepcase":
+                if self._pixmap is not None and not self._pixmap.isNull():
+                    self._paint_cover_image(buf, case_frame.toRect(), accent)
+                else:
+                    self._paint_generated(buf, case_frame.toRect(), accent)
             else:
-                self._paint_generated(buf, rect, accent)
+                paint_console_case(
+                    buf,
+                    case_frame,
+                    profile,
+                    self._pixmap,
+                    lambda p, r: self._paint_generated(p, r.toRect(), accent),
+                )
 
             buf.setClipping(False)
             border = QColor(style.accent)
-            border.setAlpha(80)
+            border.setAlpha(75)
             buf.setPen(QPen(border, style.border_width))
             buf.setBrush(Qt.NoBrush)
-            buf.drawRoundedRect(rect, radius, radius)
+            buf.drawRoundedRect(case_frame, radius, radius)
             buf.end()
             self._cached_render = rendered
             self._cached_style_key = style.key
@@ -413,15 +443,27 @@ class CoverArt(QWidget):
                 max(1, int(round(rect.width() * dpr))),
                 max(1, int(round(rect.height() * dpr))),
             )
+            painter.fillRect(rect, QColor("#080705"))
+            small = QSize(max(1, int(hi_sz.width() * 0.14)), max(1, int(hi_sz.height() * 0.14)))
+            backdrop = pixmap.scaled(
+                small, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+            ).scaled(hi_sz, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            backdrop.setDevicePixelRatio(dpr)
+            painter.setOpacity(0.42)
+            painter.drawPixmap(rect.topLeft(), backdrop)
+            painter.setOpacity(1.0)
             scaled = pixmap.scaled(
-                hi_sz, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+                hi_sz, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             scaled.setDevicePixelRatio(dpr)
-            source_x = max(0, (scaled.width() - hi_sz.width()) // 2)
-            source_y = max(0, (scaled.height() - hi_sz.height()) // 3)
+            draw_w = scaled.width() / dpr
+            draw_h = scaled.height() / dpr
             painter.drawPixmap(
-                rect.topLeft(),
-                scaled.copy(QRect(source_x, source_y, hi_sz.width(), hi_sz.height())),
+                QPointF(
+                    rect.center().x() - draw_w / 2.0,
+                    rect.center().y() - draw_h / 2.0,
+                ),
+                scaled,
             )
         else:
             dpr = min(2.0, max(1.0, float(self.devicePixelRatioF())))

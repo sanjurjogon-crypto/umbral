@@ -389,10 +389,20 @@ def backup_data(version: str, keep: int = 3) -> Path:
     root = data_dir() / "backups"
     destination = root / f"pre-{slug_version(version)}"
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ("library.json", "settings.json"):
+    for name in (
+        "library.json",
+        "settings.json",
+        "synopses.json",
+        "cover_cache.json",
+        "downloads_seen.json",
+    ):
         source = data_dir() / name
         if source.exists():
             shutil.copy2(source, destination / name)
+    usage_src = data_dir() / "uso" / "estadisticas.json"
+    if usage_src.is_file():
+        (destination / "uso").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(usage_src, destination / "uso" / "estadisticas.json")
     backups = sorted(
         (item for item in root.iterdir() if item.is_dir()),
         key=lambda item: item.stat().st_mtime,
