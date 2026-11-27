@@ -110,10 +110,15 @@ class MainWindow(QMainWindow):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
+        self._bootstrapped = False
         self._build()
         self._apply_theme()
         self._navigate("library")
-        QTimer.singleShot(80, self._bootstrap)
+        if self._startup_overlay is not None:
+            self._startup_overlay.finished.connect(self._bootstrap)
+            QTimer.singleShot(2750, self._bootstrap)
+        else:
+            QTimer.singleShot(80, self._bootstrap)
 
     def _build(self) -> None:
         root = Backdrop()
@@ -574,8 +579,9 @@ class MainWindow(QMainWindow):
             button.refresh_icon()
 
     def _bootstrap(self) -> None:
-        if self._closing:
+        if self._closing or self._bootstrapped:
             return
+        self._bootstrapped = True
         stored = self.store.settings.get("emulators", [])
         self.emulators = [
             Emulator.from_dict(item) for item in stored if isinstance(item, dict)

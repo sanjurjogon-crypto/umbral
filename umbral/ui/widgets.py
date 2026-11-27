@@ -1616,6 +1616,8 @@ class StylePreview(QFrame):
 class StartupOverlay(QWidget):
     """Animated intro: half-diamond brackets swallow 'UMBRAL' and reveal the glowing inner diamond."""
 
+    finished = Signal()
+
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -1624,8 +1626,12 @@ class StartupOverlay(QWidget):
         self._start_ts = 0.0
         self._bg_cache: Optional[QPixmap] = None
         self._bg_cache_key: tuple = ()
+        self._font_cache_key: str = ""
+        self._title_font: Optional[QFont] = None
+        self._sub_font: Optional[QFont] = None
+        self._text_w: float = 0.0
         self._timer = QTimer(self)
-        self._timer.setInterval(20)
+        self._timer.setInterval(16)
         self._timer.timeout.connect(self._tick)
 
     def start(self) -> None:
@@ -1643,9 +1649,10 @@ class StartupOverlay(QWidget):
         if self._start_ts > 0.0:
             self._elapsed_ms = int((time.monotonic() - self._start_ts) * 1000.0)
         else:
-            self._elapsed_ms += 20
+            self._elapsed_ms += 16
         if self._elapsed_ms >= self._total_ms:
             self._timer.stop()
+            self.finished.emit()
             self.hide()
             self.deleteLater()
             return
@@ -1701,14 +1708,24 @@ class StartupOverlay(QWidget):
         bg_pix = self._ensure_bg_cache(self.width(), self.height(), style)
         painter.drawPixmap(0, 0, bg_pix)
 
-        # Typography measurement for "UMBRAL"
-        title_font = QFont(style.heading_font or "Cinzel")
-        title_font.setPixelSize(64)
-        title_font.setWeight(QFont.DemiBold)
-        title_font.setLetterSpacing(QFont.AbsoluteSpacing, 12.0)
-        fm = QFontMetrics(title_font)
+        # Typography measurement for "UMBRAL" (cached per heading font)
+        font_name = style.heading_font or "Cinzel"
+        if self._title_font is None or self._font_cache_key != font_name:
+            tf = QFont(font_name)
+            tf.setPixelSize(64)
+            tf.setWeight(QFont.DemiBold)
+            tf.setLetterSpacing(QFont.AbsoluteSpacing, 12.0)
+            self._title_font = tf
+            self._text_w = float(QFontMetrics(tf).horizontalAdvance("UMBRAL"))
+            sf = QFont(font_name)
+            sf.setPixelSize(16)
+            sf.setLetterSpacing(QFont.AbsoluteSpacing, 5.5)
+            self._sub_font = sf
+            self._font_cache_key = font_name
+        title_font = self._title_font
+        sub_font = self._sub_font
         text = "UMBRAL"
-        text_w = float(fm.horizontalAdvance(text))
+        text_w = self._text_w
 
         # Sharper, larger outer diamond geometry (acute mitered tips)
         half_w = 42.0
@@ -1760,9 +1777,6 @@ class StartupOverlay(QWidget):
             painter.drawPath(right_path)
 
         # Subtitle "Gonzalo Sanjurjo" below
-        sub_font = QFont(style.heading_font or "Cinzel")
-        sub_font.setPixelSize(16)
-        sub_font.setLetterSpacing(QFont.AbsoluteSpacing, 5.5)
         painter.setFont(sub_font)
         sub_color = QColor(accent_2)
         sub_color.setAlpha(205)
