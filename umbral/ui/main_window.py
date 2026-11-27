@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
         self.gamepad.prev_system.connect(lambda: self._gamepad_cycle_system(-1))
         self.gamepad.next_system.connect(lambda: self._gamepad_cycle_system(1))
         self.gamepad.fullscreen_requested.connect(self.toggle_fullscreen_mode)
-        self.gamepad.connected_changed.connect(self._on_gamepad_connected)
+        self.gamepad.device_changed.connect(self._on_gamepad_connected)
         if os.environ.get("QT_QPA_PLATFORM", "").lower() != "offscreen":
             self.gamepad.start()
 
@@ -2169,9 +2169,15 @@ class MainWindow(QMainWindow):
                 self.showNormal()
         self._layout_chrome()
 
-    def _on_gamepad_connected(self, connected: bool) -> None:
+    def _on_gamepad_connected(self, connected: bool, device_name: str = "") -> None:
         if connected:
-            self.toast.show_message("Mando conectado: navega con cruceta/stick y pulsa A para jugar.", 3600)
+            label = device_name or "Mando"
+            self.toast.show_message(
+                f"{label} conectado · navega con cruceta/stick y pulsa A/X para jugar.",
+                3800,
+            )
+        else:
+            self.toast.show_message("Mando desconectado.", 2400)
 
     def _gamepad_left(self) -> None:
         if self._current_page_key in ("library", "favorites"):
