@@ -261,3 +261,13 @@ def test_v866_home_library_synopsis_and_backdrop_fixes(monkeypatch, tmp_path: Pa
     assert len(lib.canvas.items) == 0
     assert lib._empty.isHidden() is False
     lib.deleteLater()
+
+
+def test_gamepad_identifies_ps3_ps4_ps5_xbox_switch() -> None:
+    from umbral.ui.gamepad import identify_controller
+
+    assert "PS3" in identify_controller(0x054C, 0x0268)
+    assert "PS4" in identify_controller(0x054C, 0x05C4)
+    assert "PS5" in identify_controller(0x054C, 0x0CE6)
+    assert "Xbox" in identify_controller(0x045E, 0x0B12)
+    assert "Switch" in identify_controller(0x057E, 0x2009)
