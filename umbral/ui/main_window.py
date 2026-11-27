@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
         self._navigate("library")
         if self._startup_overlay is not None:
             self._startup_overlay.finished.connect(self._bootstrap)
-            QTimer.singleShot(2750, self._bootstrap)
+            QTimer.singleShot(3250, self._bootstrap)
         else:
             QTimer.singleShot(80, self._bootstrap)
 
